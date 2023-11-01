@@ -1,7 +1,6 @@
 import finitediffx as fdx
 import numpy as np
-
-from jaxsw._src.operators.functional import grid as F_grid
+from finitevolx import avg_pool, center_avg_2D
 
 
 def init_tau(domain, tau0: float = 2.0e-5):
@@ -24,10 +23,11 @@ def init_tau(domain, tau0: float = 2.0e-5):
 
 def calculate_wind_forcing(tau, domain):
     # move from edges to nodes
-    tau_x = F_grid.x_average_2D(tau[0], padding=((1, 0), (0, 0)))
-    tau_y = F_grid.y_average_2D(tau[1], padding=((0, 0), (1, 0)))
+    tau_x = avg_pool(tau[0], padding=((1, 0), (0, 0)), stride=1, mean_fn="arithmetic")
+    tau_y = avg_pool(tau[1], padding=((0, 0), (1, 0)), stride=1, mean_fn="arithmetic")
 
     # compute finite difference
+    # dF2dX = difference(tau_y, axis=0, step_size=domain.dx[0], )
     dF2dX = fdx.difference(
         tau_y, axis=0, step_size=domain.dx[0], accuracy=1, method="central"
     )
@@ -36,4 +36,4 @@ def calculate_wind_forcing(tau, domain):
     )
     curl_stagg = dF2dX - dF1dY
 
-    return F_grid.center_average_2D(curl_stagg.squeeze()[1:, 1:])
+    return center_avg_2D(curl_stagg.squeeze()[1:, 1:])

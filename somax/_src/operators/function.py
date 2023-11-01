@@ -1,6 +1,9 @@
 from typing import Callable
 import equinox as eqx
-from somax._src.field.field import Field
+from fieldx._src.field.field import Field
+
+def identity(u):
+    return u
 
 
 class FuncOperator(eqx.Module):

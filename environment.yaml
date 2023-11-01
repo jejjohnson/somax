@@ -1,0 +1,65 @@
+name: somax
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11
+  # Standard Libraries
+  - numpy # Numerical Linear Algebra
+  - scipy # Scientific Computing
+  - conda-forge::xarray # Data structures
+  - pandas # Data structure
+  - scikit-learn # Machine Learning
+  # PLOTTING LIBRARY
+  - matplotlib # standard plotting library
+  - seaborn # Stats viz library
+  # Storage
+  - conda-forge::netCDF4
+  - conda-forge::zarr
+  # GUI
+  - conda-forge::ipywidgets
+  - ipykernel
+  - conda-forge::tqdm
+  - pip
+  - pip:
+      # Jax framework
+      - "jax[cpu]"
+      - "git+https://github.com/jejjohnson/finitevolX.git"
+      - "git+https://github.com/jejjohnson/fieldx.git"
+      - einops
+      - jaxtyping
+      - equinox
+      - kernex
+      - FiniteDiffX
+      # deep learning
+      - diffrax
+      # optimization
+      - optax
+      - jaxopt
+      # probabilistic
+      - dynamax
+      # OTHER
+      - plum-dispatch
+      # formatting
+      - black
+      - pylint
+      - isort
+      - flake8
+      - mypy
+      - pytest
+      - pre-commit
+      # Notebook stuff
+      - autoroot
+      - pyprojroot
+      - python-dotenv
+      # logging
+      - wandb
+      - loguru
+      # plotting
+      - celluloid
+      - corner
+      - tabulate
+      # experiment
+      - hydra-core
+      - hydra-colorlog
+      - hydra-optuna-sweeper

@@ -5,8 +5,8 @@ import jax.numpy as jnp
 import equinox as eqx
 import finitediffx as fdx
 from jaxtyping import Float, Array
-from jaxsw._src.domain.base_v2 import Domain
-from jaxsw._src.models.pde import DynamicalSystem
+from fieldx._src.domain.domain import Domain
+from somax._src.models.pde import DynamicalSystem
 
 
 def bc_fn(u: Array) -> Array:

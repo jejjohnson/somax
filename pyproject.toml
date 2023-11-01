@@ -29,9 +29,13 @@ jaxtyping = "^0.2.15"
 beartype = "^0.13.1"
 jax = ">=0.4.10"
 jaxlib = ">=0.4.10"
+finitevolx = { git = "https://github.com/jejjohnson/finitevolX.git" }
+fieldx = { git = "https://github.com/jejjohnson/fieldx.git" }
 kernex = "^0.2.0"
 einops = "^0.7.0"
 equinox = "^0.11.1"
+jaxopt = "^0.8.1"
+lineax = "^0.0.3"
 
 
 [tool.poetry.group.test.dependencies]
