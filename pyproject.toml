@@ -109,7 +109,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options] # https://docs.pytest.org/en/latest/reference/reference.html#ini-options-ref
 # addopts = "--color=yes --doctest-modules --exitfirst --failed-first --strict-config --strict-markers --typeguard-packages=my_package --verbosity=2 --junitxml=reports/pytest.xml"
 filterwarnings = ["error", "ignore::DeprecationWarning"]
-testpaths = ["fieldx"]
+testpaths = ["somax"]
 xfail_strict = true
 
 
@@ -161,7 +161,7 @@ ignore = [
   "PLR0913",
 ]
 unfixable = ["ERA001", "F401", "F841", "T201", "T203"]
-src = ["fieldx"]
+src = ["somax"]
 target-version = "py38"
 
 [tool.black] # https://black.readthedocs.io/en/stable/usage_and_configuration/the_basics.html#configuration-via-a-file
