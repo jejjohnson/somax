@@ -1,11 +1,18 @@
-from typing import NamedTuple, Optional, Tuple
+from typing import (
+    NamedTuple,
+    Optional,
+    Tuple,
+)
 
 import equinox as eqx
+from equinox import static_field
 import jax.numpy as jnp
 import jax.random as jrandom
-from equinox import static_field
 from jax.random import PRNGKeyArray
-from jaxtyping import Array, PyTree
+from jaxtyping import (
+    Array,
+    PyTree,
+)
 
 from .base import DynamicalSystem
 
@@ -26,10 +33,13 @@ class L63State(NamedTuple):
         cls,
         noise: float = 0.01,
         batchsize: int = 1,
-        key: PRNGKeyArray = jrandom.PRNGKey(123),
+        key: Optional[PRNGKeyArray] = None,
     ):
         msg = f"batchsize not >= 1, {batchsize}"
         assert batchsize >= 1, msg
+
+        if key is None:
+            key = jrandom.PRNGKey(123)
 
         if batchsize > 1:
             x0, y0, z0 = jnp.array_split(jnp.ones((batchsize, 3)), 3, axis=-1)
@@ -47,8 +57,10 @@ class L63State(NamedTuple):
         sigma: float = 8,
         rho: float = 28,
         beta: float = 8.0 / 3.0,
-        key: PRNGKeyArray = jrandom.PRNGKey(123),
+        key: Optional[PRNGKeyArray] = None,
     ):
+        if key is None:
+            key = jrandom.PRNGKey(123)
         return L63State.init_state(
             noise=noise, batchsize=batchsize, key=key
         ), L63Params(sigma=sigma, rho=rho, beta=beta)

@@ -1,6 +1,8 @@
 from typing import Callable
+
 import equinox as eqx
 from fieldx._src.field.field import Field
+
 
 def identity(u):
     return u

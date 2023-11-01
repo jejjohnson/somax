@@ -1,5 +1,6 @@
 import equinox as eqx
 
+
 class QGParams(eqx.Module):
     f0: float = 9.375e-5  # coriolis [s^-1]
     beta: float = 1.754e-11  # coriolis gradient [m^-1 s^-1]

@@ -1,6 +1,9 @@
 import finitediffx as fdx
+from finitevolx import (
+    avg_pool,
+    center_avg_2D,
+)
 import numpy as np
-from finitevolx import avg_pool, center_avg_2D
 
 
 def init_tau(domain, tau0: float = 2.0e-5):

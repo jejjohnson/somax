@@ -1,13 +1,21 @@
-from typing import Any, NamedTuple, Tuple, Union
+from typing import (
+    Any,
+    NamedTuple,
+    Tuple,
+    Union,
+)
 
 import einops
 import equinox as eqx
+from equinox import static_field
 import jax
 import jax.numpy as jnp
 import jax.random as jrandom
-from equinox import static_field
 from jax.random import PRNGKeyArray
-from jaxtyping import Array, PyTree
+from jaxtyping import (
+    Array,
+    PyTree,
+)
 
 from .base import DynamicalSystem
 

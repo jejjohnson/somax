@@ -1,10 +1,14 @@
-from typing import Callable, NamedTuple, Optional
+from typing import (
+    Callable,
+    NamedTuple,
+    Optional,
+)
 
 import jax
 import jax.numpy as jnp
-import lineax as lx
 from jaxopt import linear_solve as jopt_linear_solver
 from jaxtyping import Array
+import lineax as lx
 
 
 class SDResults(NamedTuple):
@@ -200,7 +204,7 @@ def jaxopt_linear_solver(
     b: Array,
     x0: Optional[Array] = None,
     solver: Callable = jopt_linear_solver.solve_cg,
-    **kwargs
+    **kwargs,
 ):
     if x0 is None:
         x0 = matvec_fn(b)

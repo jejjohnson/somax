@@ -1,11 +1,12 @@
 import typing as tp
-import functools as ft
-import jax
-import jax.numpy as jnp
-import equinox as eqx
-import finitediffx as fdx
-from jaxtyping import Float, Array
+
 from fieldx._src.domain.domain import Domain
+import finitediffx as fdx
+import jax.numpy as jnp
+from jaxtyping import (
+    Array,
+)
+
 from somax._src.models.pde import DynamicalSystem
 
 

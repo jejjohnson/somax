@@ -1,10 +1,11 @@
-from typing import Optional, NamedTuple
+from typing import (
+    Optional,
+)
 
 import diffrax as dfx
 import equinox as eqx
+from fieldx._src.domain.time import TimeDomain
 from jaxtyping import PyTree
-
-from jaxsw._src.domain.time import TimeDomain
 
 
 class DynamicalSystem(eqx.Module):
@@ -46,7 +47,7 @@ class DynamicalSystem(eqx.Module):
             saveat=saveat,
             solver=solver,
             stepsize_controller=stepsize_controller,
-            **kwargs
+            **kwargs,
         )
         return sol
 

@@ -2,8 +2,8 @@ import typing as tp
 
 import equinox as eqx
 import jax.numpy as jnp
-import numpy as np
 from jaxtyping import Array
+import numpy as np
 
 
 class LayerDomain(eqx.Module):
@@ -15,7 +15,12 @@ class LayerDomain(eqx.Module):
     A_mode_2_layer: Array = eqx.static_field()
     lambda_sq: Array = eqx.static_field()
 
-    def __init__(self, heights: tp.List[float], reduced_gravities: tp.List[float], correction: bool = False):
+    def __init__(
+        self,
+        heights: tp.List[float],
+        reduced_gravities: tp.List[float],
+        correction: bool = False,
+    ):
         num_layers = len(heights)
 
         msg = "Incorrect number of heights to reduced gravities."
@@ -39,8 +44,7 @@ class LayerDomain(eqx.Module):
 
 
 def create_qg_multilayer_mat(
-        heights: tp.List[float], reduced_gravities: tp.List[float],
-        correction: bool = False
+    heights: tp.List[float], reduced_gravities: tp.List[float], correction: bool = False
 ) -> np.ndarray:
     """Computes the Matrix that is used to connected a stacked
     isopycnal Quasi-Geostrophic model.
@@ -60,11 +64,13 @@ def create_qg_multilayer_mat(
     A = np.zeros((num_heights, num_heights))
 
     if num_heights == 1:
-        A[0, 0] = 1. / (heights[0] * reduced_gravities[0])
+        A[0, 0] = 1.0 / (heights[0] * reduced_gravities[0])
     else:
         # top rows
         if correction:
-            A[0, 0] = 1. / (heights[0] * 9.81) + 1. / (heights[0] * reduced_gravities[0])
+            A[0, 0] = 1.0 / (heights[0] * 9.81) + 1.0 / (
+                heights[0] * reduced_gravities[0]
+            )
         else:
             A[0, 0] = 1.0 / (heights[0] * reduced_gravities[0])
         A[0, 1] = -1.0 / (heights[0] * reduced_gravities[0])
@@ -73,13 +79,19 @@ def create_qg_multilayer_mat(
         for i in range(1, num_heights - 1):
             A[i, i - 1] = -1.0 / (heights[i] * reduced_gravities[i - 1])
             A[i, i] = (
-                    1.0 / heights[i] * (1 / reduced_gravities[i] + 1 / reduced_gravities[i - 1])
+                1.0
+                / heights[i]
+                * (1 / reduced_gravities[i] + 1 / reduced_gravities[i - 1])
             )
             A[i, i + 1] = -1.0 / (heights[i] * reduced_gravities[num_heights - 2])
 
         # bottom rows
-        A[-1, -1] = 1.0 / (heights[num_heights - 1] * reduced_gravities[num_heights - 2])
-        A[-1, -2] = -1.0 / (heights[num_heights - 1] * reduced_gravities[num_heights - 2])
+        A[-1, -1] = 1.0 / (
+            heights[num_heights - 1] * reduced_gravities[num_heights - 2]
+        )
+        A[-1, -2] = -1.0 / (
+            heights[num_heights - 1] * reduced_gravities[num_heights - 2]
+        )
     return A
 
 

@@ -1,15 +1,22 @@
-from finitevolx import center_avg_2D, laplacian
 import math
+
+from fieldx._src.domain.domain import Domain
+from finitevolx import (
+    center_avg_2D,
+    laplacian,
+)
 import jax
 import jax.numpy as jnp
-from fieldx._src.domain.domain import Domain
-from jaxtyping import Array, Float
+from jaxtyping import (
+    Array,
+    Float,
+)
 
 
 def calculate_wind_forcing(
-        domain: Domain,
-        H_0: float,
-        tau0: float =0.08 /1_000.0,
+    domain: Domain,
+    H_0: float,
+    tau0: float = 0.08 / 1_000.0,
 ) -> Float[Array, "Nx Ny"]:
     """
     Equation:
@@ -25,10 +32,9 @@ def calculate_wind_forcing(
     # [Nx,Ny] --> [Nx-1,Ny-1]
     y_coords_center = center_avg_2D(y_coords)
 
-
     # calculate tau
     # analytical form! =]
-    curl_tau = - tau0 * 2 * math.pi /Ly * jnp.sin(2 * math.pi * y_coords_center /Ly)
+    curl_tau = -tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * y_coords_center / Ly)
 
     # print_debug_quantity(curl_tau, "CURL TAU")
 
@@ -38,12 +44,12 @@ def calculate_wind_forcing(
 
 
 def calculate_bottom_drag(
-        psi: Array,
-        domain: Domain,
-        H_z: float = 1.0,
-        delta_ek: float = 2.0,
-        f0: float = 9.375e-05,
-        masks_psi=None
+    psi: Array,
+    domain: Domain,
+    H_z: float = 1.0,
+    delta_ek: float = 2.0,
+    f0: float = 9.375e-05,
+    masks_psi=None,
 ) -> Array:
     """
     Equation:
@@ -56,7 +62,9 @@ def calculate_bottom_drag(
 
     # pad interior psi points
     # [Nx,Ny] --> [Nx,Ny]
-    omega = jnp.pad(omega, pad_width=((0, 0), (1, 1), (1, 1)), mode="constant", constant_values=0.0)
+    omega = jnp.pad(
+        omega, pad_width=((0, 0), (1, 1), (1, 1)), mode="constant", constant_values=0.0
+    )
 
     if masks_psi is not None:
         omega *= masks_psi.values
@@ -70,7 +78,7 @@ def calculate_bottom_drag(
     bottom_drag_coeff = delta_ek / H_z * f0 / 2.0
 
     # calculate bottom drag
-    bottom_drag = - bottom_drag_coeff * omega[-1]
+    bottom_drag = -bottom_drag_coeff * omega[-1]
 
     # plot_field(omega)
     return bottom_drag

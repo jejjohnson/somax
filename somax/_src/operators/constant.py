@@ -1,7 +1,7 @@
 import typing as tp
+
 import equinox as eqx
 import jax.numpy as jnp
-
 
 
 class Constant(eqx.Module):

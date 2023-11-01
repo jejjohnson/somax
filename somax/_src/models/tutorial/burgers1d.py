@@ -1,13 +1,15 @@
 import typing as tp
-import functools as ft
+
+from fieldx._src.domain.domain import Domain
+import finitediffx as fdx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-import finitediffx as fdx
-from jaxtyping import Float, Array
-from fieldx._src.domain.domain import Domain
-from somax._src.models.pde import DynamicalSystem
+from jaxtyping import (
+    Array,
+    Float,
+)
 
+from somax._src.models.pde import DynamicalSystem
 
 # class Params(eqx.Module):
 #     bc_fn: tp.Callable

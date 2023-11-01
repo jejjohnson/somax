@@ -1132,7 +1132,7 @@ kernex = "^0.2.0"
 type = "git"
 url = "https://github.com/jejjohnson/fieldx.git"
 reference = "HEAD"
-resolved_reference = "5582d4930b1de829efa949ee7aafec75593f1491"
+resolved_reference = "d8fc1322ffded2960bdec8ddc5a8da8a084443dc"
 
 [[package]]
 name = "filelock"

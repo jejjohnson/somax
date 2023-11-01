@@ -1,36 +1,56 @@
-from typing import Optional
 import functools as ft
+from typing import Optional
+
 import einops
+from fieldx._src.domain.domain import Domain
+from finitevolx import (
+    MaskGrid,
+    center_avg_2D,
+    divergence,
+    geostrophic_gradient,
+    laplacian,
+    reconstruct,
+)
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
-from finitevolx import center_avg_2D, laplacian, divergence, MaskGrid, geostrophic_gradient, reconstruct
+from jaxtyping import (
+    Array,
+    Float,
+)
+
 from somax._src.models.qg.domain import LayerDomain
 from somax._src.models.qg.elliptical import DSTSolution
-from somax._src.operators.dst import inverse_elliptic_dst, inverse_elliptic_dst_cmm
-from fieldx._src.domain.domain import Domain
+from somax._src.models.qg.forcing import (
+    calculate_bottom_drag,
+)
 from somax._src.models.qg.params import QGParams
-from somax._src.models.qg.forcing import calculate_wind_forcing, calculate_bottom_drag
+from somax._src.operators.dst import (
+    inverse_elliptic_dst,
+    inverse_elliptic_dst_cmm,
+)
+
+laplacian_batch = jax.vmap(laplacian, in_axes=(0, None))
 
 
-laplacian_batch = jax.vmap(laplacian, in_axes=(0,None))
 def calculate_potential_vorticity(
-        psi: Array,
-        domain: Domain,
-        layer_domain: LayerDomain,
-        params: QGParams,
-        masks_psi: Optional[MaskGrid]=None,
-        masks_q: Optional[MaskGrid]=None
+    psi: Array,
+    domain: Domain,
+    layer_domain: LayerDomain,
+    params: QGParams,
+    masks_psi: Optional[MaskGrid] = None,
+    masks_q: Optional[MaskGrid] = None,
 ) -> Array:
-
-
     # calculate laplacian [Nx,Ny] --> [Nx-2, Ny-2]
     psi_lap = laplacian_batch(psi, domain.dx)
 
     # pad
     # [Nx-2,Ny-2] --> [Nx,Ny]
-    psi_lap = jnp.pad(psi_lap, pad_width=((0 ,0) ,(1 ,1) ,(1 ,1)), mode="constant", constant_values=0.0)
-
+    psi_lap = jnp.pad(
+        psi_lap,
+        pad_width=((0, 0), (1, 1), (1, 1)),
+        mode="constant",
+        constant_values=0.0,
+    )
 
     # calculate beta term in helmholtz decomposition
     beta_lap = params.f0**2 * jnp.einsum("lm,...mxy->...lxy", layer_domain.A, psi)
@@ -50,8 +70,6 @@ def calculate_potential_vorticity(
 
     q += f_y
 
-
-
     # apply boundary conditions on q
     if masks_q:
         q *= masks_q.values
@@ -60,14 +78,14 @@ def calculate_potential_vorticity(
 
 
 def advection_rhs(
-        q: Float[Array, "Nx-1 Ny-1"],
-        psi: Float[Array, "Nx Ny"],
-        dx: float,
-        dy: float,
-        num_pts: int = 1,
-        method: str = "wenoz",
-        masks_u: MaskGrid = None,
-        masks_v: MaskGrid = None
+    q: Float[Array, "Nx-1 Ny-1"],
+    psi: Float[Array, "Nx Ny"],
+    dx: float,
+    dy: float,
+    num_pts: int = 1,
+    method: str = "wenoz",
+    masks_u: MaskGrid = None,
+    masks_v: MaskGrid = None,
 ):
     """Calculates the advection term on the RHS of the Multilayer QG
     PDE. It assumes we use an arakawa C-grid whereby the potential
@@ -108,12 +126,20 @@ def advection_rhs(
     v_i = v[..., 1:-1]
 
     q_flux_on_u = reconstruct(
-        q=q, u=u_i, dim=0, u_mask=masks_u[1:-1, :],
-        method=method, num_pts=num_pts,
+        q=q,
+        u=u_i,
+        dim=0,
+        u_mask=masks_u[1:-1, :],
+        method=method,
+        num_pts=num_pts,
     )
     q_flux_on_v = reconstruct(
-        q=q, u=v_i, dim=1, u_mask=masks_v[:, 1:-1],
-        method=method, num_pts=num_pts,
+        q=q,
+        u=v_i,
+        dim=1,
+        u_mask=masks_v[:, 1:-1],
+        method=method,
+        num_pts=num_pts,
     )
 
     # pad arrays to comply with velocities (cell faces)
@@ -126,30 +152,40 @@ def advection_rhs(
     # [Nx,Ny-1] --> [Nx-1,Ny-1]
     div_flux = divergence(q_flux_on_u, q_flux_on_v, dx, dy)
 
-    return - div_flux, u, v, q_flux_on_u, q_flux_on_v
+    return -div_flux, u, v, q_flux_on_u, q_flux_on_v
 
 
 @ft.partial(jax.vmap, axis_name=("q", "psi"))
 def batch_advection_rhs(q, psi, dx, dy, num_pts, method, masks_u, masks_v):
-    return advection_rhs(q=q, psi=psi, dx=dx, dy=dy, num_pts=num_pts, method=method, masks_u=masks_u, masks_v=masks_v)
+    return advection_rhs(
+        q=q,
+        psi=psi,
+        dx=dx,
+        dy=dy,
+        num_pts=num_pts,
+        method=method,
+        masks_u=masks_u,
+        masks_v=masks_v,
+    )
+
 
 def qg_rhs(
-        q: Array,
-        psi: Array,
-        params: QGParams,
-        domain: Domain,
-        layer_domain: LayerDomain,
-        dst_sol: DSTSolution,
-        wind_forcing: Array,
-        bottom_drag: Array,
-        masks=None,
+    q: Array,
+    psi: Array,
+    params: QGParams,
+    domain: Domain,
+    layer_domain: LayerDomain,
+    dst_sol: DSTSolution,
+    wind_forcing: Array,
+    bottom_drag: Array,
+    masks=None,
 ) -> Array:
-
     # calculate advection
     fn = jax.vmap(advection_rhs, in_axes=(0, 0, None, None, None, None, None, None))
 
     dq, u, v, q_flux_on_u, q_flux_on_v = fn(
-        q, psi, domain.dx[-2], domain.dx[-1], 3, "wenoz", masks.face_u, masks.face_v)
+        q, psi, domain.dx[-2], domain.dx[-1], 3, "wenoz", masks.face_u, masks.face_v
+    )
 
     bottom_drag = calculate_bottom_drag(
         psi=psi,
@@ -157,7 +193,7 @@ def qg_rhs(
         H_z=layer_domain.heights[-1],
         delta_ek=params.delta_ek,
         f0=params.f0,
-        masks_psi=masks.node
+        masks_psi=masks.node,
     )
 
     # add forces duh
@@ -170,15 +206,15 @@ def qg_rhs(
     # multiply by mask
     dq *= masks.center.values
 
-
     # get interior points (cell verticies interior)
     # [Nx-1,Ny-1] --> [Nx-2,Ny-2]
     dq_i = jax.vmap(center_avg_2D)(dq)
 
     # calculate helmholtz rhs
     # [Nx-2,Ny-2]
-    helmholtz_rhs = jnp.einsum("lm, ...mxy -> ...lxy", layer_domain.A_layer_2_mode, dq_i)
-
+    helmholtz_rhs = jnp.einsum(
+        "lm, ...mxy -> ...lxy", layer_domain.A_layer_2_mode, dq_i
+    )
 
     # solve elliptical inversion problem
     # [Nx-2,Ny-2] --> [Nx,Ny]
@@ -188,21 +224,25 @@ def qg_rhs(
             rhs=helmholtz_rhs,
             H_matrix=dst_sol.H_mat,
             cap_matrices=dst_sol.capacitance_matrix,
-            bounds_xids=masks.psi.irrbound_xids,
-            bounds_yids=masks.psi.irrbound_yids,
-            mask=masks.node.values
+            bounds_xids=masks.node.irrbound_xids,
+            bounds_yids=masks.node.irrbound_yids,
+            mask=masks.node.values,
         )
     else:
-        dpsi_modes = jax.vmap(inverse_elliptic_dst, in_axes=(0, 0))(helmholtz_rhs, dst_sol.H_mat)
+        dpsi_modes = jax.vmap(inverse_elliptic_dst, in_axes=(0, 0))(
+            helmholtz_rhs, dst_sol.H_mat
+        )
 
     # Add homogeneous solutions to ensure mass conservation
     # [Nx,Ny] --> [Nx-1,Ny-1]
     dpsi_modes_i = jax.vmap(center_avg_2D)(dpsi_modes)
 
-    dpsi_modes_i_mean = einops.reduce(dpsi_modes_i, "... Nx Ny -> ... 1 1", reduction="mean")
+    dpsi_modes_i_mean = einops.reduce(
+        dpsi_modes_i, "... Nx Ny -> ... 1 1", reduction="mean"
+    )
 
     # [Nz] / [Nx,Ny] --> [Nx,Ny]
-    alpha = -  dpsi_modes_i_mean / dst_sol.homsol_mean
+    alpha = -dpsi_modes_i_mean / dst_sol.homsol_mean
 
     # [Nx,Ny]
     dpsi_modes += alpha * dst_sol.homsol
