@@ -53,19 +53,57 @@ We have nicely bundled PDEs for specific use cases, e.g. shallow water, (multila
 ---
 ## Installation
 
-We can install it directly through pip
+
+#### Pip Installation
+
+We can install it directly through pip.
+First we create a development environment (optional).
 
 ```bash
-pip install git+https://github.com/jejjohnson/somax
+conda create -n somax python=3.11 poetry
+conda activate somax
 ```
 
-We also use poetry for the development environment.
+Then we can pip install the `somax` package.
+
+```bash
+pip install git+https://github.com/jejjohnson/somax.git
+```
+
+---
+#### Development
+
+We also use poetry for the development environment. First, we clone the repo
 
 ```bash
 git clone https://github.com/jejjohnson/somax.git
 cd somax
+```
+
+Then we create a conda environment (optional)
+
+```bash
 conda create -n somax python=3.11 poetry
+conda activate somax
+```
+
+We install all of the requirements using poetry
+
+```bash
 poetry install
 ```
 
- diffrax (and equinox) with an finite difference discretization
+---
+#### Using GPUs
+
+JAX allows us to use GPUs with minimal changes to the code.
+We can use any steps above to install the package. 
+However, after installation, it may be necessary to reinstall jax with the GPU requirements. 
+This can be done through pip.
+
+```bash
+conda activate somax
+pip install --upgrade "jax[cuda]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+Please see the installation instructions on the [jax documentation](https://jax.readthedocs.io/en/latest/installation.html#nvidia-gpu) for further instructions.
