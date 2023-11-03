@@ -1,6 +1,4 @@
-from typing import (
-    Optional,
-)
+from typing import Optional
 
 import diffrax as dfx
 import equinox as eqx

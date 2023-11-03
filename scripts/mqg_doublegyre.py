@@ -260,12 +260,12 @@ plot_field(sol.ys.psi[-1])
 plot_field(sol.ys.q[-1])
 n_years = num_days / 365
 
-logger.info(f"Saving...")
+logger.info("Saving...")
 output_dir = "/Users/eman/code_projects/data/qg_runs"
-fname = os.path.join(output_dir, f'psi_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy')
-np.save(fname, np.asarray(sol.ys.psi).astype('float32'))
+fname = os.path.join(output_dir, f"psi_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy")
+np.save(fname, np.asarray(sol.ys.psi).astype("float32"))
 
-fname = os.path.join(output_dir, f'q_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy')
-np.save(fname, np.asarray(sol.ys.q).astype('float32'))
+fname = os.path.join(output_dir, f"q_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy")
+np.save(fname, np.asarray(sol.ys.q).astype("float32"))
 
 logger.info("Completed Script!")

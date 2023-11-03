@@ -1,6 +1,9 @@
 import equinox as eqx
-from jaxtyping import Float, Array
 import jax.numpy as jnp
+from jaxtyping import (
+    Array,
+    Float,
+)
 
 
 class SWMParams(eqx.Module):
@@ -19,7 +22,7 @@ class SWMParams(eqx.Module):
         return self.coriolis_f0 + Y * self.coriolis_beta
 
     def lateral_viscosity(self, dx: Array):
-        return 1e-3 * self.coriolis_f0 * dx ** 2
+        return 1e-3 * self.coriolis_f0 * dx**2
 
     @property
     def phase_speed(self):

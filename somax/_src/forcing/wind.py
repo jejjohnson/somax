@@ -1,13 +1,17 @@
 import math
+
+from fieldx._src.domain.domain import Domain
 import finitediffx as fdx
 from finitevolx import (
     avg_pool,
     center_avg_2D,
 )
-import numpy as np
 import jax.numpy as jnp
-from fieldx._src.domain.domain import Domain
-from jaxtyping import Float, Array
+from jaxtyping import (
+    Array,
+    Float,
+)
+import numpy as np
 
 
 def init_tau(domain, tau0: float = 2.0e-5):
