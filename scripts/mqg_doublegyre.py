@@ -13,6 +13,7 @@ import numpy as np
 
 config.update("jax_enable_x64", True)
 import time
+import os
 
 from fieldx._src.domain.time import TimeDomain
 from finitevolx import (
@@ -31,11 +32,10 @@ from somax._src.models.qg.elliptical import (
 )
 from somax._src.models.qg.operators import (
     advection_rhs,
-    calculate_bottom_drag,
     calculate_potential_vorticity,
-    calculate_wind_forcing,
     qg_rhs,
 )
+from somax._src.models.qg.forcing import calculate_wind_forcing, calculate_bottom_drag
 from somax._src.models.qg.params import QGParams
 from somax._src.operators.dst import (
     compute_capacitance_matrices,
@@ -224,8 +224,9 @@ logger.info("Initializing Time Intervals...")
 dt = 4_000
 
 tmin = 0.0
-num_days = 5 * 360
-tmax = pd.to_timedelta(num_days, unit="days").total_seconds()
+num_years = 50
+num_days = 360
+tmax = pd.to_timedelta(num_years * num_days, unit="days").total_seconds()
 num_save = 20
 
 t_domain = TimeDomain(tmin=tmin, tmax=tmax, dt=dt)
@@ -259,12 +260,12 @@ plot_field(sol.ys.psi[-1])
 plot_field(sol.ys.q[-1])
 n_years = num_days / 365
 
-# logger.info(f"Saving...")
-# output_dir = "/Users/eman/code_projects/data/qg_runs"
-# fname = os.path.join(output_dir, f'psi_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy')
-# np.save(fname, np.asarray(sol.ys.psi).astype('float32'))
-#
-# fname = os.path.join(output_dir, f'q_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy')
-# np.save(fname, np.asarray(sol.ys.q).astype('float32'))
+logger.info(f"Saving...")
+output_dir = "/Users/eman/code_projects/data/qg_runs"
+fname = os.path.join(output_dir, f'psi_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy')
+np.save(fname, np.asarray(sol.ys.psi).astype('float32'))
+
+fname = os.path.join(output_dir, f'q_{n_years:.3f}y_{num_days:.2f}d_{domain_type}_.npy')
+np.save(fname, np.asarray(sol.ys.q).astype('float32'))
 
 logger.info("Completed Script!")

@@ -1,9 +1,13 @@
+import math
 import finitediffx as fdx
 from finitevolx import (
     avg_pool,
     center_avg_2D,
 )
 import numpy as np
+import jax.numpy as jnp
+from fieldx._src.domain.domain import Domain
+from jaxtyping import Float, Array
 
 
 def init_tau(domain, tau0: float = 2.0e-5):
@@ -40,3 +44,33 @@ def calculate_wind_forcing(tau, domain):
     curl_stagg = dF2dX - dF1dY
 
     return center_avg_2D(curl_stagg.squeeze()[1:, 1:])
+
+
+def calculate_wind_forcing(
+    domain: Domain,
+    H_0: float,
+    tau0: float = 0.08 / 1_000.0,
+) -> Float[Array, "Nx Ny"]:
+    """
+    Equation:
+        F_wind: (τ₀ /H₀)(∂xτ−∂yτ)
+    """
+
+    Ly = domain.Lx[-1]
+
+    # [Nx,Ny]
+    y_coords = domain.grid_axis[-1]
+
+    # center coordinates, cell centers
+    # [Nx,Ny] --> [Nx-1,Ny-1]
+    y_coords_center = center_avg_2D(y_coords)
+
+    # calculate tau
+    # analytical form! =]
+    curl_tau = -tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * y_coords_center / Ly)
+
+    # print_debug_quantity(curl_tau, "CURL TAU")
+
+    wind_forcing = curl_tau / H_0
+
+    return wind_forcing
