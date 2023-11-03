@@ -13,6 +13,7 @@ from finitevolx import (
     x_avg_2D,
     y_avg_2D,
 )
+
 import jax.numpy as jnp
 from jaxtyping import (
     Array,
@@ -20,7 +21,7 @@ from jaxtyping import (
 )
 
 from somax._src.models.sw.params import SWMParams
-
+from somax._src.models.sw.boundaries import no_slip_padding, flux_zero_padding
 
 def calculate_uvh_flux(
     h: Float[Array, "Nx Ny"],
@@ -35,9 +36,12 @@ def calculate_uvh_flux(
     Eq:
         (uh), (vh)
     """
-    # free-slip boundary conditions
+    # zero flux padding
+    # h_pad: Float[Array, "Nx+2 Ny+2"] = jnp.pad(
+    #     h, pad_width=((1, 1), (1, 1)), mode="edge"
+    # )
     h_pad: Float[Array, "Nx+2 Ny+2"] = jnp.pad(
-        h, pad_width=((1, 1), (1, 1)), mode="edge"
+        h, pad_width=((1, 1), (1, 1)), mode="constant", constant_values=0.0
     )
 
     # calculate h fluxes
@@ -80,6 +84,50 @@ def kinetic_energy(
     return ke_on_h
 
 
+# def potential_vorticity(
+#     h: Float[Array, "Nx Ny"],
+#     u: Float[Array, "Nx+1 Ny"],
+#     v: Float[Array, "Nx Ny+1"],
+#     dx: Array,
+#     dy: Array,
+#     params: SWMParams,
+#     q_domain: Domain,
+#     node_mask: Optional[MaskGrid] = None,
+# ):
+#     """
+#     Eq:
+#         ζ = ∂v/∂x - ∂u/∂y
+#         q = (ζ + f) / h
+#     """
+#     # # pad arrays
+#     # h_pad: Float[Array, "Nx+2 Ny+2"] = jnp.pad(h, pad_width=1, mode="edge")
+#     # u_pad: Float[Array, "Nx+1 Ny+2"] = jnp.pad(u, pad_width=((0,0),(1,1)), mode="constant")
+#     # v_pad: Float[Array, "Nx+2 Ny+1"] = jnp.pad(v, pad_width=((1,1),(0,0)), mode="constant")
+
+#     # planetary vorticity, f
+#     f_on_q: Float[Array, "Nx+1 Ny+1"] = (
+#         params.coriolis_f0 + q_domain.grid_axis[1] * params.coriolis_beta
+#     )
+
+#     # relative vorticity, ζ = dv/dx - du/dy
+#     vort_r: Float[Array, "Nx-1 Ny-1"] = relative_vorticity(
+#         u=u[1:-1], v=v[:, 1:-1], dx=dx, dy=dy
+#     )
+
+#     # potential vorticity, q = (ζ + f) / h
+#     h_on_q: Float[Array, "Nx-1 Ny-1"] = center_avg_2D(h)
+#     q: Float[Array, "Nx-1 Ny-1"] = (vort_r + f_on_q[1:-1, 1:-1]) / h_on_q
+
+#     # pad array
+#     q: Float[Array, "Nx+1 Ny+1"] = jnp.pad(q, pad_width=((1, 1), (1, 1)), mode="constant", constant_values=0.0)
+
+#     # apply masks
+#     if node_mask is not None:
+#         q *= node_mask.values
+
+#     return q
+
+
 def potential_vorticity(
     h: Float[Array, "Nx Ny"],
     u: Float[Array, "Nx+1 Ny"],
@@ -96,7 +144,9 @@ def potential_vorticity(
         q = (ζ + f) / h
     """
     # # pad arrays
-    # h_pad: Float[Array, "Nx+2 Ny+2"] = jnp.pad(h, pad_width=1, mode="edge")
+    h_pad: Float[Array, "Nx+2 Ny+2"] = flux_zero_padding(h)
+    u_pad: Float[Array, "Nx+1 Ny+2"] = no_slip_padding(u, "u")
+    v_pad: Float[Array, "Nx+2 Ny+1"] = no_slip_padding(v, "v")
     # u_pad: Float[Array, "Nx+1 Ny+2"] = jnp.pad(u, pad_width=((0,0),(1,1)), mode="constant")
     # v_pad: Float[Array, "Nx+2 Ny+1"] = jnp.pad(v, pad_width=((1,1),(0,0)), mode="constant")
 
@@ -106,16 +156,13 @@ def potential_vorticity(
     )
 
     # relative vorticity, ζ = dv/dx - du/dy
-    vort_r: Float[Array, "Nx-1 Ny-1"] = relative_vorticity(
-        u=u[1:-1], v=v[:, 1:-1], dx=dx, dy=dy
+    vort_r: Float[Array, "Nx+1 Ny+1"] = relative_vorticity(
+        u=u_pad, v=v_pad, dx=dx, dy=dy
     )
 
     # potential vorticity, q = (ζ + f) / h
-    h_on_q: Float[Array, "Nx-1 Ny-1"] = center_avg_2D(h)
-    q: Float[Array, "Nx-1 Ny-1"] = (vort_r + f_on_q[1:-1, 1:-1]) / h_on_q
-
-    # pad array
-    q: Float[Array, "Nx+1 Ny+1"] = jnp.pad(q, pad_width=((1, 1), (1, 1)))
+    h_on_q: Float[Array, "Nx+1 Ny+1"] = center_avg_2D(h_pad)
+    q: Float[Array, "Nx+1 Ny+1"] = (vort_r + f_on_q) / h_on_q
 
     # apply masks
     if node_mask is not None:
@@ -214,6 +261,77 @@ def u_linear_rhs(
     return u_rhs
 
 
+# def u_nonlinear_rhs(
+#     h: Float[Array, "Nx Ny"],
+#     q: Float[Array, "Nx+1 Ny+1"],
+#     vh_flux: Float[Array, "Nx Ny+1"],
+#     ke: Float[Array, "Nx Ny"],
+#     params: SWMParams,
+#     dx: float | Array,
+#     num_pts: int = 3,
+#     method: str = "wenoz",
+#     u_mask: Optional[FaceMask] = None,
+# ):
+#     """
+#     Eq:
+#         work = g ∂h/∂x
+#         ke = 0.5 (u² + v²)
+#         ∂u/∂t = qhv - work - ke
+
+#     Notes:
+#         - uses reconstruction (5pt, improved weno) of q on vh flux
+#     """
+
+#     # pad arrays
+#     h_pad: Float[Array, "Nx+2 Ny"] = jnp.pad(h, pad_width=((1, 1), (0, 0)), mode="edge")
+#     ke_pad: Float[Array, "Nx+2 Ny"] = jnp.pad(
+#         ke, pad_width=((1, 1), (0, 0)), mode="edge"
+#     )
+
+#     vh_flux_on_u: Float[Array, "Nx-1 Ny"] = center_avg_2D(vh_flux)
+
+#     qhv_flux_on_u: Float[Array, "Nx-1 Ny-2"] = reconstruct(
+#         q=q[1:-1, 1:-1],
+#         u=vh_flux_on_u[:, 1:-1],
+#         u_mask=u_mask[1:-1, 1:-1] if u_mask is not None else None,
+#         dim=1,
+#         method=method,
+#         num_pts=num_pts,
+#     )
+
+#     qhv_flux_on_u: Float[Array, "Nx+1 Ny"] = jnp.pad(
+#         qhv_flux_on_u, pad_width=((1, 1), (1, 1)), mode="constant"
+#     )
+
+#     # apply mask
+#     if u_mask is not None:
+#         qhv_flux_on_u *= u_mask.values
+
+#     # calculate work
+#     dh_dx: Float[Array, "Nx+1 Ny"] = difference(
+#         h_pad, step_size=dx, axis=0, derivative=1
+#     )
+#     work = params.gravity * dh_dx
+
+#     # calculate kinetic energy
+#     dke_on_u: Float[Array, "Nx+1 Ny"] = difference(
+#         ke_pad, step_size=dx, axis=0, derivative=1
+#     )
+
+#     # calculate u RHS
+#     u_rhs: Float[Array, "Nx-1 Ny-2"] = (
+#         -work[1:-1, 1:-1] + qhv_flux_on_u[1:-1, 1:-1] - dke_on_u[1:-1, 1:-1]
+#     )
+
+#     # pad array
+#     u_rhs = jnp.pad(u_rhs, pad_width=1)
+
+#     # apply mask
+#     if u_mask is not None:
+#         u_rhs *= u_mask.values
+
+#     return u_rhs
+
 def u_nonlinear_rhs(
     h: Float[Array, "Nx Ny"],
     q: Float[Array, "Nx+1 Ny+1"],
@@ -236,24 +354,24 @@ def u_nonlinear_rhs(
     """
 
     # pad arrays
-    h_pad: Float[Array, "Nx+2 Ny"] = jnp.pad(h, pad_width=((1, 1), (0, 0)), mode="edge")
+    h_pad: Float[Array, "Nx+2 Ny"] = jnp.pad(h, pad_width=((1, 1), (0, 0)), mode="constant", constant_values=0.0)
     ke_pad: Float[Array, "Nx+2 Ny"] = jnp.pad(
-        ke, pad_width=((1, 1), (0, 0)), mode="edge"
+        ke, pad_width=((1, 1), (0, 0)), mode="constant", constant_values=0.0
     )
 
     vh_flux_on_u: Float[Array, "Nx-1 Ny"] = center_avg_2D(vh_flux)
+    
+    vh_flux_on_u: Float[Array, "Nx+2 Ny"] = jnp.pad(
+        vh_flux_on_u, pad_width=((1, 1), (0, 0)), mode="constant", constant_values=0.0
+    )
 
-    qhv_flux_on_u: Float[Array, "Nx-1 Ny-2"] = reconstruct(
-        q=q[1:-1, 1:-1],
-        u=vh_flux_on_u[:, 1:-1],
-        u_mask=u_mask[1:-1, 1:-1] if u_mask is not None else None,
+    qhv_flux_on_u: Float[Array, "Nx+1 Ny"] = reconstruct(
+        q=q,
+        u=vh_flux_on_u,
+        u_mask=u_mask if u_mask is not None else None,
         dim=1,
         method=method,
         num_pts=num_pts,
-    )
-
-    qhv_flux_on_u: Float[Array, "Nx+1 Ny"] = jnp.pad(
-        qhv_flux_on_u, pad_width=((1, 1), (1, 1)), mode="constant"
     )
 
     # apply mask
@@ -272,12 +390,9 @@ def u_nonlinear_rhs(
     )
 
     # calculate u RHS
-    u_rhs: Float[Array, "Nx-1 Ny-2"] = (
-        -work[1:-1, 1:-1] + qhv_flux_on_u[1:-1, 1:-1] - dke_on_u[1:-1, 1:-1]
+    u_rhs: Float[Array, "Nx+1 Ny"] = (
+        - work + qhv_flux_on_u - dke_on_u
     )
-
-    # pad array
-    u_rhs = jnp.pad(u_rhs, pad_width=1)
 
     # apply mask
     if u_mask is not None:
@@ -321,6 +436,97 @@ def v_linear_rhs(
     return v_rhs
 
 
+# def v_nonlinear_rhs(
+#     h: Float[Array, "Nx Ny"],
+#     q: Float[Array, "Nx+1 Ny+1"],
+#     uh_flux: Float[Array, "Nx+1 Ny"],
+#     ke: Float[Array, "Nx Ny"],
+#     dy: float | Array,
+#     params: SWMParams,
+#     num_pts: int = 3,
+#     method: str = "wenoz",
+#     v_mask: Optional[FaceMask] = None,
+# ):
+#     """
+#     Eq:
+#         work = g ∂h/∂y
+#         ke = 0.5 (u² + v²)
+#         ∂v/∂t = - qhu - work - ke
+
+#     Notes:
+#         - uses reconstruction (5pt, improved weno) of q on uh flux
+#     """
+#     # h_pad: Float[Array, "Nx Ny+2"] = jnp.pad(
+#     #     h,
+#     #     pad_width=(
+#     #         (0, 0),
+#     #         (1, 1),
+#     #     ),
+#     #     mode="edge",
+#     # )
+#     h_pad: Float[Array, "Nx Ny+2"] = jnp.pad(
+#         h,
+#         pad_width=(
+#             (0, 0),
+#             (1, 1),
+#         ),
+#         mode="constant", constant_values=0.0
+#     )
+#     ke_pad: Float[Array, "Nx Ny+2"] = jnp.pad(
+#         ke,
+#         pad_width=(
+#             (0, 0),
+#             (1, 1),
+#         ),
+#         # mode="edge",
+#         mode="constant", constant_values=0.0
+#     )
+
+#     uh_flux_on_v: Float[Array, "Nx Ny-1"] = center_avg_2D(uh_flux)
+
+#     qhu_flux_on_v: Float[Array, "Nx-2 Ny-1"] = reconstruct(
+#         q=q[1:-1, 1:-1],
+#         u=uh_flux_on_v[1:-1],
+#         u_mask=v_mask[1:-1, 1:-1] if v_mask is not None else None,
+#         dim=0,
+#         method=method,
+#         num_pts=num_pts,
+#     )
+
+#     qhu_flux_on_v: Float[Array, "Nx Ny+1"] = jnp.pad(
+#         qhu_flux_on_v, pad_width=((1, 1), (1, 1)), mode="constant"
+#     )
+
+#     # apply masks
+#     if v_mask is not None:
+#         qhu_flux_on_v *= v_mask.values
+
+#     # calculate work
+#     dh_dy: Float[Array, "Nx Ny+1"] = difference(
+#         h_pad, step_size=dy, axis=1, derivative=1
+#     )
+#     work = params.gravity * dh_dy
+
+#     # calculate kinetic energy
+#     dke_on_v: Float[Array, "Nx Ny+1"] = difference(
+#         ke_pad, step_size=dy, axis=1, derivative=1
+#     )
+
+#     # calculate u RHS
+#     v_rhs: Float[Array, "Nx-2 Ny-1"] = (
+#         -work[1:-1, 1:-1] - qhu_flux_on_v[1:-1, 1:-1] - dke_on_v[1:-1, 1:-1]
+#     )
+
+#     # pad array
+#     v_rhs = jnp.pad(v_rhs, pad_width=1)
+
+#     # apply masks
+#     if v_mask is not None:
+#         v_rhs *= v_mask.values
+
+#     return v_rhs
+
+
 def v_nonlinear_rhs(
     h: Float[Array, "Nx Ny"],
     q: Float[Array, "Nx+1 Ny+1"],
@@ -347,7 +553,7 @@ def v_nonlinear_rhs(
             (0, 0),
             (1, 1),
         ),
-        mode="edge",
+        mode="constant", constant_values=0.0
     )
     ke_pad: Float[Array, "Nx Ny+2"] = jnp.pad(
         ke,
@@ -355,22 +561,21 @@ def v_nonlinear_rhs(
             (0, 0),
             (1, 1),
         ),
-        mode="edge",
+        # mode="edge",
+        mode="constant", constant_values=0.0
     )
 
     uh_flux_on_v: Float[Array, "Nx Ny-1"] = center_avg_2D(uh_flux)
+    
+    uh_flux_on_v: Float[Array, "Nx Ny+1"] = jnp.pad(uh_flux_on_v, ((0,0),(1,1)), mode="constant", constant_values=0.0)
 
-    qhu_flux_on_v: Float[Array, "Nx-2 Ny-1"] = reconstruct(
-        q=q[1:-1, 1:-1],
-        u=uh_flux_on_v[1:-1],
-        u_mask=v_mask[1:-1, 1:-1] if v_mask is not None else None,
+    qhu_flux_on_v: Float[Array, "Nx Ny+1"] = reconstruct(
+        q=q,
+        u=uh_flux_on_v,
+        u_mask=v_mask if v_mask is not None else None,
         dim=0,
         method=method,
         num_pts=num_pts,
-    )
-
-    qhu_flux_on_v: Float[Array, "Nx Ny+1"] = jnp.pad(
-        qhu_flux_on_v, pad_width=((1, 1), (1, 1)), mode="constant"
     )
 
     # apply masks
@@ -389,12 +594,9 @@ def v_nonlinear_rhs(
     )
 
     # calculate u RHS
-    v_rhs: Float[Array, "Nx-2 Ny-1"] = (
-        -work[1:-1, 1:-1] - qhu_flux_on_v[1:-1, 1:-1] - dke_on_v[1:-1, 1:-1]
+    v_rhs: Float[Array, "Nx Ny+1"] = (
+        -work - qhu_flux_on_v - dke_on_v
     )
-
-    # pad array
-    v_rhs = jnp.pad(v_rhs, pad_width=1)
 
     # apply masks
     if v_mask is not None:

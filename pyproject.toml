@@ -27,8 +27,8 @@ classifiers = [
 python = ">=3.10,<3.12"
 jaxtyping = "^0.2.15"
 beartype = "^0.13.1"
-jax = ">=0.4.10"
-jaxlib = ">=0.4.10"
+jax = ">=0.4.13"
+jaxlib = ">=0.4.13"
 finitevolx = { git = "https://github.com/jejjohnson/finitevolX.git" }
 fieldx = { git = "https://github.com/jejjohnson/fieldx.git" }
 kernex = "^0.2.0"

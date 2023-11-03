@@ -1,6 +1,5 @@
 name: somax
 channels:
-  - defaults
   - conda-forge
 dependencies:
   - python=3.11
@@ -16,6 +15,8 @@ dependencies:
   # Storage
   - conda-forge::netCDF4
   - conda-forge::zarr
+  # JAX
+  - conda-forge::jax
   # GUI
   - conda-forge::ipywidgets
   - ipykernel
@@ -23,7 +24,6 @@ dependencies:
   - pip
   - pip:
       # Jax framework
-      - "jax[cpu]"
       - "git+https://github.com/jejjohnson/finitevolX.git"
       - "git+https://github.com/jejjohnson/fieldx.git"
       - einops
