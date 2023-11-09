@@ -1,5 +1,5 @@
 import functools as ft
-from typing import Optional
+from typing import Optional, Callable
 
 import einops
 from fieldx._src.domain.domain import Domain
@@ -39,10 +39,9 @@ def calculate_potential_vorticity(
     masks_q: Optional[MaskGrid] = None,
 ) -> Array:
     # calculate laplacian [Nx,Ny] --> [Nx-2, Ny-2]
-    psi_lap = laplacian_batch(psi, domain.dx)
+    psi_lap: Float[Array, "Nx-2 Ny-2"] = laplacian_batch(psi, domain.dx)
 
-    # pad
-    # [Nx-2,Ny-2] --> [Nx,Ny]
+    # pad (zero boundaries)
     psi_lap = jnp.pad(
         psi_lap,
         pad_width=((0, 0), (1, 1), (1, 1)),
@@ -113,77 +112,65 @@ def advection_rhs(
     """
 
     # calculate velocities
-    # [Nx,Ny] --> [Nx,Ny-1],[Nx-1,Ny]
     # u, v = -∂yΨ, ∂xΨ
     u, v = geostrophic_gradient(u=psi, dx=dx, dy=dy)
 
-    # take interior points of velocities
-    u_i: Float[Array, "Nx-2 Ny-1"] = u[..., 1:-1, :]
-    v_i: Float[Array, "Nx-1 Ny-2"] = v[..., 1:-1]
-    
     # calculate fluxes
+    # Note: take interior points of velocities (+ masks)
     q_flux_on_u: Float[Array, "Nx-2 Ny-1"] = reconstruct(
         q=q,
-        u=u_i,
+        u=u[1:-1,:],
         dim=0,
-        u_mask=masks_u[1:-1, :],
+        u_mask=masks_u[1:-1, :] if masks_u is not None else None,
         method=method,
         num_pts=num_pts,
     )
     q_flux_on_v: Float[Array, "Nx-1 Ny-2"] = reconstruct(
         q=q,
-        u=v_i,
+        u=v[:,1:-1],
         dim=1,
-        u_mask=masks_v[:, 1:-1],
+        u_mask=masks_v[:, 1:-1] if masks_v is not None else None,
         method=method,
         num_pts=num_pts,
     )
 
     # pad arrays to comply with velocities (cell faces)
-    # [Nx-2,Ny-1] --> [Nx,Ny-1]
     q_flux_on_u: Float[Array, "Nx Ny-1"] = jnp.pad(q_flux_on_u, pad_width=((1, 1), (0, 0)))
-    # [Nx-1,Ny-2] --> [Nx-1,Ny]
     q_flux_on_v: Float[Array, "Nx-1 Ny"] = jnp.pad(q_flux_on_v, pad_width=((0, 0), (1, 1)))
 
     # calculate divergence
-    # [Nx,Ny-1] --> [Nx-1,Ny-1]
+    # ∂x(flux_u) + ∂y(flux_v) = div(flux_u, flux_v)
     div_flux: Float[Array, "Nx-1 Ny-1"] = divergence(q_flux_on_u, q_flux_on_v, dx, dy)
 
     return - div_flux
 
 
-@ft.partial(jax.vmap, axis_name=("q", "psi"))
-def batch_advection_rhs(q, psi, dx, dy, num_pts, method, masks_u, masks_v):
-    return advection_rhs(
-        q=q,
-        psi=psi,
-        dx=dx,
-        dy=dy,
-        num_pts=num_pts,
-        method=method,
-        masks_u=masks_u,
-        masks_v=masks_v,
-    )
+def batch_advection_rhs(q, psi, dx, dy, num_pts, method, masks_u, masks_v):    
+    fn = jax.vmap(advection_rhs, in_axes=(0, 0, None, None, None, None, None, None))
+    return fn(q, psi, dx, dy, num_pts, method, masks_u, masks_v)
 
 
-def equation_of_motion_q(
+def equation_of_motion(
     q: Array,
     psi: Array,
     params: QGParams,
     domain: Domain,
     layer_domain: LayerDomain,
-    dst_sol: DSTSolution,
-    forcing_fn: Array,
+    forcing_fn: Callable,
     masks=None,
 ) -> Array:
+    
     # calculate advection
-    fn = jax.vmap(advection_rhs, in_axes=(0, 0, None, None, None, None, None, None))
-
-    dq = fn(
-        q, psi, domain.dx[-2], domain.dx[-1], 3, "wenoz", masks.face_u, masks.face_v
+    dq = batch_advection_rhs(
+        q, psi,
+        domain.dx[-2], domain.dx[-1], 
+        params.num_pts, 
+        params.method,
+        masks.face_u,
+        masks.face_v
     )
 
-    # add forces duh
+    # add forces
     dq = forcing_fn(
         psi=psi, dq=dq, 
         domain=domain, 
@@ -198,29 +185,24 @@ def equation_of_motion_q(
     return dq
 
 
-def equation_of_motion_psi(
-    dq: Float[Array, "Nx-1 Ny-1"],
-    psi: Float[Array, "Nx Ny"],
+def calculate_psi_from_pv(
+    q: Float[Array, "Nx-1 Ny-1"],
     layer_domain: LayerDomain,
     mask_node: NodeMask,
     dst_sol: DSTSolution,
-):
+) -> Float[Array, "Nx Ny"]:
     
     # get interior points (cell verticies interior)
-    # [Nx-1,Ny-1] --> [Nx-2,Ny-2]
-    dq_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(dq)
+    q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q)
     
     # calculate helmholtz rhs
-    # [Nx-2,Ny-2]
-    helmholtz_rhs = jnp.einsum(
-        "lm, ...mxy -> ...lxy", layer_domain.A_layer_2_mode, dq_i
+    helmholtz_rhs: Float[Array, "Nz Nx Ny"] = jnp.einsum(
+        "lm, ...mxy -> ...lxy", layer_domain.A_layer_2_mode, q_i
     )
 
     # solve elliptical inversion problem
-    # [Nx-2,Ny-2] --> [Nx,Ny]
     if dst_sol.capacitance_matrix is not None:
-        # print_debug_quantity(dst_sol.capacitance_matrix, "CAPACITANCE MAT")
-        dpsi_modes = inverse_elliptic_dst_cmm(
+        psi_modes: Float[Array, "Nz Nx Ny"] = inverse_elliptic_dst_cmm(
             rhs=helmholtz_rhs,
             H_matrix=dst_sol.H_mat,
             cap_matrices=dst_sol.capacitance_matrix,
@@ -229,27 +211,27 @@ def equation_of_motion_psi(
             mask=mask_node.values,
         )
     else:
-        dpsi_modes = jax.vmap(inverse_elliptic_dst, in_axes=(0, 0))(
+        psi_modes: Float[Array, "Nz Nx Ny"] = jax.vmap(
+            inverse_elliptic_dst, in_axes=(0, 0)
+        )(
             helmholtz_rhs, dst_sol.H_mat
         )
 
     # Add homogeneous solutions to ensure mass conservation
-    # [Nx,Ny] --> [Nx-1,Ny-1]
-    dpsi_modes_i = jax.vmap(center_avg_2D)(dpsi_modes)
+    psi_modes_i: Float[Array, "Nz Nx-1 Ny-1"] = jax.vmap(center_avg_2D)(psi_modes)
 
-    dpsi_modes_i_mean = einops.reduce(
-        dpsi_modes_i, "... Nx Ny -> ... 1 1", reduction="mean"
+    psi_modes_i_mean: Float[Array, "Nz 1 1"] = einops.reduce(
+        psi_modes_i, "... Nx Ny -> ... 1 1", reduction="mean"
     )
-
-    # [Nz] / [Nx,Ny] --> [Nx,Ny]
-    alpha = -dpsi_modes_i_mean / dst_sol.homsol_mean
-
-    # [Nx,Ny]
-    dpsi_modes += alpha * dst_sol.homsol
-
-    # [Nx,Ny]
-    dpsi = jnp.einsum("lm , ...mxy -> lxy", layer_domain.A_mode_2_layer, dpsi_modes)
     
-    # dpsi *= mask_node.values
+    alpha: Float[Array, "Nz 1 1"] = -psi_modes_i_mean / dst_sol.homsol_mean
     
-    return dpsi
+    psi_modes += alpha * dst_sol.homsol
+    
+    psi: Float[Array, "Nz Nx Ny"] = jnp.einsum(
+        "lm , ...mxy -> lxy", layer_domain.A_mode_2_layer, psi_modes
+    )
+    
+    psi *= mask_node.values 
+    
+    return psi

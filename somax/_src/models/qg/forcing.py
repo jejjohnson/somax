@@ -57,12 +57,10 @@ def calculate_bottom_drag(
     """
 
     # interior, vertex points on psi
-    # [...,Nx,Ny] --> [...,Nx-2,Ny-2]
-    omega = jax.vmap(laplacian, in_axes=(0, None))(psi, domain.dx)
+    omega: Float[Array, "Nz Nx-2 Ny-2"] = jax.vmap(laplacian, in_axes=(0, None))(psi, domain.dx)
 
     # pad interior psi points
-    # [Nx,Ny] --> [Nx,Ny]
-    omega = jnp.pad(
+    omega: Float[Array, "Nz Nx Ny"]  = jnp.pad(
         omega, pad_width=((0, 0), (1, 1), (1, 1)), mode="constant", constant_values=0.0
     )
 
@@ -72,13 +70,13 @@ def calculate_bottom_drag(
     # plot_field(omega)
     # pad interior, center points on q
     # [Nx,Ny] --> [Nx-1,Ny-1]
-    omega = jax.vmap(center_avg_2D)(omega)
+    omega: Float[Array, "Nz Nx-1 Ny-1"] = jax.vmap(center_avg_2D)(omega)
 
     # calculate bottom drag coefficient
-    bottom_drag_coeff = delta_ek / H_z * f0 / 2.0
+    bottom_drag_coeff: Float[Array, ""]  = delta_ek / H_z * f0 / 2.0
 
     # calculate bottom drag
-    bottom_drag = -bottom_drag_coeff * omega[-1]
+    bottom_drag: Float[Array, "Nx Ny"]  = -bottom_drag_coeff * omega[-1]
 
     # plot_field(omega)
     return bottom_drag

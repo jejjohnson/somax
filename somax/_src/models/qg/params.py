@@ -10,6 +10,8 @@ class QGParams(eqx.Module):
     a_4: float = 5.0e11  # LR # 2.0e9 # HR
     bcco: float = 0.2  # boundary condition coef. (non-dim.)
     delta_ek: float = 2.0  # eckman height [m]
+    num_pts: int = 5
+    method: str = "wenoz"
 
     @property
     def zfbc(self):
