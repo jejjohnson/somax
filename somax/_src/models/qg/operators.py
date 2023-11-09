@@ -5,6 +5,7 @@ import einops
 from fieldx._src.domain.domain import Domain
 from finitevolx import (
     MaskGrid,
+    NodeMask,
     center_avg_2D,
     divergence,
     geostrophic_gradient,
@@ -20,7 +21,6 @@ from jaxtyping import (
 
 from somax._src.models.qg.domain import LayerDomain
 from somax._src.models.qg.elliptical import DSTSolution
-from somax._src.models.qg.forcing import calculate_bottom_drag
 from somax._src.models.qg.params import QGParams
 from somax._src.operators.dst import (
     inverse_elliptic_dst,
@@ -31,7 +31,7 @@ laplacian_batch = jax.vmap(laplacian, in_axes=(0, None))
 
 
 def calculate_potential_vorticity(
-    psi: Array,
+    psi: Float[Array, "Nx Ny"],
     domain: Domain,
     layer_domain: LayerDomain,
     params: QGParams,
@@ -118,12 +118,11 @@ def advection_rhs(
     u, v = geostrophic_gradient(u=psi, dx=dx, dy=dy)
 
     # take interior points of velocities
-    # [Nx,Ny-1] --> [Nx-2,Ny-1]
-    u_i = u[..., 1:-1, :]
-    # [Nx-1,Ny] --> [Nx-1,Ny-2]
-    v_i = v[..., 1:-1]
-
-    q_flux_on_u = reconstruct(
+    u_i: Float[Array, "Nx-2 Ny-1"] = u[..., 1:-1, :]
+    v_i: Float[Array, "Nx-1 Ny-2"] = v[..., 1:-1]
+    
+    # calculate fluxes
+    q_flux_on_u: Float[Array, "Nx-2 Ny-1"] = reconstruct(
         q=q,
         u=u_i,
         dim=0,
@@ -131,7 +130,7 @@ def advection_rhs(
         method=method,
         num_pts=num_pts,
     )
-    q_flux_on_v = reconstruct(
+    q_flux_on_v: Float[Array, "Nx-1 Ny-2"] = reconstruct(
         q=q,
         u=v_i,
         dim=1,
@@ -142,15 +141,15 @@ def advection_rhs(
 
     # pad arrays to comply with velocities (cell faces)
     # [Nx-2,Ny-1] --> [Nx,Ny-1]
-    q_flux_on_u = jnp.pad(q_flux_on_u, pad_width=((1, 1), (0, 0)))
+    q_flux_on_u: Float[Array, "Nx Ny-1"] = jnp.pad(q_flux_on_u, pad_width=((1, 1), (0, 0)))
     # [Nx-1,Ny-2] --> [Nx-1,Ny]
-    q_flux_on_v = jnp.pad(q_flux_on_v, pad_width=((0, 0), (1, 1)))
+    q_flux_on_v: Float[Array, "Nx-1 Ny"] = jnp.pad(q_flux_on_v, pad_width=((0, 0), (1, 1)))
 
     # calculate divergence
     # [Nx,Ny-1] --> [Nx-1,Ny-1]
-    div_flux = divergence(q_flux_on_u, q_flux_on_v, dx, dy)
+    div_flux: Float[Array, "Nx-1 Ny-1"] = divergence(q_flux_on_u, q_flux_on_v, dx, dy)
 
-    return -div_flux, u, v, q_flux_on_u, q_flux_on_v
+    return - div_flux
 
 
 @ft.partial(jax.vmap, axis_name=("q", "psi"))
@@ -167,47 +166,50 @@ def batch_advection_rhs(q, psi, dx, dy, num_pts, method, masks_u, masks_v):
     )
 
 
-def qg_rhs(
+def equation_of_motion_q(
     q: Array,
     psi: Array,
     params: QGParams,
     domain: Domain,
     layer_domain: LayerDomain,
     dst_sol: DSTSolution,
-    wind_forcing: Array,
-    bottom_drag: Array,
+    forcing_fn: Array,
     masks=None,
 ) -> Array:
     # calculate advection
     fn = jax.vmap(advection_rhs, in_axes=(0, 0, None, None, None, None, None, None))
 
-    dq, u, v, q_flux_on_u, q_flux_on_v = fn(
+    dq = fn(
         q, psi, domain.dx[-2], domain.dx[-1], 3, "wenoz", masks.face_u, masks.face_v
     )
 
-    bottom_drag = calculate_bottom_drag(
-        psi=psi,
-        domain=domain,
-        H_z=layer_domain.heights[-1],
-        delta_ek=params.delta_ek,
-        f0=params.f0,
-        masks_psi=masks.node,
-    )
-
     # add forces duh
-    forces = jnp.zeros_like(dq)
-    forces = forces.at[0].set(wind_forcing)
-    forces = forces.at[-1].set(bottom_drag)
-    # print_debug_quantity(forces, "FORCES")
-    dq += forces
+    dq = forcing_fn(
+        psi=psi, dq=dq, 
+        domain=domain, 
+        layer_domain=layer_domain,
+        params=params, 
+        masks=masks
+    )
 
     # multiply by mask
     dq *= masks.center.values
 
+    return dq
+
+
+def equation_of_motion_psi(
+    dq: Float[Array, "Nx-1 Ny-1"],
+    psi: Float[Array, "Nx Ny"],
+    layer_domain: LayerDomain,
+    mask_node: NodeMask,
+    dst_sol: DSTSolution,
+):
+    
     # get interior points (cell verticies interior)
     # [Nx-1,Ny-1] --> [Nx-2,Ny-2]
-    dq_i = jax.vmap(center_avg_2D)(dq)
-
+    dq_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(dq)
+    
     # calculate helmholtz rhs
     # [Nx-2,Ny-2]
     helmholtz_rhs = jnp.einsum(
@@ -222,9 +224,9 @@ def qg_rhs(
             rhs=helmholtz_rhs,
             H_matrix=dst_sol.H_mat,
             cap_matrices=dst_sol.capacitance_matrix,
-            bounds_xids=masks.node.irrbound_xids,
-            bounds_yids=masks.node.irrbound_yids,
-            mask=masks.node.values,
+            bounds_xids=mask_node.irrbound_xids,
+            bounds_yids=mask_node.irrbound_yids,
+            mask=mask_node.values,
         )
     else:
         dpsi_modes = jax.vmap(inverse_elliptic_dst, in_axes=(0, 0))(
@@ -247,5 +249,7 @@ def qg_rhs(
 
     # [Nx,Ny]
     dpsi = jnp.einsum("lm , ...mxy -> lxy", layer_domain.A_mode_2_layer, dpsi_modes)
-
-    return dq, dpsi
+    
+    # dpsi *= mask_node.values
+    
+    return dpsi
