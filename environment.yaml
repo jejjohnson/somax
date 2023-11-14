@@ -9,12 +9,19 @@ dependencies:
   - scipy # Scientific Computing
   - conda-forge::xarray # Data structures
   - pandas # Data structure
+  - dask
+  - distributed
+  - jupyterlab
+  - nodejs
+  - conda-forge::jax
+  - conda-forge::jaxlib=*=*cuda*
   - scikit-learn # Machine Learning
   # PLOTTING LIBRARY
   - matplotlib # standard plotting library
   - seaborn # Stats viz library
   # Storage
   - conda-forge::netCDF4
+  - conda-forge::hdf5
   - conda-forge::zarr
   # GUI
   - conda-forge::ipywidgets
@@ -23,7 +30,7 @@ dependencies:
   - pip
   - pip:
       # Jax framework
-      - "jax[cpu]"
+      #- "jax[cpu]"
       - "git+https://github.com/jejjohnson/finitevolX.git"
       - "git+https://github.com/jejjohnson/fieldx.git"
       - einops
