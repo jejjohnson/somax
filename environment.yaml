@@ -26,6 +26,8 @@ dependencies:
       # Jax framework
       - "git+https://github.com/jejjohnson/finitevolX.git"
       - "git+https://github.com/jejjohnson/fieldx.git"
+      - interpax
+      - "git+https://github.com/adam-coogan/jaxinterp2d.git@master"
       - einops
       - jaxtyping
       - equinox

@@ -37,7 +37,7 @@ from somax._src.models.qg.operators import (
 )
 from somax._src.models.qg.forcing import calculate_wind_forcing, calculate_bottom_drag
 from somax._src.models.qg.params import QGParams
-from somax._src.operators.dst import (
+from somax._src.operators.functional.dst import (
     compute_capacitance_matrices,
 
 )

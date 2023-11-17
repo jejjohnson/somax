@@ -1,118 +1,119 @@
-# import typing as tp
-# import jax
-# import jax.numpy as jnp
-# from jaxtyping import Array
-# from fieldx._src.domain.domain import Domain
+import typing as tp
+import jax
+import jax.numpy as jnp
+from jaxtyping import Array
+from fieldx._src.domain.domain import Domain
+from somax._src.domain.utils import init_domain_from_bounds_and_step
 # # from jaxsw._src.domain import base_v2 as domain_utils
 # from fieldx._src.field.field import Field
 # # from jaxsw._src.operators.functional import grid as F_grid
 # import finitediffx as fdx
 #
 #
-# DIRECTIONS = {
-#     "right": (1.0, 1.0),
-#     "left": (-1.0, -1.0),
-#     "inner": (1.0, -1.0),
-#     "outer": (-1.0, 1.0),
-#     None: (0.0, 0.0),
-# }
-#
-# STAGGER_BOOLS = {"0": 1.0, "1": 0.5}
-#
-# PADDING = {
-#     "both": (1, 1),
-#     "right": (0, 1),
-#     "left": (1, 0),
-#     None: (0, 0),
-# }
-#
-#
-# def domain_limits_transform(
-#     xmin: float,
-#     xmax: float,
-#     dx: float,
-#     direction: tp.Optional[str] = None,
-#     stagger: tp.Optional[bool] = None,
-# ) -> tp.Tuple:
-#     # convert staggers to bools
-#     if stagger is None:
-#         stagger = "0"
-#     stagger = str(int(stagger))
-#
-#     # TODO: check size of dx
-#     xmin += dx * STAGGER_BOOLS[stagger] * DIRECTIONS[direction][0]
-#     xmax += dx * STAGGER_BOOLS[stagger] * DIRECTIONS[direction][1]
-#     return xmin, xmax
-#
-#
-# def batch_domain_limits_transform(
-#     xmin: tp.Iterable[float],
-#     xmax: tp.Iterable[float],
-#     dx: tp.Iterable[float],
-#     direction: tp.Iterable[str] = None,
-#     stagger: tp.Iterable[bool] = None,
-# ) -> tp.Tuple:
-#     if direction is None:
-#         direction = (None,) * len(xmin)
-#
-#     if stagger is None:
-#         stagger = (False,) * len(xmin)
-#
-#     msg = "Incorrect shapes"
-#     msg += f"\nxmin: {len(xmin)} | "
-#     msg += f"xmax: {len(xmax)} | "
-#     msg += f"dx: {len(dx)} | "
-#     msg += f"direction: {len(direction)} | "
-#     msg += f"stagger: {len(stagger)}"
-#     assert len(xmin) == len(xmax) == len(dx) == len(direction) == len(stagger), msg
-#
-#     limits = [
-#         domain_limits_transform(imin, imax, idx, idirection, istagger)
-#         for imin, imax, idx, idirection, istagger in zip(
-#             xmin, xmax, dx, direction, stagger
-#         )
-#     ]
-#
-#     xmin, xmax = zip(*limits)
-#     return xmin, xmax
-#
-#
-# def stagger_domain(
-#     domain: Domain, direction: tp.Iterable[str], stagger: tp.Iterable[bool]
-# ):
-#     msg = "Incorrect shapes"
-#     msg += f"\nxmin: {len(domain.xmin)} | "
-#     msg += f"xmax: {len(domain.xmax)} | "
-#     msg += f"dx: {len(domain.dx)} | "
-#     msg += f"direction: {len(direction)} | "
-#     msg += f"stagger: {len(stagger)}"
-#     assert (
-#         len(domain.xmin)
-#         == len(domain.xmax)
-#         == len(domain.dx)
-#         == len(direction)
-#         == len(stagger)
-#     ), msg
-#
-#     # change domain limits
-#     xmin, xmax = batch_domain_limits_transform(
-#         domain.xmin, domain.xmax, domain.dx, direction, stagger
-#     )
-#     domains = [
-#         domain_utils.init_domain_1d(float(ixmin), float(ixmax), float(idx))
-#         for ixmin, ixmax, idx in zip(xmin, xmax, domain.dx)
-#     ]
-#     import functools
-#
-#     domain = functools.reduce(lambda a, b: a * b, domains)
-#
-#     # print(domains[0], domains[1])
-#     # domain = sum(domains)
-#     # create new domain
-#     # domain = Domain(xmin=xmin, xmax=xmax, dx=domain.dx)
-#
-#     return domain
-#
+DIRECTIONS = {
+    "right": (1.0, 1.0),
+    "left": (-1.0, -1.0),
+    "inner": (1.0, -1.0),
+    "outer": (-1.0, 1.0),
+    None: (0.0, 0.0),
+}
+
+STAGGER_BOOLS = {"0": 1.0, "1": 0.5}
+
+PADDING = {
+    "both": (1, 1),
+    "right": (0, 1),
+    "left": (1, 0),
+    None: (0, 0),
+}
+
+
+def domain_limits_transform(
+    xmin: float,
+    xmax: float,
+    dx: float,
+    direction: tp.Optional[str] = None,
+    stagger: tp.Optional[bool] = None,
+) -> tp.Tuple:
+    # convert staggers to bools
+    if stagger is None:
+        stagger = "0"
+    stagger = str(int(stagger))
+
+    # TODO: check size of dx
+    xmin += dx * STAGGER_BOOLS[stagger] * DIRECTIONS[direction][0]
+    xmax += dx * STAGGER_BOOLS[stagger] * DIRECTIONS[direction][1]
+    return xmin, xmax
+
+
+def batch_domain_limits_transform(
+    xmin: tp.Iterable[float],
+    xmax: tp.Iterable[float],
+    dx: tp.Iterable[float],
+    direction: tp.Iterable[str] = None,
+    stagger: tp.Iterable[bool] = None,
+) -> tp.Tuple:
+    if direction is None:
+        direction = (None,) * len(xmin)
+
+    if stagger is None:
+        stagger = (False,) * len(xmin)
+
+    msg = "Incorrect shapes"
+    msg += f"\nxmin: {len(xmin)} | "
+    msg += f"xmax: {len(xmax)} | "
+    msg += f"dx: {len(dx)} | "
+    msg += f"direction: {len(direction)} | "
+    msg += f"stagger: {len(stagger)}"
+    assert len(xmin) == len(xmax) == len(dx) == len(direction) == len(stagger), msg
+
+    limits = [
+        domain_limits_transform(imin, imax, idx, idirection, istagger)
+        for imin, imax, idx, idirection, istagger in zip(
+            xmin, xmax, dx, direction, stagger
+        )
+    ]
+
+    xmin, xmax = zip(*limits)
+    return xmin, xmax
+
+
+def stagger_domain(
+    domain: Domain, direction: tp.Iterable[str], stagger: tp.Iterable[bool]
+):
+    msg = "Incorrect shapes"
+    msg += f"\nxmin: {len(domain.xmin)} | "
+    msg += f"xmax: {len(domain.xmax)} | "
+    msg += f"dx: {len(domain.dx)} | "
+    msg += f"direction: {len(direction)} | "
+    msg += f"stagger: {len(stagger)}"
+    assert (
+        len(domain.xmin)
+        == len(domain.xmax)
+        == len(domain.dx)
+        == len(direction)
+        == len(stagger)
+    ), msg
+
+    # change domain limits
+    xmin, xmax = batch_domain_limits_transform(
+        domain.xmin, domain.xmax, domain.dx, direction, stagger
+    )
+    domains = [
+        init_domain_from_bounds_and_step(xmin=float(ixmin), xmax=float(ixmax), dx=float(idx))
+        for ixmin, ixmax, idx in zip(xmin, xmax, domain.dx)
+    ]
+    import functools
+
+    domain = functools.reduce(lambda a, b: a * b, domains)
+
+    # print(domains[0], domains[1])
+    # domain = sum(domains)
+    # create new domain
+    # domain = Domain(xmin=xmin, xmax=xmax, dx=domain.dx)
+
+    return domain
+
 #
 # def slice_interior_axis(u: Field, axis: int = 0):
 #     assert axis <= len(u.domain.Nx)
