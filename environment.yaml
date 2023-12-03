@@ -1,5 +1,6 @@
 name: somax
 channels:
+  - defaults
   - conda-forge
 dependencies:
   - python=3.11
@@ -8,15 +9,20 @@ dependencies:
   - scipy # Scientific Computing
   - conda-forge::xarray # Data structures
   - pandas # Data structure
+  - dask
+  - distributed
+  - jupyterlab
+  - nodejs
+  - conda-forge::jax
+  - conda-forge::jaxlib=*=*cuda*
   - scikit-learn # Machine Learning
   # PLOTTING LIBRARY
   - matplotlib # standard plotting library
   - seaborn # Stats viz library
   # Storage
   - conda-forge::netCDF4
+  - conda-forge::hdf5
   - conda-forge::zarr
-  # JAX
-  - conda-forge::jax
   # GUI
   - conda-forge::ipywidgets
   - ipykernel
@@ -24,6 +30,7 @@ dependencies:
   - pip
   - pip:
       # Jax framework
+      #- "jax[cpu]"
       - "git+https://github.com/jejjohnson/finitevolX.git"
       - "git+https://github.com/jejjohnson/fieldx.git"
       - einops
