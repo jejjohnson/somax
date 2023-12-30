@@ -156,30 +156,35 @@ def viscous_dissip(
     domain: Domain,
     params: QGParams,
     masks: MaskGrid,
+    capacitance_matrix,
 ) -> Float[Array, "Nz Nx Ny"]:
 
-    # harmonic dissipation
+    # harmonic dissipation (free slip; q=0 at the domain boundary)
     if params.a_2 != 0.:
-        q_pad = jnp.pad(
-            q,
-            pad_width=((0, 0), (1, 1), (1, 1)),
-            mode="constant",
-            constant_values=0.0,
-        )
-        q_har = laplacian_batch(q_pad, domain.dx)
-        dq += params.a_2 * q_har
-
+        if capacitance_matrix == None:
+            q_pad = jnp.pad(
+                -q,
+                pad_width=((0, 0), (1, 1), (1, 1)),
+                mode="symmetric",
+            )
+            q_pad = q_pad.at[...,1:-1,1:-1].set(q)
+            q_har = laplacian_batch(q_pad, domain.dx)
+            dq += params.a_2 * q_har
+        else:
+            raise NotImplementedError("Dissipation is not implemented for non-rectangular domains.")
+    
     # biharmonic dissipation
     if params.a_4 != 0.:
-        q_pad = jnp.pad(
-            q,
-            pad_width=((0, 0), (2, 2), (2, 2)),
-            mode="constant",
-            constant_values=0.0,
-        )
-        q_har = laplacian_batch(q_pad, domain.dx)
-        q_bihar = laplacian_batch(q_har, domain.dx)
-        dq -= params.a_4 * q_bihar
+        raise NotImplementedError("Biharmonic dissipation is not implemented.")
+        # q_pad = jnp.pad(
+        #     q,
+        #     pad_width=((0, 0), (2, 2), (2, 2)),
+        #     mode="constant",
+        #     constant_values=0.0,
+        # )
+        # q_har = laplacian_batch(q_pad, domain.dx)
+        # q_bihar = laplacian_batch(q_har, domain.dx)
+        # dq -= params.a_4 * q_bihar
 
     dq *= masks.center.values
     
@@ -194,6 +199,7 @@ def equation_of_motion(
     layer_domain: LayerDomain,
     forcing_fn: Callable,
     masks=None,
+    capacitance_matrix=None,
 ) -> Array:
     
     # calculate advection
@@ -220,7 +226,8 @@ def equation_of_motion(
         dq=dq, q=q, 
         domain=domain,
         params=params,
-        masks=masks
+        masks=masks,
+        capacitance_matrix=capacitance_matrix
     )
 
     # multiply by mask
