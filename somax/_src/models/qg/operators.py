@@ -158,15 +158,18 @@ def viscous_dissip(
     capacitance_matrix,
 ) -> Float[Array, "Nz Nx Ny"]:
 
+    y_coords = center_avg_2D(domain.grid_axis[-1])
+    f_y = params.beta * (y_coords - params.y0)
+    
     # harmonic dissipation (free slip; q=0 at the domain boundary)
     if params.a_2 != 0.:
         if capacitance_matrix == None:
             q_pad = jnp.pad(
-                -q,
+                -(q - f_y),    # remove beta-plane vorticity
                 pad_width=((0, 0), (1, 1), (1, 1)),
                 mode="symmetric",
             )
-            q_pad = q_pad.at[...,1:-1,1:-1].set(q)
+            q_pad = q_pad.at[...,1:-1,1:-1].set(q - f_y)
             q_har = laplacian_batch(q_pad, domain.dx)
             dq += params.a_2 * q_har
         else:
