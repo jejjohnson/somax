@@ -31,9 +31,9 @@ from somax._src.models.qg.elliptical import (
     compute_homogeneous_solution,
 )
 from somax._src.models.qg.operators import (
-    advection_rhs,
     calculate_potential_vorticity,
-    qg_rhs,
+    calculate_psi_from_pv,
+    equation_of_motion
 )
 from somax._src.models.qg.forcing import calculate_wind_forcing, calculate_bottom_drag
 from somax._src.models.qg.params import QGParams
@@ -50,7 +50,8 @@ def plot_field(field):
     for i in range(num_axis):
         pts = ax[i].imshow(field[i].T, origin="lower", cmap="coolwarm")
         plt.colorbar(pts)
-
+        ax[i].set_aspect('equal')
+    
     plt.tight_layout()
     plt.show()
 
@@ -64,7 +65,7 @@ Nx, Ny = 256, 256
 # Lx, Ly = 3840.0e3, 4800.0e3
 Lx, Ly = 5_120.0e3, 5_120.0e3
 
-dx, dy = Lx / Nx, Ly / Ny
+dx, dy = Lx / (Nx-1), Ly / (Ny-1)
 
 xy_domain = Domain(
     xmin=(0.0, 0.0), xmax=(Lx, Ly), Lx=(Lx, Ly), Nx=(Nx, Ny), dx=(dx, dy)
@@ -161,21 +162,50 @@ bottom_drag = calculate_bottom_drag(
 )
 
 wind_forcing = calculate_wind_forcing(
-    domain=xy_domain,
+    domain=xy_domaini,
+    params=params,
     H_0=layer_domain.heights[0],
     tau0=0.08 / 1_000.0,
 )
 
-dq, dpsi = qg_rhs(
-    q=q,
-    psi=psi0,
-    domain=xy_domain,
-    params=params,
+def forcing_fn(
+    psi: Float[Array, "Nz Nx Ny"],
+    dq: Float[Array, "Nz Nx-1 Ny-1"],
+    domain: Domain,
+    layer_domain: LayerDomain,
+    params: QGParams,
+    masks: MaskGrid,
+) -> Float[Array, "Nz Nx Ny"]:
+    
+    # add wind forcing
+    dq = dq.at[0].add(wind_forcing)
+    
+    # calculate bottom drag
+    bottom_drag = calculate_bottom_drag(
+        psi=psi, domain=domain,
+        H_z=layer_domain.heights[-1],
+        delta_ek=params.delta_ek,
+        f0=params.f0,
+        masks_psi=masks.node
+    )
+    
+
+    dq = dq.at[-1].add(bottom_drag)
+    
+    return dq
+
+dq = equation_of_motion(
+    q=q0, psi=psi0, params=params,
+    domain=xy_domain, layer_domain=layer_domain,
+    forcing_fn=forcing_fn,
+    masks=masks
+)
+
+dpsi = calculate_psi_from_pv(
+    q=dq,
     layer_domain=layer_domain,
-    dst_sol=dst_sol,
-    wind_forcing=wind_forcing,
-    bottom_drag=bottom_drag,
-    masks=masks,
+    mask_node=masks.node,
+    dst_sol=dst_sol
 )
 
 
@@ -195,21 +225,27 @@ class State(eqx.Module):
 
 
 def vector_field(t: float, state: State, args) -> State:
-    dq, dpsi = qg_rhs(
-        q=state.q,
-        psi=state.psi,
-        domain=xy_domain,
-        params=params,
-        layer_domain=layer_domain,
-        dst_sol=dst_sol,
-        wind_forcing=wind_forcing,
-        bottom_drag=bottom_drag,
-        masks=masks,
+    
+    dq = equation_of_motion(
+        q=state.q, psi=state.psi, params=params,
+        domain=xy_domain, layer_domain=layer_domain,
+        forcing_fn=forcing_fn,
+        masks=masks
     )
 
+    dpsi = calculate_psi_from_pv(
+        q=dq,
+        params=params,
+        domain=xy_domain,
+        layer_domain=layer_domain,
+        mask_node=masks.node,
+        dst_sol=dst_sol,
+        include_beta=True
+    )
+    
     state = eqx.tree_at(lambda x: x.q, state, dq)
     state = eqx.tree_at(lambda x: x.psi, state, dpsi)
-
+    
     return state
 
 
