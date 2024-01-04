@@ -98,7 +98,8 @@ heights = [400.0, 1_100.0, 2_600.0]
 reduced_gravities = [0.025, 0.0125]
 
 # initialize layer domain
-layer_domain = LayerDomain(heights, reduced_gravities, correction=False)
+with jax.default_device(jax.devices("cpu")[0]):
+    layer_domain = LayerDomain(heights, reduced_gravities, correction=False)
 
 # ====================================
 # DST ELLIPTICAL SOLVER

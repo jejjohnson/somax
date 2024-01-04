@@ -150,6 +150,50 @@ def batch_advection_rhs(q, psi, dx, dy, num_pts, method, masks_u, masks_v):
     return fn(q, psi, dx, dy, num_pts, method, masks_u, masks_v)
 
 
+def viscous_dissip(
+    dq: Float[Array, "Nz Nx-1 Ny-1"],
+    q: Float[Array, "Nz Nx-1 Ny-1"],
+    domain: Domain,
+    params: QGParams,
+    masks: MaskGrid,
+    capacitance_matrix,
+) -> Float[Array, "Nz Nx Ny"]:
+
+    y_coords = center_avg_2D(domain.grid_axis[-1])
+    f_y = params.beta * (y_coords - params.y0)
+    
+    # harmonic dissipation (free slip; q=0 at the domain boundary)
+    if params.a_2 != 0.:
+        if capacitance_matrix == None:
+            q_pad = jnp.pad(
+                -(q - f_y),    # remove beta-plane vorticity
+                pad_width=((0, 0), (1, 1), (1, 1)),
+                mode="symmetric",
+            )
+            q_pad = q_pad.at[...,1:-1,1:-1].set(q - f_y)
+            q_har = laplacian_batch(q_pad, domain.dx)
+            dq += params.a_2 * q_har
+        else:
+            raise NotImplementedError("Dissipation is not implemented for non-rectangular domains.")
+    
+    # biharmonic dissipation
+    if params.a_4 != 0.:
+        raise NotImplementedError("Biharmonic dissipation is not implemented.")
+        # q_pad = jnp.pad(
+        #     q,
+        #     pad_width=((0, 0), (2, 2), (2, 2)),
+        #     mode="constant",
+        #     constant_values=0.0,
+        # )
+        # q_har = laplacian_batch(q_pad, domain.dx)
+        # q_bihar = laplacian_batch(q_har, domain.dx)
+        # dq -= params.a_4 * q_bihar
+
+    dq *= masks.center.values
+    
+    return dq
+
+
 def equation_of_motion(
     q: Array,
     psi: Array,
@@ -158,6 +202,7 @@ def equation_of_motion(
     layer_domain: LayerDomain,
     forcing_fn: Callable,
     masks=None,
+    capacitance_matrix=None,
 ) -> Array:
     
     # calculate advection
@@ -177,6 +222,15 @@ def equation_of_motion(
         layer_domain=layer_domain,
         params=params, 
         masks=masks
+    )
+
+    # add dissipation (harmonic + biharmonic)
+    dq = viscous_dissip(
+        dq=dq, q=q, 
+        domain=domain,
+        params=params,
+        masks=masks,
+        capacitance_matrix=capacitance_matrix
     )
 
     # multiply by mask
