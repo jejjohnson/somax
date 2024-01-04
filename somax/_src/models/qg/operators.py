@@ -240,13 +240,21 @@ def equation_of_motion(
 
 def calculate_psi_from_pv(
     q: Float[Array, "Nx-1 Ny-1"],
+    params: QGParams,
+    domain: Domain,
     layer_domain: LayerDomain,
     mask_node: NodeMask,
-    dst_sol: DSTSolution,
+    dst_sol: DSTSolution,    
+    include_beta=False,
 ) -> Float[Array, "Nx Ny"]:
     
     # get interior points (cell verticies interior)
-    q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q)
+    if include_beta:
+        q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q)
+    else:
+        y_coords = center_avg_2D(domain.grid_axis[-1])
+        f_y = params.beta * (y_coords - params.y0)
+        q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q - f_y)
     
     # calculate helmholtz rhs
     helmholtz_rhs: Float[Array, "Nz Nx Ny"] = jnp.einsum(
