@@ -5,6 +5,7 @@ from fieldx._src.domain.domain import Domain
 from finitevolx import (
     MaskGrid,
     NodeMask,
+    y_avg_2D,
     center_avg_2D,
     divergence,
     geostrophic_gradient,
@@ -73,6 +74,44 @@ def calculate_potential_vorticity(
     return q
 
 
+def det_jacobian(f, g, dx, dy):
+    """Arakawa discretisation of Jacobian J(f,g).
+    Scalar fields f and g must have the same dimension.
+    Grid is regular and dx = dy."""
+    
+    dx_f = f[..., 2:, :] - f[..., :-2, :]
+    dx_g = g[..., 2:, :] - g[..., :-2, :]
+    dy_f = f[..., 2:] - f[..., :-2]
+    dy_g = g[..., 2:] - g[..., :-2]
+    
+    return (
+        (
+            dx_f[..., 1:-1] * dy_g[..., 1:-1, :] 
+            - dx_g[..., 1:-1] * dy_f[..., 1:-1, :]
+        )
+        + (
+            (
+                f[..., 2:, 1:-1] * dy_g[..., 2:, :]
+                - f[..., :-2, 1:-1] * dy_g[..., :-2, :]
+            )
+            - (
+                f[..., 1:-1, 2:] * dx_g[..., 2:] 
+                - f[..., 1:-1, :-2] * dx_g[..., :-2]
+              )
+        )
+        + (
+            (
+                g[..., 1:-1, 2:] * dx_f[..., 2:] 
+                - g[..., 1:-1, :-2] * dx_f[..., :-2]
+            )
+            - (
+                g[..., 2:, 1:-1] * dy_f[..., 2:, :]
+                - g[..., :-2, 1:-1] * dy_f[..., :-2, :]
+              )
+          )
+    ) / (12.0 * dx * dy)
+
+
 def advection_rhs(
     q: Float[Array, "Nx-1 Ny-1"],
     psi: Float[Array, "Nx Ny"],
@@ -110,36 +149,53 @@ def advection_rhs(
 
     """
 
-    # calculate velocities
-    # u, v = -∂yΨ, ∂xΨ
-    u, v = geostrophic_gradient(u=psi, dx=dx, dy=dy)
-
-    # calculate fluxes
-    # Note: take interior points of velocities (+ masks)
-    q_flux_on_u: Float[Array, "Nx-2 Ny-1"] = reconstruct(
-        q=q,
-        u=u[1:-1,:],
-        dim=0,
-        u_mask=masks_u[1:-1, :] if masks_u is not None else None,
-        method=method,
-        num_pts=num_pts,
-    )
-    q_flux_on_v: Float[Array, "Nx-1 Ny-2"] = reconstruct(
-        q=q,
-        u=v[:,1:-1],
-        dim=1,
-        u_mask=masks_v[:, 1:-1] if masks_v is not None else None,
-        method=method,
-        num_pts=num_pts,
-    )
-
-    # pad arrays to comply with velocities (cell faces)
-    q_flux_on_u: Float[Array, "Nx Ny-1"] = jnp.pad(q_flux_on_u, pad_width=((1, 1), (0, 0)))
-    q_flux_on_v: Float[Array, "Nx-1 Ny"] = jnp.pad(q_flux_on_v, pad_width=((0, 0), (1, 1)))
-
-    # calculate divergence
-    # ∂x(flux_u) + ∂y(flux_v) = div(flux_u, flux_v)
-    div_flux: Float[Array, "Nx-1 Ny-1"] = divergence(q_flux_on_u, q_flux_on_v, dx, dy)
+    if method == 'arakawa':
+        q_pad = jnp.pad(
+                -q,  
+                pad_width=((1, 1), (1, 1)),
+                mode="symmetric",
+        )
+        q_pad = q_pad.at[..., 1:-1, 1:-1].set(q)
+        q_pad = q_pad.at[..., 0, 0].set(q[ 0, 0])
+        q_pad = q_pad.at[..., 0,-1].set(q[ 0,-1])
+        q_pad = q_pad.at[...,-1, 0].set(q[-1, 0])
+        q_pad = q_pad.at[...,-1,-1].set(q[-1,-1])
+        div_flux: Float[Array, "Nx-2 Ny-2"] = det_jacobian(psi, center_avg_2D(q_pad), dx=dx, dy=dy)
+        div_flux: Float[Array, "Nx-1 Ny-1"] = center_avg_2D(jnp.pad(div_flux, pad_width=((1, 1), (1, 1)), 
+                                                                    mode="edge")
+                                                           )
+        
+    else:
+        # calculate velocities
+        # u, v = -∂yΨ, ∂xΨ
+        u, v = geostrophic_gradient(u=psi, dx=dx, dy=dy)
+    
+        # calculate fluxes
+        # Note: take interior points of velocities (+ masks)
+        q_flux_on_u: Float[Array, "Nx-2 Ny-1"] = reconstruct(
+            q=q,
+            u=u[1:-1,:],
+            dim=0,
+            u_mask=masks_u[1:-1, :] if masks_u is not None else None,
+            method=method,
+            num_pts=num_pts,
+        )
+        q_flux_on_v: Float[Array, "Nx-1 Ny-2"] = reconstruct(
+            q=q,
+            u=v[:,1:-1],
+            dim=1,
+            u_mask=masks_v[:, 1:-1] if masks_v is not None else None,
+            method=method,
+            num_pts=num_pts,
+        )
+    
+        # pad arrays to comply with velocities (cell faces)
+        q_flux_on_u: Float[Array, "Nx Ny-1"] = jnp.pad(q_flux_on_u, pad_width=((1, 1), (0, 0)))
+        q_flux_on_v: Float[Array, "Nx-1 Ny"] = jnp.pad(q_flux_on_v, pad_width=((0, 0), (1, 1)))
+    
+        # calculate divergence
+        # ∂x(flux_u) + ∂y(flux_v) = div(flux_u, flux_v)
+        div_flux: Float[Array, "Nx-1 Ny-1"] = divergence(q_flux_on_u, q_flux_on_v, dx, dy)
 
     return - div_flux
 
@@ -245,16 +301,20 @@ def calculate_psi_from_pv(
     layer_domain: LayerDomain,
     mask_node: NodeMask,
     dst_sol: DSTSolution,    
-    include_beta=False,
+    remove_beta=True,
 ) -> Float[Array, "Nx Ny"]:
     
     # get interior points (cell verticies interior)
-    if include_beta:
-        q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q)
-    else:
+    if remove_beta == True:
         y_coords = center_avg_2D(domain.grid_axis[-1])
         f_y = params.beta * (y_coords - params.y0)
         q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q - f_y)
+    # elif remove_beta == "v":
+    #     _, v = jax.vmap(geostrophic_gradient, in_axes=(0, None, None))(psi, domain.dx[-2], domain.dx[-1])
+    #     bv = params.beta * jax.vmap(y_avg_2D)(v)
+    #     q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q - bv)
+    else:
+        q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q)
     
     # calculate helmholtz rhs
     helmholtz_rhs: Float[Array, "Nz Nx Ny"] = jnp.einsum(
