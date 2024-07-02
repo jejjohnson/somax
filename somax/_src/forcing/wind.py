@@ -1,8 +1,8 @@
 import math
 
-from fieldx._src.domain.domain import Domain
+from somax.domain import Domain
 import finitediffx as fdx
-from finitevolx import (
+from somax.interp import (
     avg_pool,
     center_avg_2D,
 )
