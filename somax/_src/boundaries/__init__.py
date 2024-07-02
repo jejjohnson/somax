@@ -31,6 +31,10 @@ def periodic_boundaries(u, pad_width):
 
 no_flow_boundaries = zero_boundaries
 no_energy_boundaries = zero_boundaries
-no_flux_boundaries = zero_boundaries
 no_slip_boundaries = zero_boundaries
 free_slip_boundaries = zero_gradient_boundaries
+# NOTE: No Flux is Tricky...
+# Tak - flip the sign and add the same value
+# E - we need a zero average boundary
+# see viscosity code from Tak
+no_flux_boundaries = zero_boundaries

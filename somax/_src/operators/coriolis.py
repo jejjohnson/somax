@@ -3,14 +3,14 @@ from typing import Optional
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from finitevolx._src.constants import OMEGA, R_EARTH
+from somax._src.constants import OMEGA, R_EARTH
 
 
 def coriolis_fn(Y: Array, f0: Array | float=9.375e-5, beta: Array | float=1.754e-11, y0: Optional[float]=None) -> Array:
     """Beta-Plane Approximation for the coriolis parameter
 
     Eq:
-        f = f₀ - β(y - y₀)
+        f = f₀ + β(y - y₀)
 
     where:
         f₀ = 2Ω sin θ₀
@@ -30,11 +30,11 @@ def coriolis_fn(Y: Array, f0: Array | float=9.375e-5, beta: Array | float=1.754e
         y0 = jnp.mean(Y)
 
     # calculate coriolis parameter
-    f = f0 - beta * (Y - y0)
+    f = f0 + beta * (Y - y0)
 
     return f
 
-def beta_plane(lat: Array, omega: float = OMEGA, radius: float = R_EARTH) -> Array:
+def beta_param(lat: Array, omega: float = OMEGA, radius: float = R_EARTH) -> Array:
     """Beta-Plane Approximation coefficient from the mean latitude
 
     Equation:
