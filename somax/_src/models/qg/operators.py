@@ -295,16 +295,20 @@ def calculate_psi_from_pv(
     layer_domain: LayerDomain,
     mask_node: NodeMask,
     dst_sol: DSTSolution,    
-    include_beta=False,
+    remove_beta=True,
 ) -> Float[Array, "Nx Ny"]:
     
     # get interior points (cell verticies interior)
-    if include_beta:
-        q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q)
-    else:
+    if remove_beta == True:
         y_coords = center_avg_2D(domain.grid_axis[-1])
         f_y = params.beta * (y_coords - params.y0)
         q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q - f_y)
+    # elif remove_beta == "v":
+    #     _, v = jax.vmap(geostrophic_gradient, in_axes=(0, None, None))(psi, domain.dx[-2], domain.dx[-1])
+    #     bv = params.beta * jax.vmap(y_avg_2D)(v)
+    #     q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q - bv)
+    else:
+        q_i: Float[Array, "Nx-2 Ny-2"] = jax.vmap(center_avg_2D)(q)
     
     # calculate helmholtz rhs
     helmholtz_rhs: Float[Array, "Nz Nx Ny"] = jnp.einsum(
