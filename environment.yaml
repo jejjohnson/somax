@@ -4,42 +4,50 @@ channels:
 dependencies:
   - python=3.11
   # Standard Libraries
-  - numpy # Numerical Linear Algebra
-  - scipy # Scientific Computing
-  - conda-forge::xarray # Data structures
-  - pandas # Data structure
-  - scikit-learn # Machine Learning
-  # PLOTTING LIBRARY
-  - matplotlib # standard plotting library
-  - seaborn # Stats viz library
-  # Storage
-  - conda-forge::netCDF4
-  - conda-forge::zarr
+  - numpy             # Numerical Linear Algebra
+  - scipy             # Scientific Computing
+  - xarray            # Geoscience Data structures
+  - pandas            # Unstructed Data structure
+  - geopandas         # Geoscience Unstructured Data
+  - scikit-learn      # Machine Learning
+  - dask
+  - distributed
+  # CUDA Specifics
+  - cuda-libraries    # cuda meta-package
+  - cudnn             # specifically for cudnn
+  - cuda-nvcc         # compatible nvidia C compiler is available
   # JAX
-  - conda-forge::jax
+  - jaxlib
+  - cuda-version      # pulling packages that are CUDA12 compatible
+  - jax # ==0.4.26
+  # PLOTTING LIBRARY
+  - matplotlib        # standard plotting library
+  - seaborn           # Stats viz library
+  # Storage
+  - netCDF4
+  - hdf5
+  - zarr
   # GUI
-  - conda-forge::ipywidgets
+  - nodejs
+  - jupyterlab
+  - ipywidgets
   - ipykernel
   - conda-forge::tqdm
   - pip
   - pip:
-      # Jax framework
-      - "git+https://github.com/jejjohnson/finitevolX.git"
-      - "git+https://github.com/jejjohnson/fieldx.git"
-      - interpax
-      - "git+https://github.com/adam-coogan/jaxinterp2d.git@master"
       - einops
       - jaxtyping
       - equinox
       - kernex
       - FiniteDiffX
+      - interpax
+      - quadax
+      - "git+https://github.com/adam-coogan/jaxinterp2d.git@master"
       # deep learning
       - diffrax
       # optimization
       - optax
       - jaxopt
-      # probabilistic
-      - dynamax
       # OTHER
       - plum-dispatch
       # formatting

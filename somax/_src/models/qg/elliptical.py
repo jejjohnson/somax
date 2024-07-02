@@ -2,7 +2,7 @@ from typing import Optional
 
 import einops
 import equinox as eqx
-from fieldx._src.domain.domain import Domain
+from somax.domain import Domain
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array

@@ -1,10 +1,9 @@
 import math
 
-from fieldx._src.domain.domain import Domain
-from finitevolx import (
-    center_avg_2D,
-    laplacian,
-)
+from somax._src.domain.domain import Domain
+from somax.interp import center_avg_2D
+from somax.operators import laplacian
+
 import jax
 import jax.numpy as jnp
 from jaxtyping import (
