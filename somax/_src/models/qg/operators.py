@@ -1,4 +1,3 @@
-import functools as ft
 from typing import Optional, Callable
 
 import einops
@@ -17,7 +16,7 @@ from jaxtyping import (
 from somax._src.models.qg.domain import LayerDomain
 from somax._src.models.qg.elliptical import DSTSolution
 from somax._src.models.qg.params import QGParams
-from somax._src.operators.dst import (
+from somax._src.operators.functional.dst import (
     inverse_elliptic_dst,
     inverse_elliptic_dst_cmm,
 )

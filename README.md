@@ -36,11 +36,10 @@ This makes use of the `fieldx` package which defines custom spatiotemporal conta
 ## Key Features
 
 **Models**.
-* [ ] 
-* [ ] Linear Shallow Water Model
-* [ ] Quasi-Geostrophic Model
-* [ ] Shallow Water Model
-* [ ] Multi-Layer Quasi-Geostrophic Modle
+* [X] Linear Shallow Water Model
+* [X] Quasi-Geostrophic Model
+* [X] Shallow Water Model
+* [X] Multi-Layer Quasi-Geostrophic Model
 * [ ] Multi-Layer Shallow Water Model
 
 **Elliptical Solvers**.
