@@ -305,7 +305,8 @@ def main(
                 "method": method,
                 "num_pts": num_pts,
                 "resolution": resolution,
-                "time": time
+                "time": time,
+                "dt": dt
             }
         )
 
@@ -318,24 +319,57 @@ def main(
     num_days = 360
     tmax = pd.to_timedelta(num_days, unit="days").total_seconds()
     num_save = 2
+    num_steps = int(tmax / dt)
+
+    logger.info(f"Number of Steps per year: {num_steps}...")
     
     from somax.domain import TimeDomain
     
     t_domain = TimeDomain(tmin=tmin, tmax=tmax, dt=dt)
     ts = jnp.linspace(tmin, tmax, num_save)
-    saveat = dfx.SaveAt(ts=ts)
+    def ssrk3_update_stage_1(x, x0, dt):
+        # self.q += self.dt * dq_0
+        return x + dt*x0
     
-    # Euler, Constant StepSize
-    # solver = dfx.Tsit5()
-    solver = dfx.Heun()
-    # solver = dfx.Bosh3()
+    def ssrk3_update_stage_2(x, x0, x1, dt):
+        # self.q += (self.dt/4)*(dq_1 - 3*dq_0)
+        return x + (dt/4) * (x1 - 3*x0)
     
-    # Tolerances
-    if stepsize_controller:
-        stepsize_controller = dfx.PIDController(rtol=1e-4, atol=1e-4)
-    else:
-        stepsize_controller = dfx.ConstantStepSize()
+    def ssrk3_update_stage_3(x, x0, x1, x2, dt):
+        # self.q += (self.dt/12)*(8*dq_2 - dq_1 - dq_0)
+        return x + (dt/12)*(8*x2 - x1 - x0)
+
+    def timestepper_ssrk3(t, state, *args):
+        """ Time itegration with SSP-RK3 scheme."""
     
+        # compute update (round 1)
+        state_1 = vector_field(t, state, None)
+        
+        q = ssrk3_update_stage_1(state.q, state_1.q, dt)
+        psi = ssrk3_update_stage_1(state.psi, state_1.psi, dt)
+        
+        state = eqx.tree_at(lambda x: x.q, state, q)
+        state = eqx.tree_at(lambda x: x.psi, state, psi)
+    
+        # compute update (round 2)
+        state_2 = vector_field(t, state, None)
+        
+        q = ssrk3_update_stage_2(state.q, state_1.q, state_2.q, dt)
+        psi = ssrk3_update_stage_2(state.psi, state_1.psi, state_2.psi, dt)
+        
+        state = eqx.tree_at(lambda x: x.q, state, q)
+        state = eqx.tree_at(lambda x: x.psi, state, psi)
+    
+        # compute update (round 3)
+        state_3 = vector_field(t, state, None)
+        
+        q = ssrk3_update_stage_3(state.q, state_1.q, state_2.q, state_3.q, dt)
+        psi = ssrk3_update_stage_3(state.psi, state_1.psi, state_2.psi, state_3.psi, dt)
+        
+        state = eqx.tree_at(lambda x: x.q, state, q)
+        state = eqx.tree_at(lambda x: x.psi, state, psi)
+    
+        return state
     
     psi0 = jnp.zeros(shape=(layer_domain.Nz,) + xy_domain.Nx)
     # psi0 = np.load("/Users/eman/code_projects/data/qg_runs/psi_0.986y_360.00d_octogonal.npy")
@@ -347,13 +381,21 @@ def main(
         masks_q=masks.center
     )
     
-    state_init = State(q=q0, psi=psi0)
+    state = State(q=q0, psi=psi0)
     
     
-    from tqdm.auto import trange
+    from tqdm.auto import trange, tqdm
     import time
+    from functools import partial
     
-    pbar = trange(num_years)
+    
+    
+    
+    # jit to make it go brrrr
+    fn = jax.jit(timestepper_ssrk3)
+
+    pbar_year = trange(num_years, leave=True)
+    logger.info(f"Starting Time Step...")
     logger.info(f"Starting Time Step...")
 
     t0_all = time.time()
@@ -365,36 +407,23 @@ def main(
     fname = output_dir.joinpath(f"soln_0y_r{resolution}_d{diffusivity}_{method}_pts{num_pts}.nc")
     ds.to_netcdf(fname, engine="netcdf4")
     
-    for iyear in pbar:
-    
+    for iyear in pbar_year:
+        pbar_year.set_description(f"Year - {iyear}")
+        
+        pbar_timestep = trange(num_steps, leave=False)
         t0 = time.time()
+        for istep in pbar_timestep:
+            state = fn(0, state, None)
     
-        pbar.set_description(f"Year - {iyear}")
-    
-        # integration
-        sol = dfx.diffeqsolve(
-            terms=dfx.ODETerm(vector_field),
-            solver=solver,
-            t0=tmin,
-            t1=tmax,
-            dt0=dt,
-            y0=state_init,
-            saveat=saveat,
-            args=None,
-            stepsize_controller=stepsize_controller,
-            max_steps=None,
-        )
         t1 = time.time() - t0
         logger.info(f"Year - {iyear+1} | Time Taken - {t1:.2f} secs")
-
-        state_init = State(q=sol.ys.q[-1], psi=sol.ys.psi[-1])
-
         
         logger.info("Saving...")
-        ds = create_dataset(sol.ys.psi[-1], sol.ys.q[-1], iyear+1, t1)
+        # print(state.psi.shape, state.q.shape)
+        ds = create_dataset(state.psi, state.q, iyear+1, t1)
         
         logger.info("Creating Dataset...")
-        fname = output_dir.joinpath(f"soln_{iyear+1:03}y_r{resolution}_d{diffusivity}_{method}_pts{num_pts}.nc")
+        fname = output_dir.joinpath(f"soln_{iyear+1}y_r{resolution}_d{diffusivity}_{method}_pts{num_pts}.nc")
         ds.to_netcdf(fname, engine="netcdf4")
 
     t1 = time.time() - t0_all
@@ -402,7 +431,7 @@ def main(
     logger.info(f"Total Time Taken - {t1:.2f} secs")
 
 
-            
+
 
 if __name__ == '__main__':
     typer.run(main)
