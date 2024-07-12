@@ -1,6 +1,7 @@
 from typing import Iterable, Union
 from jaxtyping import Array
-from somax._src.boundaries import padding
+from somax._src.boundaries.base import padding
+
 
 def free_slip_padding(u, axes: Iterable[Union[str | None]]):
     """This function pads the array with edge values to

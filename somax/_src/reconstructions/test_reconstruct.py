@@ -125,7 +125,9 @@ def test_reconstruct_nomask_u(method, num_pts):
     u = jax.lax.slice_in_dim(u, axis=0, start_index=1, limit_index=-1)
 
     # do flux
-    flux = reconstruct(q=q, u=u, u_mask=None, dim=0, method=method, num_pts=num_pts)
+    flux = reconstruct(
+        q=q, u=u, u_mask=None, dim=0, method=method, num_pts=num_pts
+    )
 
     msg = "Incorrect shape..."
     msg += f"Shape: {flux.shape} | {u.shape}"
@@ -141,7 +143,9 @@ def test_reconstruct_nomask_v(method, num_pts):
     v = jax.lax.slice_in_dim(v, axis=1, start_index=1, limit_index=-1)
 
     # do flux
-    flux = reconstruct(q=q, u=v, u_mask=None, dim=1, method=method, num_pts=num_pts)
+    flux = reconstruct(
+        q=q, u=v, u_mask=None, dim=1, method=method, num_pts=num_pts
+    )
 
     msg = "Incorrect shape..."
     msg += f"Shape: {flux.shape} | {v.shape}"
@@ -158,7 +162,9 @@ def test_reconstruct_mask_u(method, num_pts):
     u_mask = MASKS_RECT.face_u[1:-1]
 
     # do flux
-    flux = reconstruct(q=q, u=u, u_mask=u_mask, dim=0, method=method, num_pts=num_pts)
+    flux = reconstruct(
+        q=q, u=u, u_mask=u_mask, dim=0, method=method, num_pts=num_pts
+    )
 
     true_flux = flux * u_mask.values
     msg = "Incorrect shape..."
@@ -176,7 +182,9 @@ def test_reconstruct_mask_v(method, num_pts):
     v_mask = MASKS_RECT.face_v[:, 1:-1]
 
     # do flux
-    flux = reconstruct(q=q, u=v, u_mask=v_mask, dim=1, method=method, num_pts=num_pts)
+    flux = reconstruct(
+        q=q, u=v, u_mask=v_mask, dim=1, method=method, num_pts=num_pts
+    )
 
     true_flux = flux * v_mask.values
 

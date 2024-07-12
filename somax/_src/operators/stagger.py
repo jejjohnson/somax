@@ -1,14 +1,8 @@
 import functools as ft
 import typing as tp
 
-from somax.domain import Domain
+from somax._src.domain.base import Domain
 
-# # from jaxsw._src.domain import base_v2 as domain_utils
-# from fieldx._src.field.field import Field
-# # from jaxsw._src.operators.functional import grid as F_grid
-# import finitediffx as fdx
-#
-#
 DIRECTIONS = {
     "right": (1.0, 1.0),
     "left": (-1.0, -1.0),
@@ -82,10 +76,14 @@ def batch_domain_limits_transform(
     msg += f"dx: {len(dx)} | "
     msg += f"direction: {len(direction)} | "
     msg += f"stagger: {len(stagger)}"
-    assert len(xmin) == len(xmax) == len(dx) == len(direction) == len(stagger), msg
+    assert (
+        len(xmin) == len(xmax) == len(dx) == len(direction) == len(stagger)
+    ), msg
 
     limits = [
-        domain_limits_transform(imin, imax, idx, iLx, iNx, idirection, istagger)
+        domain_limits_transform(
+            imin, imax, idx, iLx, iNx, idirection, istagger
+        )
         for imin, imax, idx, iLx, iNx, idirection, istagger in zip(
             xmin, xmax, dx, Lx, Nx, direction, stagger
         )
@@ -114,7 +112,13 @@ def stagger_domain(
 
     # change domain limits
     xmin, xmax, Nx, Lx = batch_domain_limits_transform(
-        domain.xmin, domain.xmax, domain.dx, domain.Lx, domain.Nx, direction, stagger
+        domain.xmin,
+        domain.xmax,
+        domain.dx,
+        domain.Lx,
+        domain.Nx,
+        direction,
+        stagger,
     )
 
     domains = [

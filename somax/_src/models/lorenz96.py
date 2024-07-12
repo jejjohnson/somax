@@ -59,7 +59,9 @@ class Lorenz96(DynamicalSystem):
     def __init__(self, advection: bool = True):
         self.advection = advection
 
-    def equation_of_motion(self, t: float, state: L96State, args: PyTree) -> PyTree:
+    def equation_of_motion(
+        self, t: float, state: L96State, args: PyTree
+    ) -> PyTree:
         # compute RHS
         x = state.x
         F = args.F

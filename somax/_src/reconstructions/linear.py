@@ -38,10 +38,17 @@ def linear_4pts(qmm: Array, qm: Array, qp: Array, qpp: Array) -> Array:
     qmm-----qm--x--qp-----qpp
 
     """
-    return -1.0 / 12.0 * qmm + 7.0 / 12.0 * qm + 7.0 / 12.0 * qp - 1.0 / 12.0 * qpp
+    return (
+        -1.0 / 12.0 * qmm
+        + 7.0 / 12.0 * qm
+        + 7.0 / 12.0 * qp
+        - 1.0 / 12.0 * qpp
+    )
 
 
-def linear_5pts_left(qmm: Array, qm: Array, q0: Array, qp: Array, qpp: Array) -> Array:
+def linear_5pts_left(
+    qmm: Array, qm: Array, q0: Array, qp: Array, qpp: Array
+) -> Array:
     """
     5-points linear left-biased stencil reconstruction
 
@@ -57,7 +64,9 @@ def linear_5pts_left(qmm: Array, qm: Array, q0: Array, qp: Array, qpp: Array) ->
     )
 
 
-def linear_5pts_right(qmm: Array, qm: Array, q0: Array, qp: Array, qpp: Array) -> Array:
+def linear_5pts_right(
+    qmm: Array, qm: Array, q0: Array, qp: Array, qpp: Array
+) -> Array:
     """
     5-points linear left-biased stencil reconstruction
 

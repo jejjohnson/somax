@@ -10,6 +10,7 @@
     * mass term: h --> u,v
     * momentum term: q --> uh,vh
 """
+
 from typing import NamedTuple
 
 import autoroot
@@ -48,7 +49,9 @@ dx, dy = 5e3, 5e3
 Lx, Ly = Nx * dx, Ny * dy
 
 # define domains - Arakawa C-Grid Configuration
-h_domain = Domain(xmin=(0.0, 0.0), xmax=(Lx, Ly), Lx=(Lx, Ly), Nx=(Nx, Ny), dx=(dx, dy))
+h_domain = Domain(
+    xmin=(0.0, 0.0), xmax=(Lx, Ly), Lx=(Lx, Ly), Nx=(Nx, Ny), dx=(dx, dy)
+)
 u_domain = Domain(
     xmin=(-0.5, 0.0),
     xmax=(Lx + 0.5 * dx, Ly),
@@ -140,7 +143,9 @@ def init_h0_jet(domain, u0):
     Lx, Ly = domain.Lx
     X, Y = domain.grid_axis
 
-    h_geostrophy = jnp.cumsum(-dy * x_avg_2D(u0) * coriolis_param / gravity, axis=1)
+    h_geostrophy = jnp.cumsum(
+        -dy * x_avg_2D(u0) * coriolis_param / gravity, axis=1
+    )
 
     h0 = (
         depth
@@ -148,7 +153,9 @@ def init_h0_jet(domain, u0):
         # make sure h0 is centered around depth
         - h_geostrophy.mean()
         # small perturbation
-        + 0.2 * jnp.sin(X / Lx * 10.0 * jnp.pi) * jnp.cos(Y / Ly * 8.0 * jnp.pi)
+        + 0.2
+        * jnp.sin(X / Lx * 10.0 * jnp.pi)
+        * jnp.cos(Y / Ly * 8.0 * jnp.pi)
     )
 
     return h0
@@ -189,7 +196,10 @@ def update_plot(t, h, u, v, ax):
     h, u, v = list(map(np.asarray, [h, u, v]))
     eta = h - depth
 
-    quiver_stride = (slice(1, -1, Nx // max_quivers), slice(1, -1, Ny // max_quivers))
+    quiver_stride = (
+        slice(1, -1, Nx // max_quivers),
+        slice(1, -1, Ny // max_quivers),
+    )
 
     ax.clear()
     cs = ax.pcolormesh(
@@ -232,7 +242,9 @@ def update_plot(t, h, u, v, ax):
 # Nonlinear Terms
 # ====================================
 def calculate_uvh_flux(
-    h: Float[Array, "Nx+2 Ny+2"], u: Float[Array, "Nx+1 Ny"], v: Float[Array, "Nx Ny+1"]
+    h: Float[Array, "Nx+2 Ny+2"],
+    u: Float[Array, "Nx+1 Ny"],
+    v: Float[Array, "Nx Ny+1"],
 ):
     """
     Eq:
@@ -241,10 +253,20 @@ def calculate_uvh_flux(
 
     # calculate h fluxes
     uh_flux: Float[Array, "Nx+1 Ny"] = reconstruct(
-        q=h[:, 1:-1], u=u, u_mask=masks.face_u, dim=0, num_pts=num_pts, method=method
+        q=h[:, 1:-1],
+        u=u,
+        u_mask=masks.face_u,
+        dim=0,
+        num_pts=num_pts,
+        method=method,
     )
     vh_flux: Float[Array, "Nx Ny+1"] = reconstruct(
-        q=h[1:-1, :], u=v, u_mask=masks.face_v, dim=1, num_pts=num_pts, method=method
+        q=h[1:-1, :],
+        u=v,
+        u_mask=masks.face_v,
+        dim=1,
+        num_pts=num_pts,
+        method=method,
     )
 
     # apply masks
@@ -255,7 +277,9 @@ def calculate_uvh_flux(
 
 
 def potential_vorticity(
-    h: Float[Array, "Nx Ny"], u: Float[Array, "Nx+1 Ny"], v: Float[Array, "Nx Ny+1"]
+    h: Float[Array, "Nx Ny"],
+    u: Float[Array, "Nx+1 Ny"],
+    v: Float[Array, "Nx Ny+1"],
 ):
     """
     Eq:
@@ -576,9 +600,15 @@ def iterate_shallow_water():
             h += dt * h_rhs
             first_step = False
         else:
-            u += dt * (adams_bashforth_a * u_rhs + adams_bashforth_b * u_rhs_old)
-            v += dt * (adams_bashforth_a * v_rhs + adams_bashforth_b * v_rhs_old)
-            h += dt * (adams_bashforth_a * h_rhs + adams_bashforth_b * h_rhs_old)
+            u += dt * (
+                adams_bashforth_a * u_rhs + adams_bashforth_b * u_rhs_old
+            )
+            v += dt * (
+                adams_bashforth_a * v_rhs + adams_bashforth_b * v_rhs_old
+            )
+            h += dt * (
+                adams_bashforth_a * h_rhs + adams_bashforth_b * h_rhs_old
+            )
         # #
         # h = enforce_boundaries(h, 'h')
         # u = enforce_boundaries(u, 'u')
@@ -607,8 +637,6 @@ if __name__ == "__main__":
             # u,v --> h
             u_on_h = center_avg_2D(u)
             v_on_h = center_avg_2D(v)
-
-
 
             # update plot
             update_plot(t, h, u_on_h, v_on_h, ax)

@@ -118,7 +118,9 @@ class Domain(eqx.Module):
 
         # get sliced coordinates
         # sliced_coords = [jax.lax.slice(idx, [islice.start], [slice.stop], [islice.step]) for idx, islice in zip(self.coords_axis, values)]
-        sliced_coords = [idx[islice] for idx, islice in zip(self.coords_axis, values)]
+        sliced_coords = [
+            idx[islice] for idx, islice in zip(self.coords_axis, values)
+        ]
 
         # change Nx
         Nx = list(map(lambda x: len(x), sliced_coords))
@@ -179,7 +181,9 @@ def init_domain_from_bounds_and_numpoints(
     return Domain(xmin=xmin, xmax=xmax, dx=dx, Nx=Nx, Lx=Lx)
 
 
-def init_domain_from_bounds_and_step(xmin: float, xmax: float, dx: float) -> int:
+def init_domain_from_bounds_and_step(
+    xmin: float, xmax: float, dx: float
+) -> int:
     """initialize 1d domain from bounds and step_size
     Eqs:
          Nx = 1 + ceil((x_max - x_min) / dx)

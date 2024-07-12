@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from finitevolx._src.interp.interp import (
+from somax._src.operators.interp import (
     avg_arithmetic,
     avg_geometric,
     avg_harmonic,

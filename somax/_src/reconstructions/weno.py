@@ -55,7 +55,9 @@ def weno_3pts_improved(qm: Array, q0: Array, qp: Array) -> Array:
     return qi_weno3
 
 
-def weno_5pts(qmm: Array, qm: Array, q0: Array, qp: Array, qpp: Array) -> Array:
+def weno_5pts(
+    qmm: Array, qm: Array, q0: Array, qp: Array, qpp: Array
+) -> Array:
     """
     5-points non-linear left-biased stencil reconstruction
 

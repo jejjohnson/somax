@@ -29,4 +29,7 @@ class SWMParams(eqx.Module):
         return jnp.sqrt(self.gravity * self.depth)
 
     def rossby_radius(self, Y: Float[Array, "Nx Ny"]):
-        return jnp.sqrt(self.gravity * self.depth) / self.coriolis_param(Y=Y).mean()
+        return (
+            jnp.sqrt(self.gravity * self.depth)
+            / self.coriolis_param(Y=Y).mean()
+        )

@@ -9,7 +9,7 @@ from jaxtyping import Array
 
 from somax._src.models.qg.domain import LayerDomain
 from somax._src.models.qg.params import QGParams
-from somax._src.operators.functional.dst import (
+from somax._src.operators.dst import (
     inverse_elliptic_dst,
     laplacian_dst,
 )

@@ -9,7 +9,7 @@ class State(eqx.Module):
     v: Array
 
 
-def enforce_boundaries(u, grid: str="u"):
+def enforce_boundaries(u, grid: str = "u"):
 
     return u
 

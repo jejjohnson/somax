@@ -1,5 +1,5 @@
-from somax._src.boundaries import padding
-from somax._src.boundaries import zero_boundaries
+from somax._src.boundaries.base import padding
+from somax._src.boundaries.base import zero_boundaries
 import jax.numpy as jnp
 
 
@@ -13,12 +13,12 @@ def wall_boundaries_2D(u, grid: str = "h"):
     if grid == "u":
         # ZONAL VELOCITY
         # wall boundaries, u(x=0)=u(x=Lx)=0
-        u = zero_boundaries(u[1:-1,:], ((1,1),(0,0)))
+        u = zero_boundaries(u[1:-1, :], ((1, 1), (0, 0)))
         u = wall_boundary_corners_2D(u)
     if grid == "v":
         # MERIDIONAL VELOCITY
         # wall boundaries, v(y=0)=v(y=Ly)=0
-        u = zero_boundaries(u[:,1:-1], ((0,0),(1,1)))
+        u = zero_boundaries(u[:, 1:-1], ((0, 0), (1, 1)))
         u = wall_boundary_corners_2D(u)
     if grid == "q":
         # POTENTIAL VORTICITY

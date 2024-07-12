@@ -9,7 +9,9 @@ def init_hat(domain: Domain) -> Array:
 
     u = jnp.ones((nx, ny))
 
-    u = u.at[int(0.5 / dx) : int(1 / dx + 1), int(0.5 / dy) : int(1 / dy + 1)].set(2.0)
+    u = u.at[
+        int(0.5 / dx) : int(1 / dx + 1), int(0.5 / dy) : int(1 / dy + 1)
+    ].set(2.0)
 
     return u
 

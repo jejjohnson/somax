@@ -89,7 +89,9 @@ def upwind_2pt_bnds(
     return qi_left_interior, qi_right_interior
 
 
-def upwind_3pt(q: Array, dim: int, method: str = "weno") -> tp.Tuple[Array, Array]:
+def upwind_3pt(
+    q: Array, dim: int, method: str = "weno"
+) -> tp.Tuple[Array, Array]:
     """creates the stencils for the upwind scheme
     - 3 pts inside domain
     Args:
@@ -131,7 +133,9 @@ def upwind_3pt(q: Array, dim: int, method: str = "weno") -> tp.Tuple[Array, Arra
     return qi_left_interior, qi_right_interior
 
 
-def upwind_3pt_bnds(q: Array, dim: int, method: str = "weno") -> tp.Tuple[Array, Array]:
+def upwind_3pt_bnds(
+    q: Array, dim: int, method: str = "weno"
+) -> tp.Tuple[Array, Array]:
     """creates the stencils for the upwind scheme
     - 3 pts inside domain
     Args:
@@ -170,7 +174,9 @@ def upwind_3pt_bnds(q: Array, dim: int, method: str = "weno") -> tp.Tuple[Array,
     return qi_left_interior, qi_right_interior
 
 
-def upwind_5pt(q: Array, dim: int, method: str = "weno") -> tp.Tuple[Array, Array]:
+def upwind_5pt(
+    q: Array, dim: int, method: str = "weno"
+) -> tp.Tuple[Array, Array]:
     """creates the stencils for the upwind scheme
     - 5 pts inside domain
     Args:

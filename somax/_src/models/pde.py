@@ -10,7 +10,9 @@ class DynamicalSystem(eqx.Module):
     t_domain: TimeDomain
     saveat: dfx.SaveAt
 
-    def __init__(self, t_domain: TimeDomain, saveat: Optional[dfx.SaveAt] = None):
+    def __init__(
+        self, t_domain: TimeDomain, saveat: Optional[dfx.SaveAt] = None
+    ):
         self.t_domain = t_domain
         self.saveat = saveat if saveat is not None else dfx.SaveAt(t1=True)
 
@@ -32,7 +34,9 @@ class DynamicalSystem(eqx.Module):
         dt0 = kwargs.pop("dt0", self.t_domain.dt)
         saveat = kwargs.pop("saveat", self.saveat)
         solver = kwargs.pop("solver", dfx.Tsit5())
-        stepsize_controller = kwargs.pop("stepsize_controller", dfx.ConstantStepSize())
+        stepsize_controller = kwargs.pop(
+            "stepsize_controller", dfx.ConstantStepSize()
+        )
 
         # do integration
         sol = dfx.diffeqsolve(

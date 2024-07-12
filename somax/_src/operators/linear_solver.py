@@ -58,7 +58,9 @@ def steepest_descent(
         raise ValueError("Unrecognized criterion")
 
     def condition_fn(state) -> bool:
-        return (state.iteration < max_iterations) & (state.loss > target_criterion)
+        return (state.iteration < max_iterations) & (
+            state.loss > target_criterion
+        )
 
     def body_fn(state):
         Ax = matvec_fn(state.u)
@@ -134,7 +136,9 @@ def conjugate_gradient(
         raise ValueError("Unrecognized criterion")
 
     def condition_fn(state) -> bool:
-        return (state.iteration < max_iterations) & (state.loss > target_criterion)
+        return (state.iteration < max_iterations) & (
+            state.loss > target_criterion
+        )
 
     def body_fn(state):
         # compute search direction
@@ -152,7 +156,9 @@ def conjugate_gradient(
         residual = state.residual - alpha * A_direction
 
         # update search direction
-        beta = jnp.sum(residual * residual) / jnp.sum(state.residual * state.residual)
+        beta = jnp.sum(residual * residual) / jnp.sum(
+            state.residual * state.residual
+        )
 
         # update direction
         direction = residual + beta * state.direction

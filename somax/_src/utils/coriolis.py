@@ -7,7 +7,9 @@ from somax._src.utils.constants import (
 )
 
 
-def beta_plane(lat: Array, omega: float = OMEGA, radius: float = R_EARTH) -> Array:
+def beta_plane(
+    lat: Array, omega: float = OMEGA, radius: float = R_EARTH
+) -> Array:
     """Beta-Plane Approximation from the mean latitude
 
     Equation:

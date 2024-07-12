@@ -6,6 +6,7 @@ Script Taken from:
     https://github.com/dionhaefner/shallow-water/blob/master/shallow_water_simple.py
 
 """
+
 import autoroot
 import jax
 import jax.numpy as jnp
@@ -81,7 +82,10 @@ def prepare_plot():
 def update_plot(t, h, u, v, ax):
     eta = h - depth
 
-    quiver_stride = (slice(1, -1, n_x // max_quivers), slice(1, -1, n_y // max_quivers))
+    quiver_stride = (
+        slice(1, -1, n_x // max_quivers),
+        slice(1, -1, n_y // max_quivers),
+    )
 
     ax.clear()
     cs = ax.pcolormesh(
@@ -151,7 +155,9 @@ def iterate_shallow_water():
             h, step_size=dx, axis=0, derivative=1
         )
 
-        u_rhs: Float[Array, "Nx-1 Ny"] = coriolis_param * v_avg - gravity * dh_dx
+        u_rhs: Float[Array, "Nx-1 Ny"] = (
+            coriolis_param * v_avg - gravity * dh_dx
+        )
 
         # apply masks
         u_rhs *= masks.face_u.values[1:-1]
@@ -169,7 +175,9 @@ def iterate_shallow_water():
             h, step_size=dy, axis=1, derivative=1
         )
 
-        v_rhs: Float[Array, "Nx Ny-1"] = -coriolis_param * u_avg - gravity * dh_dy
+        v_rhs: Float[Array, "Nx Ny-1"] = (
+            -coriolis_param * u_avg - gravity * dh_dy
+        )
 
         # apply masks
         v_rhs *= masks.face_v.values[:, 1:-1]
@@ -182,8 +190,12 @@ def iterate_shallow_water():
         # =================================
         # update height, h
         # =================================
-        du_dx: Float[Array, "Nx Ny"] = difference(u, step_size=dx, axis=0, derivative=1)
-        dv_dy: Float[Array, "Nx Ny"] = difference(v, step_size=dy, axis=1, derivative=1)
+        du_dx: Float[Array, "Nx Ny"] = difference(
+            u, step_size=dx, axis=0, derivative=1
+        )
+        dv_dy: Float[Array, "Nx Ny"] = difference(
+            v, step_size=dy, axis=1, derivative=1
+        )
 
         h_rhs: Float[Array, "Nx Ny"] = -depth * (du_dx + dv_dy)
 

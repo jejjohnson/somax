@@ -5,9 +5,4 @@ from somax._src.masks.masks import (
     NodeMask,
 )
 
-__all__ = [
-    "CenterMask",
-    "FaceMask",
-    "MaskGrid",
-    "NodeMask"
-]
+__all__ = ["CenterMask", "FaceMask", "MaskGrid", "NodeMask"]

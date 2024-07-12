@@ -23,17 +23,21 @@ def make_grid_from_coords(coords: tp.Iterable) -> tp.List[Array]:
 def make_grid_coords(coords: tp.Iterable) -> Array:
     grid = make_grid_from_coords(coords)
 
-    grid = jnp.stack(grid, axis=0)
+    grid = jnp.stack(grid, axis=-1)
 
-    grid = einops.rearrange(grid, "N ... -> (...) N")
+    # grid = einops.rearrange(grid, "N ... -> (...) N")
 
     return grid
 
 
 def create_meshgrid_coordinates(shape):
-    meshgrid = jnp.meshgrid(*[jnp.arange(size) for size in shape], indexing="ij")
+    meshgrid = jnp.meshgrid(
+        *[jnp.arange(size) for size in shape], indexing="ij"
+    )
     # create indices
-    indices = jnp.concatenate([jnp.expand_dims(x, axis=-1) for x in meshgrid], axis=-1)
+    indices = jnp.concatenate(
+        [jnp.expand_dims(x, axis=-1) for x in meshgrid], axis=-1
+    )
 
     return indices
 

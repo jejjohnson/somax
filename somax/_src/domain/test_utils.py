@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from finitevolx._src.domain.utils import (
+from somax._src.domain.utils import (
     bounds_and_points_to_step,
     bounds_and_step_to_points,
     bounds_to_length,

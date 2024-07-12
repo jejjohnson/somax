@@ -4,7 +4,7 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from somax._src.interp.average import avg_pool
+from somax._src.operators.average import avg_pool
 
 
 class NodeMask(eqx.Module):
@@ -112,7 +112,8 @@ class MaskGrid(tp.NamedTuple):
         # VARIABLE
         psi_irrbound_xids = jnp.logical_and(
             not_psi[1:-1, 1:-1],
-            avg_pool(node, kernel_size=(3, 3), stride=(1, 1), padding=(0, 0)) > 1 / 18,
+            avg_pool(node, kernel_size=(3, 3), stride=(1, 1), padding=(0, 0))
+            > 1 / 18,
         )
         psi_irrbound_xids = jnp.where(psi_irrbound_xids)
 
@@ -131,11 +132,13 @@ class MaskGrid(tp.NamedTuple):
         q_interior = jnp.logical_and(jnp.logical_not(psi_distbound1), node)
 
         u_distbound1 = jnp.logical_and(
-            avg_pool(u, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)) < 5 / 6,
+            avg_pool(u, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0))
+            < 5 / 6,
             u,
         )
         v_distbound1 = jnp.logical_and(
-            avg_pool(v, kernel_size=(1, 3), stride=(1, 1), padding=(0, 1)) < 5 / 6,
+            avg_pool(v, kernel_size=(1, 3), stride=(1, 1), padding=(0, 1))
+            < 5 / 6,
             v,
         )
 
@@ -143,11 +146,13 @@ class MaskGrid(tp.NamedTuple):
         v_distbound2plus = jnp.logical_and(jnp.logical_not(v_distbound1), v)
 
         u_distbound2 = jnp.logical_and(
-            avg_pool(u, kernel_size=(5, 1), stride=(1, 1), padding=(2, 0)) < 9 / 10,
+            avg_pool(u, kernel_size=(5, 1), stride=(1, 1), padding=(2, 0))
+            < 9 / 10,
             u_distbound2plus,
         )
         v_distbound2 = jnp.logical_and(
-            avg_pool(v, kernel_size=(1, 5), stride=(1, 1), padding=(0, 2)) < 9 / 10,
+            avg_pool(v, kernel_size=(1, 5), stride=(1, 1), padding=(0, 2))
+            < 9 / 10,
             v_distbound2plus,
         )
 
@@ -201,17 +206,34 @@ class MaskGrid(tp.NamedTuple):
 def init_masks_from_center(mask: Array):
     center = jnp.copy(mask)
 
-    node = avg_pool(center, kernel_size=(2, 2), stride=(1, 1), padding=(1, 1)) > 7 / 8
-    face_u = avg_pool(center, kernel_size=(2, 1), stride=(1, 1), padding=(1, 0)) > 3 / 4
-    face_v = avg_pool(center, kernel_size=(1, 2), stride=(1, 1), padding=(0, 1)) > 3 / 4
+    node = (
+        avg_pool(center, kernel_size=(2, 2), stride=(1, 1), padding=(1, 1))
+        > 7 / 8
+    )
+    face_u = (
+        avg_pool(center, kernel_size=(2, 1), stride=(1, 1), padding=(1, 0))
+        > 3 / 4
+    )
+    face_v = (
+        avg_pool(center, kernel_size=(1, 2), stride=(1, 1), padding=(0, 1))
+        > 3 / 4
+    )
 
     return center, face_u, face_v, node
 
 
 def init_masks_from_node(mask: Array):
     node = jnp.copy(mask)
-    center = avg_pool(node, kernel_size=(2, 2), stride=(1, 1), padding=(0, 0)) > 0.0
-    face_u = avg_pool(center, kernel_size=(2, 1), stride=(1, 1), padding=(1, 0)) > 3 / 4
-    face_v = avg_pool(center, kernel_size=(1, 2), stride=(1, 1), padding=(0, 1)) > 3 / 4
+    center = (
+        avg_pool(node, kernel_size=(2, 2), stride=(1, 1), padding=(0, 0)) > 0.0
+    )
+    face_u = (
+        avg_pool(center, kernel_size=(2, 1), stride=(1, 1), padding=(1, 0))
+        > 3 / 4
+    )
+    face_v = (
+        avg_pool(center, kernel_size=(1, 2), stride=(1, 1), padding=(0, 1))
+        > 3 / 4
+    )
 
     return center, face_u, face_v, node

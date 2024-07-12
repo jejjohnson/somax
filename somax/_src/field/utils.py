@@ -11,6 +11,18 @@ class DiscretizationError(Exception):
 def check_discretization(d1: Domain, d2: Domain):
     assert type(d1) == type(d2)
 
-    if d1.dx != d2.dx or d1.xmin != d2.xmin or d1.xmax != d2.xmax:
+    if not (
+        # check type
+        type(d1) == type(d2)
+        or
+        # check shape
+        d1.shape == d2.shape
+        or
+        # check size
+        d1.size == d2.size
+        or
+        # check bounds
+        d1.bounds == d2.bounds
+    ):
         print(d1, d2)
         raise DiscretizationError(d1, d2)

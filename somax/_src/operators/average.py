@@ -6,11 +6,8 @@ from typing import (
 import jax.numpy as jnp
 from jaxtyping import (
     Array,
-    Float,
 )
 import kernex as kex
-
-from somax.domain import Domain
 
 
 def avg_pool(
@@ -25,7 +22,9 @@ def avg_pool(
     mean_fn = get_mean_function(mean_fn=mean_fn)
 
     # create mean kernel
-    @kex.kmap(kernel_size=kernel_size, strides=stride, padding=padding, **kwargs)
+    @kex.kmap(
+        kernel_size=kernel_size, strides=stride, padding=padding, **kwargs
+    )
     def kernel_fn(x):
         return mean_fn(x)
 
@@ -35,7 +34,9 @@ def avg_pool(
 
 def x_avg_1D(u: Array, mean_fn: str = "arithmetic") -> Array:
     assert u.ndim == 1
-    return avg_pool(u, kernel_size=(2,), stride=(1,), padding="VALID", mean_fn=mean_fn)
+    return avg_pool(
+        u, kernel_size=(2,), stride=(1,), padding="VALID", mean_fn=mean_fn
+    )
 
 
 def x_avg_2D(u: Array, mean_fn: str = "arithmetic") -> Array:
@@ -61,16 +62,16 @@ def center_avg_2D(u: Array, mean_fn: str = "arithmetic") -> Array:
 
 def get_mean_function(mean_fn: str = "arithmetic") -> Callable:
     if mean_fn.lower() == "arithmetic":
-        fn = lambda x: jnp.mean(x)
+        fn = avg_arithmetic
         return fn
     elif mean_fn.lower() == "geometric":
-        fn = lambda x: jnp.exp(jnp.mean(jnp.log(x)))
+        fn = avg_geometric
         return fn
     elif mean_fn.lower() == "harmonic":
-        fn = lambda x: jnp.reciprocal(jnp.mean(jnp.reciprocal(x)))
+        fn = avg_harmonic
         return fn
     elif mean_fn.lower() == "quadratic":
-        fn = lambda x: jnp.sqrt(jnp.mean(jnp.square(x)))
+        fn = avg_quadratic
         return fn
     else:
         msg = "Unrecognized function"
@@ -78,65 +79,53 @@ def get_mean_function(mean_fn: str = "arithmetic") -> Callable:
         raise ValueError(msg)
 
 
-def avg_arithmetic(x, y):
+def avg_arithmetic(x: Array) -> Array:
     """
-    Calculates the arithmetic average of two numbers.
+    Calculates the arithmetic average of an Array.
 
     Parameters:
-    x (float): The first number.
-    y (float): The second number.
+    x [Array]: A list of numbers.
 
     Returns:
-    float: The arithmetic average of x and y.
+    float: The arithmetic average of the numbers in the list.
     """
-    return 0.5 * (x + y)
+    return jnp.mean(x)
 
 
-def avg_harmonic(x, y):
+def avg_harmonic(x: Array) -> Array:
     """
-    Calculates the harmonic average of two numbers.
+    Calculates the harmonic average of a number.
 
     Parameters:
-    x (float): The first number.
-    y (float): The second number.
+    x (Array): The number.
 
     Returns:
-    float: The harmonic average of x and y.
+    float: The harmonic average of x.
     """
-    x_ = jnp.reciprocal(x)
-    y_ = jnp.reciprocal(y)
-    return jnp.reciprocal(avg_arithmetic(x_, y_))
+    return jnp.reciprocal(avg_arithmetic(jnp.reciprocal(x)))
 
 
-def avg_geometric(x, y):
+def avg_geometric(x: Array) -> Array:
     """
-    Calculates the geometric average of two numbers.
+    Calculates the geometric average of an array of numbers.
 
     Parameters:
-    - x: The first number.
-    - y: The second number.
+    - x: An array of numbers.
 
     Returns:
-    The geometric average of x and y.
+    The geometric average of the numbers in the array.
     """
-    x_ = jnp.log(x)
-    y_ = jnp.log(y)
-    return jnp.exp(avg_arithmetic(x_, y_))
+    return jnp.exp(avg_arithmetic(jnp.log(x)))
 
 
-def avg_quadratic(x, y):
+def avg_quadratic(x: Array) -> Array:
     """
     Calculates the average of two values using the quadratic mean.
 
     Parameters:
-    - x: The first value.
-    - y: The second value.
+    - x: The value to calculate the average for.
 
     Returns:
-    The average of x and y using the quadratic mean.
+    The average of x using the quadratic mean.
     """
-    x_ = jnp.square(x)
-    y_ = jnp.square(y)
-    return jnp.sqrt(avg_arithmetic(x_, y_))
-
-
+    return jnp.sqrt(avg_arithmetic(jnp.square(x)))

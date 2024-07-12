@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from somax.domain import Domain
-from somax._src.field.field import Field
+from somax._src.field.base import Field
 
 PADDING = {
     "both": (1, 1),

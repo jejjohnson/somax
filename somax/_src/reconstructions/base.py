@@ -99,7 +99,9 @@ def reconstruct_3pt(
         Array: The reconstructed array.
     """
     if u_mask:
-        return _reconstruct_3pt_mask(q=q, u=u, dim=dim, u_mask=u_mask, method=method)
+        return _reconstruct_3pt_mask(
+            q=q, u=u, dim=dim, u_mask=u_mask, method=method
+        )
     else:
         return _reconstruct_3pt_nomask(q=q, u=u, dim=dim, method=method)
 
@@ -125,7 +127,9 @@ def _reconstruct_3pt_nomask(
     # define slicers
     dyn_slicer = ft.partial(jax.lax.dynamic_slice_in_dim, axis=dim)
 
-    qi_left_interior, qi_right_interior = upwind_3pt(q=q, dim=dim, method=method)
+    qi_left_interior, qi_right_interior = upwind_3pt(
+        q=q, dim=dim, method=method
+    )
 
     qi_left_interior = dyn_slicer(qi_left_interior, 0, num_pts - 3)
     qi_right_interior = dyn_slicer(qi_right_interior, 1, num_pts - 3)
@@ -134,8 +138,12 @@ def _reconstruct_3pt_nomask(
     qi_left_bd, qi_right_bd = upwind_2pt_bnds(q=q, dim=dim, method="linear")
 
     # concatenate
-    qi_left = jnp.concatenate([qi_left_bd, qi_left_interior, qi_right_bd], axis=dim)
-    qi_right = jnp.concatenate([qi_left_bd, qi_right_interior, qi_right_bd], axis=dim)
+    qi_left = jnp.concatenate(
+        [qi_left_bd, qi_left_interior, qi_right_bd], axis=dim
+    )
+    qi_right = jnp.concatenate(
+        [qi_left_bd, qi_right_interior, qi_right_bd], axis=dim
+    )
 
     # calculate +ve and -ve points
     u_pos, u_neg = plusminus(u)
@@ -225,7 +233,9 @@ def reconstruct_5pt(
         Array: The reconstructed 5-point array.
     """
     if u_mask is not None:
-        return _reconstruct_5pt_mask(q=q, u=u, dim=dim, u_mask=u_mask, method=method)
+        return _reconstruct_5pt_mask(
+            q=q, u=u, dim=dim, u_mask=u_mask, method=method
+        )
     else:
         return _reconstruct_5pt_nomask(q=q, u=u, dim=dim, method=method)
 
@@ -250,7 +260,9 @@ def _reconstruct_5pt_nomask(
     dyn_slicer = ft.partial(jax.lax.dynamic_slice_in_dim, axis=dim)
 
     # 5-pts inside domain
-    qi_left_interior, qi_right_interior = upwind_5pt(q=q, dim=dim, method="linear")
+    qi_left_interior, qi_right_interior = upwind_5pt(
+        q=q, dim=dim, method="linear"
+    )
 
     # 3pts-near boundary
     qi_left_b, qi_right_b = upwind_3pt_bnds(q, dim=dim, method=method)

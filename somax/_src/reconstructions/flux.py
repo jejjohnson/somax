@@ -1,13 +1,10 @@
 from typing import Optional
 from jaxtyping import Float, Array
 from somax.masks import FaceMask
-from somax.operators import reconstruct
-
+from somax._src.reconstructions.base import reconstruct
 
 
 def uv_center_flux(
-
-    
     h: Float[Array, "Nx Ny"],
     u: Float[Array, "Nx-1 Ny"],
     v: Float[Array, "Nx Ny-1"],
@@ -24,7 +21,6 @@ def uv_center_flux(
             Size = [Nx, Ny]
         u (Array):
     """
-
 
     # calculate h fluxes
     uh_flux: Float[Array, "Nx-1 Ny"] = reconstruct(

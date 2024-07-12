@@ -12,7 +12,11 @@ from jaxtyping import (
 )
 
 from somax._src.models.sw.params import SWMParams
-from somax._src.boundaries import zero_gradient_boundaries, no_slip_boundaries, no_flux_boundaries
+from somax._src.boundaries.base import (
+    zero_gradient_boundaries,
+    no_slip_boundaries,
+    no_flux_boundaries,
+)
 
 
 def calculate_uvh_flux(
@@ -86,12 +90,13 @@ def potential_vorticity(
     """
     # pad arrays
     # no gradient boundaries
-    h_pad: Float[Array, "Nx+2 Ny+2"] = zero_gradient_boundaries(h, ((1, 1), (1, 1)))
+    h_pad: Float[Array, "Nx+2 Ny+2"] = zero_gradient_boundaries(
+        h, ((1, 1), (1, 1))
+    )
 
     # no-slip boundaries for u,v
-    u_pad: Float[Array, "Nx+1 Ny+2"] = no_slip_boundaries(u, ((0,0),(1,1)))
-    v_pad: Float[Array, "Nx+2 Ny+1"] = no_slip_boundaries(v, ((1,1),(0,0)))
-
+    u_pad: Float[Array, "Nx+1 Ny+2"] = no_slip_boundaries(u, ((0, 0), (1, 1)))
+    v_pad: Float[Array, "Nx+2 Ny+1"] = no_slip_boundaries(v, ((1, 1), (0, 0)))
 
     # planetary vorticity, f
     f_on_q: Float[Array, "Nx+1 Ny+1"] = (
@@ -128,8 +133,12 @@ def h_linear_rhs(
     """
 
     # calculate RHS terms
-    du_dx: Float[Array, "Nx Ny"] = difference(u, step_size=dx, axis=0, derivative=1)
-    dv_dy: Float[Array, "Nx Ny"] = difference(v, step_size=dy, axis=1, derivative=1)
+    du_dx: Float[Array, "Nx Ny"] = difference(
+        u, step_size=dx, axis=0, derivative=1
+    )
+    dv_dy: Float[Array, "Nx Ny"] = difference(
+        v, step_size=dy, axis=1, derivative=1
+    )
 
     # calculate RHS
     h_rhs: Float[Array, "Nx Ny"] = -params.depth * (du_dx + dv_dy)
@@ -183,8 +192,10 @@ def u_linear_rhs(
         ∂u/∂t = fv - g ∂h/∂x
     """
     # pad arrays
-    h_pad: Float[Array, "Nx+2 Ny"] = zero_gradient_boundaries(h, ((1, 1), (0, 0)))
-    v_pad: Float[Array, "Nx+2 Ny+1"] = no_slip_boundaries(v, ((1,1),(0,0)))
+    h_pad: Float[Array, "Nx+2 Ny"] = zero_gradient_boundaries(
+        h, ((1, 1), (0, 0))
+    )
+    v_pad: Float[Array, "Nx+2 Ny+1"] = no_slip_boundaries(v, ((1, 1), (0, 0)))
 
     # calculate RHS terms
     v_avg: Float[Array, "Nx+1 Ny"] = center_avg_2D(v_pad)
@@ -193,7 +204,9 @@ def u_linear_rhs(
     )
 
     # calculate RHS
-    u_rhs: Float[Array, "Nx+1 Ny"] = params.coriolis_f0 * v_avg - params.gravity * dh_dx
+    u_rhs: Float[Array, "Nx+1 Ny"] = (
+        params.coriolis_f0 * v_avg - params.gravity * dh_dx
+    )
 
     # apply masks
     if u_mask is not None:
@@ -224,14 +237,17 @@ def u_nonlinear_rhs(
     """
 
     # pad arrays
-    h_pad: Float[Array, "Nx+2 Ny"] = zero_gradient_boundaries(h, ((1, 1), (0, 0)))
+    h_pad: Float[Array, "Nx+2 Ny"] = zero_gradient_boundaries(
+        h, ((1, 1), (0, 0))
+    )
     ke_pad: Float[Array, "Nx+2 Ny"] = no_flux_boundaries(ke, ((1, 1), (0, 0)))
 
     vh_flux_on_u: Float[Array, "Nx-1 Ny"] = center_avg_2D(vh_flux)
 
     # no flux padding
-    vh_flux_on_u: Float[Array, "Nx+2 Ny"] = no_flux_boundaries(vh_flux_on_u, ((1, 1), (0, 0)))
-
+    vh_flux_on_u: Float[Array, "Nx+2 Ny"] = no_flux_boundaries(
+        vh_flux_on_u, ((1, 1), (0, 0))
+    )
 
     qhv_flux_on_u: Float[Array, "Nx+1 Ny"] = reconstruct(
         q=q,
@@ -258,9 +274,7 @@ def u_nonlinear_rhs(
     )
 
     # calculate u RHS
-    u_rhs: Float[Array, "Nx+1 Ny"] = (
-        - work + qhv_flux_on_u - dke_on_u
-    )
+    u_rhs: Float[Array, "Nx+1 Ny"] = -work + qhv_flux_on_u - dke_on_u
 
     # apply mask
     if u_mask is not None:
@@ -281,8 +295,10 @@ def v_linear_rhs(
         ∂v/∂t = - fu - g ∂h/∂y
     """
     # pad arrays
-    h_pad: Float[Array, "Nx Ny+2"] = zero_gradient_boundaries(h, ((0, 0), (1, 1)))
-    u_pad: Float[Array, "Nx+1 Ny+2"] = no_slip_boundaries(u, ((0,0),(1,1)))
+    h_pad: Float[Array, "Nx Ny+2"] = zero_gradient_boundaries(
+        h, ((0, 0), (1, 1))
+    )
+    u_pad: Float[Array, "Nx+1 Ny+2"] = no_slip_boundaries(u, ((0, 0), (1, 1)))
 
     # calculate RHS terms
     u_avg: Float[Array, "Nx Ny+1"] = center_avg_2D(u_pad)
@@ -300,7 +316,6 @@ def v_linear_rhs(
         v_rhs *= v_mask.values
 
     return v_rhs
-
 
 
 def v_nonlinear_rhs(
@@ -323,13 +338,17 @@ def v_nonlinear_rhs(
     Notes:
         - uses reconstruction (5pt, improved weno) of q on uh flux
     """
-    h_pad: Float[Array, "Nx Ny+2"] = zero_gradient_boundaries(h, ((0, 0), (1, 1)))
+    h_pad: Float[Array, "Nx Ny+2"] = zero_gradient_boundaries(
+        h, ((0, 0), (1, 1))
+    )
     ke_pad: Float[Array, "Nx Ny+2"] = no_flux_boundaries(ke, ((0, 0), (1, 1)))
 
     uh_flux_on_v: Float[Array, "Nx Ny-1"] = center_avg_2D(uh_flux)
 
     # assume no flux on boundaries
-    uh_flux_on_v: Float[Array, "Nx Ny+2"] = no_flux_boundaries(uh_flux_on_v, ((0, 0), (1, 1)))
+    uh_flux_on_v: Float[Array, "Nx Ny+2"] = no_flux_boundaries(
+        uh_flux_on_v, ((0, 0), (1, 1))
+    )
 
     qhu_flux_on_v: Float[Array, "Nx Ny+1"] = reconstruct(
         q=q,
@@ -356,9 +375,7 @@ def v_nonlinear_rhs(
     )
 
     # calculate u RHS
-    v_rhs: Float[Array, "Nx Ny+1"] = (
-        - work - qhu_flux_on_v - dke_on_v
-    )
+    v_rhs: Float[Array, "Nx Ny+1"] = -work - qhu_flux_on_v - dke_on_v
 
     # apply masks
     if v_mask is not None:

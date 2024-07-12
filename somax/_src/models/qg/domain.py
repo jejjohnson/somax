@@ -44,7 +44,9 @@ class LayerDomain(eqx.Module):
 
 
 def create_qg_multilayer_mat(
-    heights: tp.List[float], reduced_gravities: tp.List[float], correction: bool = False
+    heights: tp.List[float],
+    reduced_gravities: tp.List[float],
+    correction: bool = False,
 ) -> np.ndarray:
     """Computes the Matrix that is used to connected a stacked
     isopycnal Quasi-Geostrophic model.
@@ -83,7 +85,9 @@ def create_qg_multilayer_mat(
                 / heights[i]
                 * (1 / reduced_gravities[i] + 1 / reduced_gravities[i - 1])
             )
-            A[i, i + 1] = -1.0 / (heights[i] * reduced_gravities[num_heights - 2])
+            A[i, i + 1] = -1.0 / (
+                heights[i] * reduced_gravities[num_heights - 2]
+            )
 
         # bottom rows
         A[-1, -1] = 1.0 / (

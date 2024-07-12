@@ -34,8 +34,12 @@ def init_tau(domain, tau0: float = 2.0e-5):
 
 def calculate_wind_forcing(tau, domain):
     # move from edges to nodes
-    tau_x = avg_pool(tau[0], padding=((1, 0), (0, 0)), stride=1, mean_fn="arithmetic")
-    tau_y = avg_pool(tau[1], padding=((0, 0), (1, 0)), stride=1, mean_fn="arithmetic")
+    tau_x = avg_pool(
+        tau[0], padding=((1, 0), (0, 0)), stride=1, mean_fn="arithmetic"
+    )
+    tau_y = avg_pool(
+        tau[1], padding=((0, 0), (1, 0)), stride=1, mean_fn="arithmetic"
+    )
 
     # compute finite difference
     # dF2dX = difference(tau_y, axis=0, step_size=domain.dx[0], )
@@ -71,7 +75,9 @@ def calculate_wind_forcing(
 
     # calculate tau
     # analytical form! =]
-    curl_tau = -tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * y_coords_center / Ly)
+    curl_tau = (
+        -tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * y_coords_center / Ly)
+    )
 
     # print_debug_quantity(curl_tau, "CURL TAU")
 

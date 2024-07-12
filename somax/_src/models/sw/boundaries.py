@@ -19,11 +19,15 @@ def wall_boundaries(u, grid: str = "h"):
         # ZONAL VELOCITY
         # wall boundaries
         # u(x=0=Lx,y=0=Ly)
-        u = jnp.pad(u[1:-1,:], ((1, 1), (0, 0)), mode="constant", constant_values=0.0)
+        u = jnp.pad(
+            u[1:-1, :], ((1, 1), (0, 0)), mode="constant", constant_values=0.0
+        )
         u = fix_boundary_corners(u)
     if grid == "v":
         # wall boundaries, v(y=0=Ly)
-        u = jnp.pad(u[:, 1:-1], ((0, 0), (1, 1)), mode="constant", constant_values=0.0)
+        u = jnp.pad(
+            u[:, 1:-1], ((0, 0), (1, 1)), mode="constant", constant_values=0.0
+        )
         u = fix_boundary_corners(u)
 
     if grid == "q":
@@ -40,11 +44,15 @@ def doublegyre_boundaries(u, grid: str = "h"):
         # ZONAL VELOCITY
         # wall boundaries
         # u(x=0=Lx,y=0=Ly)
-        u = jnp.pad(u[1:-1,:], ((1, 1), (0, 0)), mode="constant", constant_values=0.0)
+        u = jnp.pad(
+            u[1:-1, :], ((1, 1), (0, 0)), mode="constant", constant_values=0.0
+        )
         u = fix_boundary_corners(u)
     if grid == "v":
         # wall boundaries, v(y=0=Ly)
-        u = jnp.pad(u[:, 1:-1], ((0, 0), (1, 1)), mode="constant", constant_values=0.0)
+        u = jnp.pad(
+            u[:, 1:-1], ((0, 0), (1, 1)), mode="constant", constant_values=0.0
+        )
         u = fix_boundary_corners(u)
 
     if grid == "q":
@@ -52,29 +60,29 @@ def doublegyre_boundaries(u, grid: str = "h"):
     return u
 
 
-def no_slip_padding(u, grid: str="u"):
-    
-    
+def no_slip_padding(u, grid: str = "u"):
+
     if grid == "u":
         # pad with zeros
         u = jnp.pad(u, ((0, 0), (1, 1)), mode="constant", constant_values=0.0)
         # override with negative interior points
-        u = u.at[:,0].add(-u[:,1])
-        u = u.at[:,-1].add(-u[:,-2])
-    
+        u = u.at[:, 0].add(-u[:, 1])
+        u = u.at[:, -1].add(-u[:, -2])
+
     if grid == "v":
         # pad with zeros
         u = jnp.pad(u, ((1, 1), (0, 0)), mode="constant", constant_values=0.0)
         # override with negative interior points
         u = u.at[0].add(-u[1])
         u = u.at[-1].add(-u[-2])
-    
+
     return u
 
 
 def flux_zero_padding(u):
-    
-    u = jnp.pad(u, pad_width=((1, 1), (1, 1)), mode="constant", constant_values=0.0)
-    
+
+    u = jnp.pad(
+        u, pad_width=((1, 1), (1, 1)), mode="constant", constant_values=0.0
+    )
+
     return u
-        

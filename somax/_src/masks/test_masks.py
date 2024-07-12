@@ -1,4 +1,5 @@
 """None"""
+
 import pytest
 
 from somax._src.masks.utils import (

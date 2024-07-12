@@ -55,14 +55,20 @@ class L96TState(NamedTuple):
 
         keyx, keyy = jrandom.split(key=key, num=2)
         if batchsize > 1:
-            x0 = b * noise[0] * jrandom.normal(key=keyx, shape=(batchsize, ndims[0]))
+            x0 = (
+                b
+                * noise[0]
+                * jrandom.normal(key=keyx, shape=(batchsize, ndims[0]))
+            )
             y0 = noise[1] * jrandom.normal(
                 key=keyy, shape=(batchsize, ndims[1] * ndims[0])
             )
 
         else:
             x0 = b * noise[0] * jrandom.normal(key=keyx, shape=(ndims[0],))
-            y0 = noise[1] * jrandom.normal(key=keyy, shape=(ndims[1] * ndims[0],))
+            y0 = noise[1] * jrandom.normal(
+                key=keyy, shape=(ndims[1] * ndims[0],)
+            )
 
         return cls(x=x0, y=y0)
 
@@ -100,7 +106,14 @@ class Lorenz96t(DynamicalSystem):
         F, h, b, c = args.F, args.h, args.b, args.c
 
         x_dot, y_dot, coupling = rhs_lorenz_96t(
-            x=x, y=y, F=F, h=h, c=c, b=b, advection=self.advection, return_coupling=True
+            x=x,
+            y=y,
+            F=F,
+            h=h,
+            c=c,
+            b=b,
+            advection=self.advection,
+            return_coupling=True,
         )
 
         # update state

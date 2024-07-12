@@ -69,8 +69,12 @@ def helmholtz_dst(
 
 
 def helmholtz_fn(u, dx, dy, beta):
-    d2u_dx2 = (u[..., 2:, 1:-1] + u[..., :-2, 1:-1] - 2 * u[..., 1:-1, 1:-1]) / dx**2
-    d2u_dy2 = (u[..., 1:-1, 2:] + u[..., 1:-1, :-2] - 2 * u[..., 1:-1, 1:-1]) / dy**2
+    d2u_dx2 = (
+        u[..., 2:, 1:-1] + u[..., :-2, 1:-1] - 2 * u[..., 1:-1, 1:-1]
+    ) / dx**2
+    d2u_dy2 = (
+        u[..., 1:-1, 2:] + u[..., 1:-1, :-2] - 2 * u[..., 1:-1, 1:-1]
+    ) / dy**2
     return d2u_dx2 + d2u_dy2 - beta * u[..., 1:-1, 1:-1]
 
 
@@ -102,7 +106,9 @@ def inverse_elliptic_dst_cmm(
 
     # alpha correction (?)
     alphas = jnp.einsum(
-        "...ij, ...j -> ...i", cap_matrices, -sol_rect[..., bounds_xids, bounds_yids]
+        "...ij, ...j -> ...i",
+        cap_matrices,
+        -sol_rect[..., bounds_xids, bounds_yids],
     )
 
     rhs = rhs.at[..., bounds_xids, bounds_yids].set(alphas)
@@ -110,7 +116,10 @@ def inverse_elliptic_dst_cmm(
     sol = jax.vmap(fn)(rhs, H_matrix)
 
     sol = jnp.pad(
-        sol, pad_width=((0, 0), (1, 1), (1, 1)), mode="constant", constant_values=0.0
+        sol,
+        pad_width=((0, 0), (1, 1), (1, 1)),
+        mode="constant",
+        constant_values=0.0,
     )
 
     return sol * mask
@@ -138,7 +147,9 @@ def compute_capacitance_matrices(
     for iquery in range(num_queries_true):
         rhs = rhs.at[:].set(0.0)
 
-        rhs = rhs.at[..., irrbound_xids[iquery], irrbound_yids[iquery]].set(1.0)
+        rhs = rhs.at[..., irrbound_xids[iquery], irrbound_yids[iquery]].set(
+            1.0
+        )
         sol = jax.vmap(fn)(rhs, H_matrix)
         G_matrices = G_matrices.at[:, iquery].set(
             sol[..., irrbound_xids, irrbound_yids]

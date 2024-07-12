@@ -74,4 +74,6 @@ def bc_fn(u: Float[Array, "D"]) -> Float[Array, "D"]:
     return u
 
 
-dphi_dx: tp.Callable = jax.grad(lambda x, t, nu: phi(x, t, nu).squeeze(), argnums=0)
+dphi_dx: tp.Callable = jax.grad(
+    lambda x, t, nu: phi(x, t, nu).squeeze(), argnums=0
+)

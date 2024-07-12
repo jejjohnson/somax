@@ -30,7 +30,13 @@ def test_limits_transform_null():
     direction = None
     stagger = False
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx == Nx_
@@ -42,7 +48,13 @@ def test_limits_transform_null():
     direction = None
     stagger = True
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx == Nx_
@@ -61,7 +73,13 @@ def test_limits_transform_no_stagger():
     direction = "right"
     stagger = False
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx == Nx_
@@ -73,7 +91,13 @@ def test_limits_transform_no_stagger():
     direction = "left"
     stagger = False
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx == Nx_
@@ -85,7 +109,13 @@ def test_limits_transform_no_stagger():
     direction = "inner"
     stagger = False
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx_ == Nx - 2
@@ -97,7 +127,13 @@ def test_limits_transform_no_stagger():
     direction = "outer"
     stagger = False
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx_ == Nx + 2
@@ -116,7 +152,13 @@ def test_limits_transform_stagger():
     direction = "right"
     stagger = True
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx_ == Nx
@@ -128,7 +170,13 @@ def test_limits_transform_stagger():
     direction = "left"
     stagger = True
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx_ == Nx
@@ -140,7 +188,13 @@ def test_limits_transform_stagger():
     direction = "inner"
     stagger = True
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx_ == Nx - 1
@@ -152,7 +206,13 @@ def test_limits_transform_stagger():
     direction = "outer"
     stagger = True
     xmin_, xmax_, Nx_, Lx_ = domain_limits_transform(
-        xmin=xmin, xmax=xmax, dx=dx, Lx=Lx, Nx=Nx, direction=direction, stagger=stagger
+        xmin=xmin,
+        xmax=xmax,
+        dx=dx,
+        Lx=Lx,
+        Nx=Nx,
+        direction=direction,
+        stagger=stagger,
     )
 
     assert Nx_ == Nx + 1
@@ -334,7 +394,9 @@ def test_batch_limits_transform_stagger():
         stagger=stagger,
     )
     assert Nx_ == tuple(map(lambda x: x - 1, H_DOMAIN.Nx))
-    assert Lx_ == tuple(map(lambda x: x[0] - x[1], list(zip(H_DOMAIN.Lx, H_DOMAIN.dx))))
+    assert Lx_ == tuple(
+        map(lambda x: x[0] - x[1], list(zip(H_DOMAIN.Lx, H_DOMAIN.dx)))
+    )
     assert xmin_ == tuple(
         map(lambda x: x[0] + 0.5 * x[1], list(zip(H_DOMAIN.xmin, H_DOMAIN.dx)))
     )
@@ -355,7 +417,9 @@ def test_batch_limits_transform_stagger():
         stagger=stagger,
     )
     assert Nx_ == tuple(map(lambda x: x + 1, H_DOMAIN.Nx))
-    assert Lx_ == tuple(map(lambda x: x[0] + x[1], list(zip(H_DOMAIN.Lx, H_DOMAIN.dx))))
+    assert Lx_ == tuple(
+        map(lambda x: x[0] + x[1], list(zip(H_DOMAIN.Lx, H_DOMAIN.dx)))
+    )
     assert xmin_ == tuple(
         map(lambda x: x[0] - 0.5 * x[1], list(zip(H_DOMAIN.xmin, H_DOMAIN.dx)))
     )
@@ -368,7 +432,9 @@ def test_stagger_domain():
     # Case I: right | no stagger
     direction = ("right", "right")
     stagger = (True, True)
-    u_domain = stagger_domain(domain=H_DOMAIN, direction=direction, stagger=stagger)
+    u_domain = stagger_domain(
+        domain=H_DOMAIN, direction=direction, stagger=stagger
+    )
 
     assert u_domain.Nx == H_DOMAIN.Nx
     assert u_domain.Lx == H_DOMAIN.Lx
@@ -382,7 +448,9 @@ def test_stagger_domain():
     # Case II: left | no stagger
     direction = ("left", "left")
     stagger = (True, True)
-    u_domain = stagger_domain(domain=H_DOMAIN, direction=direction, stagger=stagger)
+    u_domain = stagger_domain(
+        domain=H_DOMAIN, direction=direction, stagger=stagger
+    )
 
     assert u_domain.Nx == H_DOMAIN.Nx
     assert u_domain.Lx == H_DOMAIN.Lx
@@ -396,7 +464,9 @@ def test_stagger_domain():
     # Case III: inner | no stagger
     direction = ("inner", "inner")
     stagger = (True, True)
-    u_domain = stagger_domain(domain=H_DOMAIN, direction=direction, stagger=stagger)
+    u_domain = stagger_domain(
+        domain=H_DOMAIN, direction=direction, stagger=stagger
+    )
 
     assert u_domain.Nx == tuple(map(lambda x: x - 1, H_DOMAIN.Nx))
     assert u_domain.Lx == tuple(
@@ -412,7 +482,9 @@ def test_stagger_domain():
     # Case IV: outer | no stagger
     direction = ("outer", "outer")
     stagger = (True, True)
-    u_domain = stagger_domain(domain=H_DOMAIN, direction=direction, stagger=stagger)
+    u_domain = stagger_domain(
+        domain=H_DOMAIN, direction=direction, stagger=stagger
+    )
 
     assert u_domain.Nx == tuple(map(lambda x: x + 1, H_DOMAIN.Nx))
     assert u_domain.Lx == tuple(
@@ -428,7 +500,9 @@ def test_stagger_domain():
     # Case V: None | no stagger
     direction = (None, None)
     stagger = (False, False)
-    u_domain = stagger_domain(domain=H_DOMAIN, direction=direction, stagger=stagger)
+    u_domain = stagger_domain(
+        domain=H_DOMAIN, direction=direction, stagger=stagger
+    )
 
     assert u_domain.Nx == H_DOMAIN.Nx
     assert u_domain.Lx == H_DOMAIN.Lx
@@ -438,7 +512,9 @@ def test_stagger_domain():
     # Case VI: None | stagger
     direction = (None, None)
     stagger = (True, True)
-    u_domain = stagger_domain(domain=H_DOMAIN, direction=direction, stagger=stagger)
+    u_domain = stagger_domain(
+        domain=H_DOMAIN, direction=direction, stagger=stagger
+    )
 
     assert u_domain.Nx == H_DOMAIN.Nx
     assert u_domain.Lx == H_DOMAIN.Lx

@@ -37,7 +37,13 @@ def calculate_wind_forcing(
     # calculate tau
     # analytical form! =]
     # curl_tau = -tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * y_coords_center / Ly)
-    curl_tau = tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * (y_coords_center-params.y0) / Ly) # ensure tau=0 at y0
+    curl_tau = (
+        tau0
+        * 2
+        * math.pi
+        / Ly
+        * jnp.sin(2 * math.pi * (y_coords_center - params.y0) / Ly)
+    )  # ensure tau=0 at y0
 
     # print_debug_quantity(curl_tau, "CURL TAU")
 
@@ -60,11 +66,16 @@ def calculate_bottom_drag(
     """
 
     # interior, vertex points on psi
-    omega: Float[Array, "Nz Nx-2 Ny-2"] = jax.vmap(laplacian, in_axes=(0, None))(psi, domain.dx)
+    omega: Float[Array, "Nz Nx-2 Ny-2"] = jax.vmap(
+        laplacian, in_axes=(0, None)
+    )(psi, domain.dx)
 
     # pad interior psi points
-    omega: Float[Array, "Nz Nx Ny"]  = jnp.pad(
-        omega, pad_width=((0, 0), (1, 1), (1, 1)), mode="constant", constant_values=0.0
+    omega: Float[Array, "Nz Nx Ny"] = jnp.pad(
+        omega,
+        pad_width=((0, 0), (1, 1), (1, 1)),
+        mode="constant",
+        constant_values=0.0,
     )
 
     if masks_psi is not None:
@@ -76,10 +87,10 @@ def calculate_bottom_drag(
     omega: Float[Array, "Nz Nx-1 Ny-1"] = jax.vmap(center_avg_2D)(omega)
 
     # calculate bottom drag coefficient
-    bottom_drag_coeff: Float[Array, ""]  = delta_ek / H_z * f0 / 2.0
+    bottom_drag_coeff: Float[Array, ""] = delta_ek / H_z * f0 / 2.0
 
     # calculate bottom drag
-    bottom_drag: Float[Array, "Nx Ny"]  = -bottom_drag_coeff * omega[-1]
+    bottom_drag: Float[Array, "Nx Ny"] = -bottom_drag_coeff * omega[-1]
 
     # plot_field(omega)
     return bottom_drag
