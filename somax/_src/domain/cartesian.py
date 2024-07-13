@@ -1,4 +1,6 @@
 import einx
+import jax
+from functools import partial
 import equinox as eqx
 import jax.numpy as jnp
 from typing import Self, Optional, Tuple, Iterable
@@ -103,11 +105,11 @@ class CartesianDomain1D(Domain):
 
     @property
     def coords(self) -> Array:
-        return make_coords(self.xmin, self.xmax, self.Nx)
+        return jnp.asarray(make_coords(self.xmin, self.xmax, self.Nx))
 
     @property
     def grid(self) -> Array:
-        return einx.rearrange("Dx -> Dx 1", self.coords)
+        return jnp.asarray(einx.rearrange("Dx -> Dx 1", self.coords))
 
     @property
     def cell_volume(self) -> float:
@@ -117,7 +119,7 @@ class CartesianDomain1D(Domain):
     def ndim(self) -> int:
         return 1
 
-    def isel(self, sel: slice) -> Self:
+    def isel(self, sel: slice):
         """
         Selects a subset of coordinates from the Cartesian domain.
 
@@ -144,37 +146,15 @@ class CartesianDomain1D(Domain):
     def pad(
         self,
         pad_width: Tuple[int, int],
-    ) -> Self:
-        """
-        Pads the CartesianDomain1D object with the specified pad width.
+    ):
 
-        Args:
-            pad_width (Tuple[int, int]): The amount of padding to add on each side of the domain.
-
-        Returns:
-            CartesianDomain1D: A new CartesianDomain1D object with the specified padding.
-
-        Raises:
-            AssertionError: If pad_width is not a tuple or if its length is not equal to 2.
-        """
-
-        assert isinstance(pad_width, tuple)
-        assert len(pad_width) == 2
-
-        xmin = self.xmin - pad_width[0] * self.dx
-        xmax = self.xmax + pad_width[1] * self.dx
-        Lx = xmax - xmin
-        Nx = sum(pad_width) + self.Nx
-
-        return CartesianDomain1D(
-            xmin=xmin, xmax=xmax, dx=self.dx, Lx=Lx, Nx=Nx
-        )
+        return pad_domain(self, pad_width=pad_width)
 
     def stagger(
         self,
         direction: Optional[str] = None,
         stagger: Optional[bool] = None,
-    ) -> Self:
+    ):
         xmin, xmax, Nx, Lx = domain_limits_transform(
             xmin=self.xmin,
             xmax=self.xmax,
@@ -187,7 +167,7 @@ class CartesianDomain1D(Domain):
         return CartesianDomain1D(
             xmin=xmin, xmax=xmax, dx=self.dx, Lx=Lx, Nx=Nx
         )
-
+    
 
 class CartesianDomain2D(Domain):
     x_domain: CartesianDomain1D
@@ -355,8 +335,7 @@ class CartesianDomain2D(Domain):
         direction: Optional[str] = None,
         stagger: Optional[bool] = None,
     ) -> Self:
-        x_domain = self.x_domain.stagger(direction=direction, stagger=stagger)
-        return CartesianDomain2D(x_domain=x_domain, y_domain=self.y_domain)
+        return stagger_x_field(self, direction, stagger)
 
     def stagger_y(
         self,
@@ -365,3 +344,39 @@ class CartesianDomain2D(Domain):
     ) -> Self:
         y_domain = self.y_domain.stagger(direction=direction, stagger=stagger)
         return CartesianDomain2D(x_domain=self.x_domain, y_domain=y_domain)
+
+
+def pad_domain(domain: Domain, pad_width: Tuple[int,int]) -> Domain:
+        """
+        Pads the CartesianDomain1D object with the specified pad width.
+
+        Args:
+            pad_width (Tuple[int, int]): The amount of padding to add on each side of the domain.
+
+        Returns:
+            CartesianDomain1D: A new CartesianDomain1D object with the specified padding.
+
+        Raises:
+            AssertionError: If pad_width is not a tuple or if its length is not equal to 2.
+        """
+
+        assert isinstance(pad_width, tuple)
+        assert len(pad_width) == 2
+
+        xmin = domain.xmin - pad_width[0] * domain.dx
+        xmax = domain.xmax + pad_width[1] * domain.dx
+        Lx = xmax - xmin
+        Nx = sum(pad_width) + domain.Nx
+
+        return CartesianDomain1D(
+            xmin=xmin, xmax=xmax, dx=domain.dx, Lx=Lx, Nx=Nx
+        )
+
+@partial(jax.jit, static_argnames=("direction", "stagger",))
+def stagger_x_field(
+    domain: Domain,
+    direction: Optional[str] = None,
+    stagger: Optional[bool] = None,
+) -> CartesianDomain2D:
+    x_domain = domain.x_domain.stagger(direction=direction, stagger=stagger)
+    return CartesianDomain2D(x_domain=x_domain, y_domain=domain.y_domain)

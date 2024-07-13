@@ -2,7 +2,8 @@ from typing import (
     List,
     Tuple,
 )
-
+from functools import partial
+import jax
 import equinox as eqx
 import finitediffx as fdx
 import jax.numpy as jnp
@@ -12,6 +13,8 @@ from jaxtyping import (
     Float,
 )
 import kernex as kex
+from plum import dispatch
+# from somax._src.field.base import Field
 
 generate_finitediff_coeffs = fdx._src.utils.generate_finitediff_coeffs
 generate_backward_offsets = fdx._src.utils._generate_backward_offsets
@@ -49,15 +52,14 @@ class FDParams(eqx.Module):
         return len(self.coeffs)
 
 
-def difference(
+def difference_1D(
     u: ArrayLike,
-    axis: int = -2,
-    step_size: float = 1.0,
+    step_size: float | ArrayLike = 1.0,
     method: str = "backward",
     derivative: int = 1,
     accuracy: int = 1,
     padding: str = "valid",
-):
+) -> ArrayLike:
     """
     Compute the numerical difference of an array along a specified axis using finite differences.
 
@@ -74,9 +76,60 @@ def difference(
     AssertionError: If the method is not "backward" or "forward".
 
     """
-    num_dims = len(u.shape)
     # check method
     assert method in ["backward", "forward"]
+    num_dims = 1
+    # generate offsets
+    offsets = tuple(
+        generate_offsets(method, derivative=derivative, accuracy=accuracy)
+    )
+    # generate coefficients
+    coeffs = generate_finitediff_coeffs(offsets, derivative=derivative)
+    # kernel size
+    kernel_size = (len(coeffs),)
+    # initialize strides
+    strides = (1,) * num_dims
+    # initialize weight
+    weight = jnp.array(coeffs).reshape(kernel_size)
+
+    return apply_conv(
+        x=u,
+        weight=weight / (step_size**derivative),
+        kernel_size=kernel_size,
+        padding=padding,
+        strides=strides,
+    )
+
+
+# @partial(jax.jit, static_argnames=("axis", "step_size", "method", "derivative", "accuracy", "padding"))
+def difference_2D(
+    u: ArrayLike,
+    axis: int = 0,
+    step_size: float | ArrayLike = 1.0,
+    method: str = "backward",
+    derivative: int = 1,
+    accuracy: int = 1,
+    padding: str = "valid",
+) -> ArrayLike:
+    """
+    Compute the numerical difference of an array along a specified axis using finite differences.
+
+    Parameters:
+    u (Array): The input array.
+    axis (int, optional): The axis along which to compute the difference. Default is -2.
+    step_size (float, optional): The step size used in the finite difference approximation. Default is 1.0.
+    method (str, optional): The method used for differencing. Must be either "backward" or "forward". Default is "backward".
+
+    Returns:
+    Array: The differenced array.
+
+    Raises:
+    AssertionError: If the method is not "backward" or "forward".
+
+    """
+    # check method
+    num_dims = 2
+    # assert method in ["backward", "forward"]
     # generate offsets
     offsets = tuple(
         generate_offsets(method, derivative=derivative, accuracy=accuracy)
@@ -85,7 +138,7 @@ def difference(
     coeffs = generate_finitediff_coeffs(offsets, derivative=derivative)
     # kernel size
     kernel_size = tuple(
-        calculate_kernel_size(len(coeffs), num_dims, axis=num_dims + axis)
+        calculate_kernel_size(len(coeffs), num_dims, axis=axis)
     )
     # initialize strides
     strides = (1,) * num_dims
@@ -99,6 +152,173 @@ def difference(
         padding=padding,
         strides=strides,
     )
+
+
+def difference_3D(
+    u: ArrayLike,
+    axis: int = 0,
+    step_size: float | ArrayLike = 1.0,
+    method: str = "backward",
+    derivative: int = 1,
+    accuracy: int = 1,
+    padding: str = "valid",
+) -> ArrayLike:
+    """
+    Compute the numerical difference of an array along a specified axis using finite differences.
+
+    Parameters:
+    u (Array): The input array.
+    axis (int, optional): The axis along which to compute the difference. Default is -2.
+    step_size (float, optional): The step size used in the finite difference approximation. Default is 1.0.
+    method (str, optional): The method used for differencing. Must be either "backward" or "forward". Default is "backward".
+
+    Returns:
+    Array: The differenced array.
+
+    Raises:
+    AssertionError: If the method is not "backward" or "forward".
+
+    """
+    # check method
+    num_dims = 3
+    assert method in ["backward", "forward"]
+    # generate offsets
+    offsets = tuple(
+        generate_offsets(method, derivative=derivative, accuracy=accuracy)
+    )
+    # generate coefficients
+    coeffs = generate_finitediff_coeffs(offsets, derivative=derivative)
+    # kernel size
+    kernel_size = tuple(
+        calculate_kernel_size(len(coeffs), num_dims, axis=axis)
+    )
+    # initialize strides
+    strides = (1,) * 2
+    # initialize weight
+    weight = jnp.array(coeffs).reshape(kernel_size)
+
+    return apply_conv(
+        x=num_dims,
+        weight=weight / (step_size**derivative),
+        kernel_size=kernel_size,
+        padding=padding,
+        strides=strides,
+    )
+
+
+
+# @dispatch
+# def difference_x(
+#     u: Field,
+#     method: str = "backward",
+#     derivative: int = 1,
+#     accuracy: int = 1,
+#     padding: str = "valid",
+# ) -> Field:
+#     """
+#     Compute the numerical difference of an array along a specified axis using finite differences.
+
+#     Parameters:
+#     u (Array): The input array.
+#     axis (int, optional): The axis along which to compute the difference. Default is -2.
+#     step_size (float, optional): The step size used in the finite difference approximation. Default is 1.0.
+#     method (str, optional): The method used for differencing. Must be either "backward" or "forward". Default is "backward".
+
+#     Returns:
+#     Array: The differenced array.
+
+#     Raises:
+#     AssertionError: If the method is not "backward" or "forward".
+
+#     """
+#     num_dims = len(u.shape)
+#     # check method
+#     assert method in ["backward", "forward"]
+#     # generate offsets
+#     offsets = tuple(
+#         generate_offsets(method, derivative=derivative, accuracy=accuracy)
+#     )
+#     # generate coefficients
+#     coeffs = generate_finitediff_coeffs(offsets, derivative=derivative)
+#     # kernel size
+#     kernel_size = tuple(
+#         calculate_kernel_size(len(coeffs), num_dims, axis=num_dims + -2)
+#     )
+#     # initialize strides
+#     strides = (1,) * num_dims
+#     # initialize weight
+#     weight = jnp.array(coeffs).reshape(kernel_size)
+
+#     # apply convolution on values
+#     u_values = apply_conv(
+#         x=u.values,
+#         weight=weight / (u.domain.resolution[0]**derivative),
+#         kernel_size=kernel_size,
+#         padding=padding,
+#         strides=strides,
+#     )
+
+#     # stagger domain
+#     u_domain = u.domain.stagger_x(direction="inner", stagger=True)
+
+#     return Field(u_values, u_domain)
+
+
+# @dispatch
+# def difference_y(
+#     u: Field,
+#     method: str = "backward",
+#     derivative: int = 1,
+#     accuracy: int = 1,
+#     padding: str = "valid",
+# ) -> Field:
+#     """
+#     Compute the numerical difference of an array along a specified axis using finite differences.
+
+#     Parameters:
+#     u (Array): The input array.
+#     axis (int, optional): The axis along which to compute the difference. Default is -2.
+#     step_size (float, optional): The step size used in the finite difference approximation. Default is 1.0.
+#     method (str, optional): The method used for differencing. Must be either "backward" or "forward". Default is "backward".
+
+#     Returns:
+#     Array: The differenced array.
+
+#     Raises:
+#     AssertionError: If the method is not "backward" or "forward".
+
+#     """
+#     num_dims = len(u.shape)
+#     # check method
+#     assert method in ["backward", "forward"]
+#     # generate offsets
+#     offsets = tuple(
+#         generate_offsets(method, derivative=derivative, accuracy=accuracy)
+#     )
+#     # generate coefficients
+#     coeffs = generate_finitediff_coeffs(offsets, derivative=derivative)
+#     # kernel size
+#     kernel_size = tuple(
+#         calculate_kernel_size(len(coeffs), num_dims, axis=num_dims + -1)
+#     )
+#     # initialize strides
+#     strides = (1,) * num_dims
+#     # initialize weight
+#     weight = jnp.array(coeffs).reshape(kernel_size)
+
+#     # apply convolution on values
+#     u_values = apply_conv(
+#         x=u.values,
+#         weight=weight / (u.domain.resolution[1]**derivative),
+#         kernel_size=kernel_size,
+#         padding=padding,
+#         strides=strides,
+#     )
+
+#     # stagger domain
+#     u_domain = u.domain.stagger_y(direction="inner", stagger=True)
+
+#     return Field(u_values, u_domain)
 
 
 def calculate_kernel_size(kernel_dims, num_dims, axis):
@@ -161,14 +381,13 @@ def generate_offsets(method: str, derivative: int, accuracy: int) -> List[int]:
         raise ValueError(f"Unrecognized offsets method: {method}")
     return offsets
 
-
 def apply_conv(
-    x: Array,
-    weight: Array,
+    x: ArrayLike,
+    weight: ArrayLike,
     kernel_size: Tuple[int, ...],
     padding: Tuple[int, ...],
     strides: Tuple[str, ...] | str,
-) -> Array:
+) -> ArrayLike:
     """
     Applies convolution operation on the input array `x` using the given `weight` and parameters.
 
@@ -191,11 +410,11 @@ def apply_conv(
 
 
 def x_diff_1D(
-    u: Float[Array, "... Dx"],
-    step_size: float | Float[Array, "Dx-1"] = 1.0,
+    u: Float[ArrayLike, "... Dx"],
+    step_size: ArrayLike | Float[ArrayLike, "Dx-1"] = 1.0,
     derivative: int = 1,
     method: str = "backward",
-) -> Float[Array, "... Dx-1"]:
+) -> Float[ArrayLike, "... Dx-1"]:
     """
     Compute the first derivative of a 1D array `u` along the x-axis.
 
@@ -214,9 +433,8 @@ def x_diff_1D(
 
     """
     assert derivative in [1, 2]
-    return difference(
+    return difference_1D(
         u=u,
-        axis=-1,
         step_size=step_size,
         method=method,
         derivative=derivative,
@@ -225,12 +443,13 @@ def x_diff_1D(
     )
 
 
+# @partial(jax.jit, static_argnames=("step_size", "derivative", "method",))
 def x_diff_2D(
-    u: Float[Array, "... Dx Dy"],
-    step_size: float | Float[Array, "Dx-1"] = 1.0,
+    u: Float[ArrayLike, "... Dx Dy"],
+    step_size: ArrayLike | Float[ArrayLike, "Dx-1"] = 1.0,
     derivative: int = 1,
     method: str = "backward",
-) -> Float[Array, "... Dx-1 Dy"]:
+) -> Float[ArrayLike, "... Dx-1 Dy"]:
     """
     Compute the second-order partial derivative of a 2D array `u` with respect to the x-axis.
 
@@ -246,9 +465,9 @@ def x_diff_2D(
 
     """
     assert derivative in [1, 2]
-    return difference(
+    return difference_2D(
         u=u,
-        axis=-2,
+        axis=0,
         step_size=step_size,
         method=method,
         derivative=derivative,
@@ -257,12 +476,13 @@ def x_diff_2D(
     )
 
 
+# @partial(jax.jit, static_argnames=("step_size", "derivative", "method",))
 def y_diff_2D(
-    u: Float[Array, "... Dx Dy"],
-    step_size: float | Float[Array, "Dy-1"] = 1.0,
+    u: Float[ArrayLike, "... Dx Dy"],
+    step_size: float | Float[ArrayLike, "Dy-1"] = 1.0,
     derivative: int = 1,
     method: str = "backward",
-) -> Float[Array, "... Dx Dy-1"]:
+) -> Float[ArrayLike, "... Dx Dy-1"]:
     """
     Compute the second-order derivative of a 2D array `u` along the y-axis.
 
@@ -278,9 +498,9 @@ def y_diff_2D(
 
     """
     assert derivative in [1, 2]
-    return difference(
+    return difference_2D(
         u=u,
-        axis=-1,
+        axis=1,
         step_size=step_size,
         method=method,
         derivative=derivative,
@@ -409,12 +629,12 @@ def curl_2D(
         zeta (Array): The relative vorticity. Size = [Nx-1, Ny-1].
     """
     # ∂xv
-    dv_dx = x_diff_2D(u=v, step_size=step_size_x, derivative=1, method=method)
+    dv_dx: Float[Array, "Dx-1 Dy+1"] = x_diff_2D(u=v, step_size=step_size_x, derivative=1, method=method)
     # ∂yu
-    du_dy = y_diff_2D(u=u, step_size=step_size_y, derivative=1, method=method)
+    du_dy: Float[Array, "Dx+1 Dy-1"] = y_diff_2D(u=u, step_size=step_size_y, derivative=1, method=method)
 
     # slice appropriate axes
-    dv_dx: Float[Array, "Nx-1 Ny-1"] = dv_dx[..., :, 1:-1]
-    du_dy: Float[Array, "Nx-1 Ny-1"] = du_dy[..., 1:-1, :]
+    dv_dx: Float[Array, "Nx-1 Ny-1"] = dv_dx[:, 1:-1]
+    du_dy: Float[Array, "Nx-1 Ny-1"] = du_dy[1:-1, :]
 
     return dv_dx - du_dy

@@ -7,9 +7,10 @@ from jax.scipy.ndimage import map_coordinates
 from jaxtyping import (
     Array,
     Float,
+    ArrayLike
 )
-
-from somax._src.domain.base import Domain
+from plum import dispatch
+from somax._src.domain.cartesian import CartesianDomain2D
 
 
 class CartesianGrid:
@@ -77,9 +78,9 @@ class CartesianGrid:
 
 
 def domain_interpolation_2D(
-    u: Float[Array, "... Nx Ny"],
-    source_domain: Domain,
-    target_domain: Domain,
+    u: Float[ArrayLike, "... Nx Ny"],
+    source_domain: CartesianDomain2D,
+    target_domain: CartesianDomain2D,
     method: str = "linear",
     extrap: bool = False,
 ) -> Array:
@@ -123,9 +124,9 @@ def domain_interpolation_2D(
 
 
 def regulargrid_interpolator_2D(
-    u: Float[Array, "... Nx Ny"],
-    source_domain: Domain,
-    target_domain: Domain,
+    u: Float[ArrayLike, "... Nx Ny"],
+    source_domain: CartesianDomain2D,
+    target_domain: CartesianDomain2D,
     method: str = "linear",
     fill_value=jnp.nan,
 ):
@@ -168,9 +169,9 @@ def regulargrid_interpolator_2D(
 
 
 def cartesian_interpolator_2D(
-    u: Float[Array, "... Nx Ny"],
-    source_domain: Domain,
-    target_domain: Domain,
+    u: Float[ArrayLike, "... Nx Ny"],
+    source_domain: CartesianDomain2D,
+    target_domain: CartesianDomain2D,
     mode: str = "constant",
     cval: float = 0.0,
 ) -> Array:
@@ -189,12 +190,12 @@ def cartesian_interpolator_2D(
         u_ (Array): the input array for the target domain
     """
 
-    assert len(source_domain.Nx) == len(target_domain.Nx) == 2
-    assert source_domain.Nx == u.shape
+    assert len(source_domain.shape) == len(target_domain.shape) == 2
+    assert source_domain.shape == u.shape
 
     # get limits for domain
-    xlims = (source_domain.xmin[0], source_domain.xmax[0])
-    ylims = (source_domain.xmin[1], source_domain.xmax[1])
+    xlims = (source_domain.x_domain.xmin, source_domain.x_domain.xmax)
+    ylims = (source_domain.y_domain.xmax, source_domain.y_domain.xmax)
 
     # initialize interpolator
     interpolator = CartesianGrid(
@@ -202,12 +203,12 @@ def cartesian_interpolator_2D(
     )
 
     # get coordinates of target grid
-    X, Y = target_domain.grid_axis
+    XY = target_domain.grid
 
     # interpolate
-    u_on_target = interpolator(X.ravel(), Y.ravel())
+    u_on_target = interpolator(XY[..., 0].ravel(), XY[..., 1].ravel())
 
     # reshape
-    u_on_target = u_on_target.reshape(target_domain.Nx)
+    u_on_target = u_on_target.reshape(target_domain.shape)
 
     return u_on_target

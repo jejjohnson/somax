@@ -3,7 +3,7 @@ import typing as tp
 
 import einops
 import jax.numpy as jnp
-from jaxtyping import Array
+from jaxtyping import Array, ArrayLike
 import numpy as np
 
 
@@ -11,10 +11,10 @@ def make_coords(xmin, xmax, nx):
     return jnp.linspace(start=xmin, stop=xmax, num=nx, endpoint=True)
 
 
-def make_grid_from_coords(coords: tp.Iterable) -> tp.List[Array]:
+def make_grid_from_coords(coords: tp.Iterable | ArrayLike) -> tp.List[Array]:
     if isinstance(coords, tp.Iterable):
         return jnp.meshgrid(*coords, indexing="ij")
-    elif isinstance(coords, (jnp.ndarray, np.ndarray)):
+    elif isinstance(coords, ArrayLike):
         return jnp.meshgrid(coords, indexing="ij")
     else:
         raise ValueError("Unrecognized dtype for inputs")
