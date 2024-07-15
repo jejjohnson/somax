@@ -11,12 +11,15 @@ from somax._src.constants import GRAVITY
 from somax._src.domain.cartesian import CartesianDomain2D
 
 # from somax._src.models.linear_swm.model import LinearSWM
-from somax._src.operators.average import center_avg_2D
+from somax._src.operators.average import center_avg_2D, x_avg_2D, y_avg_2D
 from somax._src.operators.difference import (
     x_diff_2D,
     y_diff_2D,
-    curl_2D
+    curl_2D,
 )
+
+from somax._src.reconstructions.upwind import plusminus
+from somax._src.reconstructions.stencils import stencil_2pt
 from somax._src.reconstructions.base import reconstruct
 from somax._src.boundaries.base import (
     zero_boundaries,
@@ -276,6 +279,7 @@ def calculate_h_nonlinear_rhs(
     return h_rhs
 
 
+
 def potential_vorticity(
         h: Float[Array, "Nx+1 Ny+1"],
         u: Float[Array, "Nx+1 Ny"], 
@@ -295,6 +299,6 @@ def potential_vorticity(
 
     # potential vorticity, q = (ζ + f) / h
     h_on_q = center_avg_2D(h)
-    q: Float[Array, "Nx-1 Ny-1"] = (vort_r + f[1:-1,1:-1]) / h_on_q[1:-1,1:-1]
+    q: Float[Array, "Nx-1 Ny-1"] = (vort_r + f) / h_on_q
 
     return q

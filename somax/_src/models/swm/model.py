@@ -24,11 +24,12 @@ from somax._src.models.swm.ops import (
     calculate_u_nonlinear_rhs,
     calculate_v_linear_rhs,
     calculate_v_nonlinear_rhs,
-    potential_vorticity
+    potential_vorticity,
 )
 from somax._src.operators.average import x_avg_2D, y_avg_2D
 from somax._src.reconstructions.flux import uv_center_flux
 from somax._src.kinematics.derived import kinetic_energy
+from somax._src.reconstructions.base import reconstruct
 
 
 class SWMState(eqx.Module):
@@ -64,6 +65,7 @@ class SWM(eqx.Module):
     mass_adv_stencil: int = eqx.field(static=True)
     momentum_adv_scheme: str = eqx.field(static=True)
     momentum_adv_stencil: int = eqx.field(static=True)
+    diffusion: bool = eqx.field(static=True)
 
     def __init__(
         self,
@@ -77,6 +79,7 @@ class SWM(eqx.Module):
         linear_momentum: bool = False,
         momentum_adv_scheme: str = "wenoz",
         momentum_adv_stencil: int = 5,
+        diffusion: bool=False,
     ):
         self.gravity = gravity
         self.depth = depth
@@ -88,6 +91,7 @@ class SWM(eqx.Module):
         self.linear_momentum = linear_momentum
         self.momentum_adv_scheme = momentum_adv_scheme
         self.momentum_adv_stencil = momentum_adv_stencil
+        self.diffusion = diffusion
 
     @property
     def phase_speed(self):
@@ -155,27 +159,22 @@ class SWM(eqx.Module):
         # precalculate quantities
         if not self.linear_mass or not self.linear_momentum:
             # zero flux padding
-            h_pad: Float[Array, "Nx+2 Ny+2"] = zero_gradient_boundaries(h, ((1, 1), (1, 1)))
-            
-            # calculate mass fluxes
-            fluxes = uv_center_flux(
-                h=h_pad, v=v, u=u,
-                u_mask=masks.face_u, v_mask=masks.face_v,
-                num_pts=self.mass_adv_stencil, method=self.mass_adv_scheme,
-            )
-
-            uh_flux: Float[Array, "Dx+1 Dy"] = fluxes[0]
-            vh_flux: Float[Array, "Dx Dy+1"] = fluxes[1]
+            uh_flux = reconstruct(q=h, u=u[1:-1,:], u_mask=masks.face_u[1:-1,:], dim=0, method=self.mass_adv_scheme, num_pts=self.mass_adv_stencil)
+            vh_flux = reconstruct(q=h, u=v[:,1:-1], u_mask=masks.face_v[:,1:-1], dim=1, method=self.mass_adv_scheme, num_pts=self.mass_adv_stencil)
+            # pad with zeros
+            uh_flux = zero_boundaries(uh_flux, pad_width=((1,1),(0,0)))
+            vh_flux = zero_boundaries(vh_flux, pad_width=((0,0),(1,1)))
 
         if not self.linear_momentum:
-            # planetary vorticity, f
-            f_on_q: Float[Array, "Nx+1 Ny+1"] = self.coriolis_param(state.q_domain.grid[..., 0])
+            # planetary vorticity, f = f₀ + β y
+            f_on_q: Float[Array, "Nx-1 Ny-1"] = self.coriolis_param(state.q_domain.grid[1:-1,1:-1, 0])
+
             # calculate potential vorticity, q = (ζ + f) / h
-            u_pad: Float[Array, "Nx+1 Ny+2"] = no_slip_boundaries(u, ((0, 0), (1, 1)))
-            v_pad: Float[Array, "Nx+2 Ny+1"] = no_slip_boundaries(v, ((1, 1), (0, 0)))
-            q: Float[Array, "Dx-1 Dy-1"] = potential_vorticity(h=h_pad, u=u, v=v, f=f_on_q, dx=dx, dy=dy)
-            q: Float[Array, "Dx+1 Dy+1"] = zero_gradient_boundaries(-q, ((1, 1), (1, 1)))
-            q: Float[Array, "Dx+1 Dy+1"] = q.at[1:-1, 1:-1].set(-q[1:-1, 1:-1])
+            q: Float[Array, "Dx-1 Dy-1"] = potential_vorticity(h=h, u=u, v=v, f=f_on_q, dx=dx, dy=dy)
+
+            # zero pv boundaries
+            q: Float[Array, "Dx+1 Dy+1"] = zero_boundaries(q, ((1, 1), (1, 1)))
+
             # calculate kinetic energy, ke = 0.5 (u² + v²)
             u_on_h = x_avg_2D(u)
             v_on_h = y_avg_2D(v)
@@ -244,6 +243,8 @@ class SWM(eqx.Module):
             )
             v_rhs *= state.masks.face_v.values
 
+
+        # if self.diffusion:
 
         # update all state vectors
         state = eqx.tree_at(lambda x: x.h, state, h_rhs)
