@@ -184,7 +184,7 @@ def conjugate_gradient(
 def lx_linear_solver(
     matvec_fn: Callable,
     b: Array,
-    solver: lx.AbstractLinearSolver = lx.GMRES,
+    solver: lx.AbstractLinearSolver = lx.GMRES(atol=1e-3, rtol=1e-4),
     x0: Optional[Array] = None,
     verbose: bool = False,
 ):

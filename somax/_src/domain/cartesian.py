@@ -12,6 +12,7 @@ from somax._src.domain.utils import (
     bounds_and_points_to_step,
     bounds_to_length,
     bounds_and_step_to_points,
+    length_and_points_to_step
 )
 from somax._src.operators.stagger import domain_limits_transform
 
@@ -91,6 +92,33 @@ class CartesianDomain1D(Domain):
         Nx = len(x_coords)
         xmin, xmax = x_coords.min(), x_coords.max()
         Lx = xmax - xmin
+        return cls(
+            xmin=float(xmin),
+            xmax=float(xmax),
+            Nx=int(Nx),
+            dx=float(dx),
+            Lx=float(Lx),
+        )
+        
+    @classmethod
+    def init_from_size_and_num_points(cls, Nx: int, Lx: float) -> Self:
+        """Initialize 1D domain from size and number of points.
+
+        This method initializes a 1D domain using the given size and number of points. It calculates the necessary parameters
+        such as the minimum and maximum values, the number of points, and the step size.
+
+        Args:
+            Nx (int): The number of points in the domain.
+            Lx (float): The size of the domain.
+
+        Returns:
+            domain (Domain): The initialized domain.
+
+        """
+        # calculate stepsize
+        dx = length_and_points_to_step(Lx=Lx, Nx=Nx)
+        xmin = 0.0
+        xmax = Lx
         return cls(
             xmin=float(xmin),
             xmax=float(xmax),
@@ -237,6 +265,31 @@ class CartesianDomain2D(Domain):
         return cls(
             x_domain=x_domain,
             y_domain=y_domain,
+        )
+
+    @classmethod
+    def init_from_size_and_num_points(cls, Nx: Tuple[int, int], Lx: Tuple[float, float]) -> Self:
+        """Initialize 1D domain from size and number of points.
+
+        This method initializes a 1D domain using the given size and number of points. It calculates the necessary parameters
+        such as the minimum and maximum values, the number of points, and the step size.
+
+        Args:
+            Nx (int): The number of points in the domain.
+            Lx (float): The size of the domain.
+
+        Returns:
+            domain (Domain): The initialized domain.
+
+        """
+        # calculate stepsize
+        assert len(Nx) == len(Lx) == 2
+        x_domain = CartesianDomain1D.init_from_size_and_num_points(Lx=Lx[0], Nx=Nx[0])
+        y_domain = CartesianDomain1D.init_from_size_and_num_points(Lx=Lx[1], Nx=Nx[1])
+        return cls(
+            x_domain=x_domain,
+            y_domain=y_domain,
+
         )
 
     @classmethod

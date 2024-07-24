@@ -6,112 +6,92 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 import numpy as np
-
-from somax._src.domain.utils import (
-    bounds_and_points_to_step,
-    bounds_and_step_to_points,
-    bounds_to_length,
-    make_coords,
-    make_grid_coords,
-    make_grid_from_coords,
-)
+from somax._src.domain.cartesian import CartesianDomain2D, CartesianDomain1D
+from typing import Tuple
+from somax._src.constants import R_EARTH
+import jax.numpy as jnp
+from jaxtyping import Array, ArrayLike
+from metpy.calc import lat_lon_grid_deltas
+from somax._src.domain.utils import bounds_to_length
 
 
-def check_inputs_types(x, name: str):
-    if isinstance(x, (int, float)):
-        return tuple([x])
-    elif isinstance(x, list):
-        return tuple(x)
-    elif isinstance(x, tuple):
-        return x
-    elif isinstance(x, (np.ndarray, jnp.ndarray)):
-        return tuple(map(lambda x: float(x), x))
-    raise ValueError(f"Unexpected type for {name}, got {x}.")
+def init_cartesian2D_from_lonlat(
+    lon: ArrayLike, lat: ArrayLike, radius: float = R_EARTH):
+
+    # estimate grid deltas
+    # dx, dy = lat_lon_deltas(lon=lon, lat=lat, radius=radius)
+    
+    dx, dy = lat_lon_grid_deltas(longitude=lon, latitude=lat)
+    
+    dx = dx.mean().magnitude
+    dy = dy.mean().magnitude
+    
+    # get shape
+    if lon.ndim > 1 & lat.ndim > 1:
+        Nx, Nx = lon.shape
+    else:
+        Nx = lon.shape[0]
+        Ny = lat.shape[0]
+        
+    # get bounds
+    xmin, xmax = lon.min(), lon.max()
+    ymin, ymax = lat.min(), lat.max()
+        
+    
+    # calculate size
+    Lx = bounds_to_length(xmin=xmin, xmax=xmax)
+    Ly = bounds_to_length(xmin=ymin, xmax=ymax)
+    
+    # initialize coordinates
+    x_domain = CartesianDomain1D(xmin=xmin, xmax=xmax, dx=dx, Nx=Nx, Lx=Lx)
+    y_domain = CartesianDomain1D(xmin=ymin, xmax=ymax, dx=dy, Nx=Ny, Lx=Ly)
+
+    # Initialize using the parent class method
+    return CartesianDomain2D(x_domain=x_domain, y_domain=y_domain)
 
 
-def _check_inputs(xmin, xmax, Nx, Lx, dx):
-    # check (xmax - xmin) == Lx
-    assert bounds_to_length(xmin=xmin, xmax=xmax) == Lx
-    # check (xmax - xmin) / (Nx - 1)
-    assert bounds_and_points_to_step(xmin=xmin, xmax=xmax, Nx=Nx) == dx
+def lat_lon_deltas(
+    lon: Array, lat: Array, radius: float = R_EARTH
+) -> Tuple[Array, Array]:
+    """Calculates the dx,dy for lon/lat coordinates. Uses
+    the spherical Earth projected onto a plane approx.
 
+    Eqn:
+        d = R √ [Δϕ² + cos(ϕₘ)Δλ]
 
-def _batch_check_inputs(xmin, xmax, Nx, Lx, dx):
-    pass
+        Δϕ - change in latitude
+        Δλ - change in longitude
+        ϕₘ - mean latitude
+        R - radius of the Earth
 
+    Args:
+        lon (Array): the longitude coordinates [degrees]
+        lat (Array): the latitude coordinates [degrees]
 
-class DomainLonLat(eqx.Module):
-    """Domain class for a rectangular domain
+    Returns:
+        dx (Array): the change in x [m]
+        dy (Array): the change in y [m]
 
-    Attributes:
-        size (Tuple[int]): The size of the domain
-        xmin: (Iterable[float]): The min bounds for the input domain
-        xmax: (Iterable[float]): The max bounds for the input domain
-        coord (List[Array]): The coordinates of the domain
-        grid (Array): A grid of the domain
-        ndim (int): The number of dimenions of the domain
-        size (Tuple[int]): The size of each dimenions of the domain
-        cell_volume (float): The total volume of a grid cell
+    Resources:
+        https://en.wikipedia.org/wiki/Geographical_distance#Spherical_Earth_projected_to_a_plane
+
     """
 
-    lat_min: float = eqx.static_field()
-    lat_max: float = eqx.static_field()
-    d_lat: float = eqx.static_field()
-    N_lat: float = eqx.static_field()
-    L_lat: float = eqx.static_field()
-    lat_coords: Array = eqx.static_field()
+    assert lon.ndim == lat.ndim
+    assert lon.ndim > 0 and lon.ndim < 3
 
-    lon_min: float = eqx.static_field()
-    lon_min: float = eqx.static_field()
-    d_lon: float = eqx.static_field()
-    N_lon: int = eqx.static_field()
-    L_lat: float = eqx.static_field()
-    lon_coords: Array = eqx.static_field()
+    if lon.ndim < 2:
+        lon, lat = jnp.meshgrid(lon, lat, indexing="ij")
 
+    lon = jnp.deg2rad(lon)
+    lat = jnp.deg2rad(lat)
 
-# def init_domain_from_bounds_and_numpoints(
-#     xmin: float = 0.0, xmax: float = 1.0, Nx: int = 50
-# ):
-#     """initialize 1d domain from bounds and number of points
-#     Eqs:
-#         dx = (x_max - x_min) / (Nx - 1)
-#         Lx = (x1 - x0)
+    lat_mean = jnp.mean(lat)
 
-#     Args:
-#         xmin (float): x min value
-#         xmax (float): maximum value
-#         Nx (int): the number of points for domain
-#     Returns:
-#         domain (Domain): the full domain
-#     """
+    dlon_dx, dlon_dy = jnp.gradient(lon)
+    dlat_dx, dlat_dy = jnp.gradient(lat)
 
-#     # calculate Nx
-#     dx = bounds_and_points_to_step(xmin=xmin, xmax=xmax, Nx=Nx)
+    dx = radius * jnp.hypot(dlat_dx, dlon_dx * jnp.cos(lat_mean))
+    dy = radius * jnp.hypot(dlat_dy, dlon_dy * jnp.cos(lat_mean))
 
-#     # calculate Lx
-#     Lx = bounds_to_length(xmin=xmin, xmax=xmax)
-
-#     return Domain(xmin=xmin, xmax=xmax, dx=dx, Nx=Nx, Lx=Lx)
-
-
-# def init_domain_from_bounds_and_step(xmin: float, xmax: float, dx: float) -> int:
-#     """initialize 1d domain from bounds and step_size
-#     Eqs:
-#          Nx = 1 + ceil((x_max - x_min) / dx)
-#         Lx = (x1 - x0)
-
-#     Args:
-#         xmin (float): x min value
-#         xmax (float): maximum value
-#         Nx (int): the number of points for domain
-#     Returns:
-#         domain (Domain): the full domain
-#     """
-
-#     # calculate Nx
-#     Nx = bounds_and_step_to_points(xmin=xmin, xmax=xmax, dx=dx)
-
-#     # calculate Lx
-#     Lx = bounds_to_length(xmin=xmin, xmax=xmax)
-
-#     return Domain(xmin=xmin, xmax=xmax, dx=dx, Nx=Nx, Lx=Lx)
+    return dx, dy

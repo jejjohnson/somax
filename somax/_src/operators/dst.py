@@ -40,18 +40,19 @@ def dstI2D(x, norm="ortho"):
 
 
 def laplacian_dst(nx, ny, dx, dy, mean: bool = True) -> Array:
+    
     if mean:
         dx = dy = jnp.mean(jnp.asarray([dx, dy]))
 
     x, y = jnp.meshgrid(
-        jnp.arange(1, nx + 1, dtype=dx.dtype),
-        jnp.arange(1, ny + 1, dtype=dx.dtype),
+        jnp.arange(1, nx),
+        jnp.arange(1, ny),
         indexing="ij",
     )
 
     return (
-        2 * (jnp.cos(jnp.pi / (nx + 1) * x) - 1) / dx**2
-        + 2 * (jnp.cos(jnp.pi / (ny + 1) * y) - 1) / dy**2
+        2 * (jnp.cos(jnp.pi / (nx) * x) - 1) / dx**2
+        + 2 * (jnp.cos(jnp.pi / (ny) * y) - 1) / dy**2
     )
 
 
@@ -65,7 +66,7 @@ def helmholtz_dst(
     mean: bool = True,
 ) -> Array:
     laplace_op = laplacian_dst(nx=nx, ny=ny, dx=dx, dy=dy, mean=mean)
-    return alpha * laplace_op - beta
+    return alpha * laplace_op - alpha * beta
 
 
 def helmholtz_fn(u, dx, dy, beta):

@@ -11,6 +11,7 @@ from somax._src.constants import GRAVITY
 from somax._src.domain.cartesian import CartesianDomain2D
 
 # from somax._src.models.linear_swm.model import LinearSWM
+from somax._src.operators.differential import divergence_2D
 from somax._src.operators.average import center_avg_2D, x_avg_2D, y_avg_2D
 from somax._src.operators.difference import (
     x_diff_2D,
@@ -82,21 +83,8 @@ def calculate_u_nonlinear_rhs(
     Notes:
         - uses reconstruction (5pt, improved weno) of q on vh flux
     """
-
-    # pad arrays
-    h_pad: Float[Array, "Nx+2 Ny"] = zero_gradient_boundaries(
-        h, ((1, 1), (0, 0))
-    )
-    ke_pad: Float[Array, "Nx+2 Ny"] = no_energy_boundaries(ke, ((1, 1), (0, 0)))
-
-    vh_flux_on_u: Float[Array, "Nx-1 Ny"] = center_avg_2D(vh_flux)
-
-    # no flux padding
-    vh_flux_on_u: Float[Array, "Nx+2 Ny"] = zero_gradient_boundaries(
-        vh_flux_on_u, ((1, 1), (0, 0))
-    )
-    vh_flux_on_u = vh_flux_on_u.at[1:-1].set(-vh_flux_on_u[1:-1])
-
+    vh_flux_on_u = center_avg_2D(vh_flux)
+    # print(f"Q: {q.shape} | VH FLUX: {vh_flux.shape} | V Mask: {v_mask.shape}")
     qhv_flux_on_u: Float[Array, "Nx+1 Ny"] = reconstruct(
         q=q,
         u=vh_flux_on_u,
@@ -105,23 +93,15 @@ def calculate_u_nonlinear_rhs(
         method=method,
         num_pts=num_pts,
     )
-
-    # apply mask
-    if u_mask is not None:
-        qhv_flux_on_u *= u_mask.values
-
+    
     # calculate work
-    dh_dx: Float[Array, "Nx+1 Ny"] = x_diff_2D(h_pad, step_size=dx)
+    dh_dx: Float[Array, "Nx+1 Ny"] = x_diff_2D(h, step_size=dx)
     work = gravity * dh_dx
 
     # calculate kinetic energy
-    dke_on_u: Float[Array, "Nx+1 Ny"] = x_diff_2D(ke_pad, step_size=dx)
+    dke_on_u: Float[Array, "Nx+1 Ny"] = x_diff_2D(ke, step_size=dx)
     # calculate u RHS
     u_rhs: Float[Array, "Nx+1 Ny"] = -work + qhv_flux_on_u - dke_on_u
-
-    # apply mask
-    if u_mask is not None:
-        u_rhs *= u_mask.values
 
     return u_rhs
 
@@ -153,7 +133,7 @@ def calculate_v_linear_rhs(
     u_on_v = center_avg_2D(u)
     dh_dy = y_diff_2D(h, step_size=dy)
 
-    v_rhs = -coriolis_param * u_on_v - gravity * dh_dy
+    v_rhs = - coriolis_param * u_on_v - gravity * dh_dy
     return v_rhs
 
 
@@ -177,20 +157,11 @@ def calculate_v_nonlinear_rhs(
     Notes:
         - uses reconstruction (5pt, improved weno) of q on uh flux
     """
-    h_pad: Float[Array, "Nx Ny+2"] = zero_gradient_boundaries(
-        h, ((0, 0), (1, 1))
-    )
-    ke_pad: Float[Array, "Nx Ny+2"] = no_energy_boundaries(ke, ((0, 0), (1, 1)))
-
-    uh_flux_on_v: Float[Array, "Nx Ny-1"] = center_avg_2D(uh_flux)
-
-    # assume no flux on boundaries
-    uh_flux_on_v: Float[Array, "Nx Ny+2"] = zero_gradient_boundaries(
-        uh_flux_on_v, ((0, 0), (1, 1))
-    )
-    uh_flux_on_v = uh_flux_on_v.at[1:-1].set(-uh_flux_on_v[1:-1])
-
-    qhu_flux_on_v: Float[Array, "Nx Ny+1"] = reconstruct(
+    
+    uh_flux_on_v = center_avg_2D(uh_flux)
+    
+    # print(f"Q: {q.shape} | VH FLUX: {uh_flux_on_v.shape} | U Mask: {v_mask.shape}")
+    qhu_flux_on_v: Float[Array, "Nx+1 Ny"] = reconstruct(
         q=q,
         u=uh_flux_on_v,
         u_mask=v_mask if v_mask is not None else None,
@@ -198,24 +169,18 @@ def calculate_v_nonlinear_rhs(
         method=method,
         num_pts=num_pts,
     )
-
-    # apply masks
-    if v_mask is not None:
-        qhu_flux_on_v *= v_mask.values
+    
 
     # calculate work
-    dh_dy: Float[Array, "Nx Ny+1"] = y_diff_2D(h_pad, step_size=dy)
+    dh_dy: Float[Array, "Nx Ny+1"] = y_diff_2D(h, step_size=dy)
     work = gravity * dh_dy
 
     # calculate kinetic energy
-    dke_on_v: Float[Array, "Nx Ny+1"] = y_diff_2D(ke_pad, step_size=dy)
+    dke_on_v: Float[Array, "Nx Ny+1"] = y_diff_2D(ke, step_size=dy)
 
     # calculate u RHS
     v_rhs: Float[Array, "Nx Ny+1"] = -work - qhu_flux_on_v - dke_on_v
 
-    # apply masks
-    if v_mask is not None:
-        v_rhs *= v_mask.values
 
     return v_rhs
 
@@ -273,10 +238,8 @@ def calculate_h_nonlinear_rhs(
     Returns:
         Float[ArrayLike, "Dx Dy"]: The right-hand side of the height equation.
     """
-    du_dx: Float[ArrayLike, "Dx Dy"] = x_diff_2D(uh_flux, step_size=dx)
-    dv_dy: Float[ArrayLike, "Dx Dy"] = y_diff_2D(vh_flux, step_size=dy)
-    h_rhs = -depth * (du_dx + dv_dy)
-    return h_rhs
+    div_flux = divergence_2D(u=uh_flux, v=vh_flux, step_size_x=dx, step_size_y=dy)
+    return - div_flux
 
 
 def potential_vorticity(
@@ -301,3 +264,4 @@ def potential_vorticity(
     q: Float[Array, "Nx-1 Ny-1"] = (vort_r + f) / h_on_q
 
     return q
+

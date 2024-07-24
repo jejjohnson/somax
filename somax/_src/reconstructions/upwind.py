@@ -17,6 +17,13 @@ from somax._src.reconstructions.weno import (
     weno_5pts,
     weno_5pts_improved,
 )
+from somax._src.reconstructions.stencils import (
+    stencil_2pt, 
+    stencil_2pt_bounds, 
+    stencil_3pt, 
+    stencil_3pt_bounds, 
+    stencil_5pt
+)
 
 
 def plusminus(u: Array, way: int = 1) -> tp.Tuple[Array, Array]:
@@ -42,13 +49,10 @@ def upwind_1pt(q: Array, dim: int) -> tp.Tuple[Array, Array]:
             shape[dim] = N-1
     """
     # get number of points
-    num_pts = q.shape[dim]
+    q0, q1 = stencil_2pt(q, dim=dim)
 
-    # define slicers
-    dyn_slicer = ft.partial(jax.lax.dynamic_slice_in_dim, axis=dim)
-
-    qi_left = dyn_slicer(q, 0, num_pts - 1)
-    qi_right = dyn_slicer(q, 1, num_pts - 1)
+    qi_left = linear_2pts(q0, q1)
+    qi_right = linear_2pts(q1, q0)
 
     return qi_left, qi_right
 

@@ -79,7 +79,7 @@ class SWM(eqx.Module):
         linear_momentum: bool = False,
         momentum_adv_scheme: str = "wenoz",
         momentum_adv_stencil: int = 5,
-        diffusion: bool=False,
+        diffusion: bool = False,
     ):
         self.gravity = gravity
         self.depth = depth

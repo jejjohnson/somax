@@ -28,7 +28,7 @@ def calculate_helmholtz_dst(
     # get Laplacian dst transform
     # print(domain.Nx, domain.dx)
     L_mat = laplacian_dst(
-        domain.Nx[0] - 2, domain.Nx[1] - 2, domain.dx[0], domain.dx[1]
+        domain.Nx[0] - 1, domain.Nx[1] - 1, domain.dx[0], domain.dx[1]
     )
     # print_debug_quantity(L_mat, "L_MAT")
     # get beta term

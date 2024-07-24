@@ -38,6 +38,21 @@ def domain_limits_transform(
     direction: tp.Optional[str] = None,
     stagger: tp.Optional[bool] = None,
 ) -> tp.Tuple:
+    """
+    Transforms the domain limits and parameters based on the given inputs.
+
+    Args:
+        xmin (float): The minimum x-coordinate of the domain.
+        xmax (float): The maximum x-coordinate of the domain.
+        dx (float): The grid spacing.
+        Lx (float): The length of the domain.
+        Nx (int): The number of grid points.
+        direction (str, optional): The direction of the transformation. Defaults to None.
+        stagger (bool, optional): Whether to apply staggered transformation. Defaults to None.
+
+    Returns:
+        Tuple: A tuple containing the transformed xmin, xmax, Nx, and Lx values.
+    """
     # convert staggers to bools
     if stagger is None:
         stagger = "0"
