@@ -48,7 +48,7 @@ class MQGParams(eqx.Module):
         num_pts: int = 5,
         method: str = "wenoz",
         heights: List[float] = [400.0, 1_100.0, 2_600.0],
-        reduced_gravities: List[float] = [0.025, 0.0125],
+        reduced_gravities: List[float] = [9.81, 0.025, 0.0125],
         ):
         self.f0 = f0
         self.beta = beta
@@ -87,10 +87,20 @@ class MQGState(eqx.Module):
         q_domain = q_domain.stagger_y(direction="inner", stagger=True)
         
         dx, dy = psi_domain.resolution
-        Y = psi_domain.grid[..., 1]
+        Y = psi_domain.coords_y
+        Y = jnp.tile(Y, (psi_domain.shape[0], 1))
         
-        
-        q = compute_q_from_psi(psi=psi, masks=masks, dx=dx, dy=dy, Y=Y, y0=params.y0, beta=params.beta, transformer=transformer)
+        q = compute_q_from_psi(
+            psi=psi,
+            masks=masks,
+            dx=dx,
+            dy=dy,
+            Y=psi_domain.grid[..., 1],
+            y0=params.y0,
+            A=transformer.A,
+            f0=params.f0,
+            beta=params.beta,
+            )
         
         return cls(psi=psi, q=q, psi_domain=psi_domain, q_domain=q_domain, masks=masks)
 
@@ -112,22 +122,33 @@ class MQGModel(eqx.Module):
     def calculate_q_from_psi(self, psi: Float[Array, "Nx+1 Ny+1"], masks: MaskGrid, psi_domain: CartesianDomain2D) -> Float[Array, "Nx Ny"]:
         
         dx, dy = psi_domain.resolution
-        Y = psi_domain.grid[..., 1]
         
-        q = compute_q_from_psi(psi=psi, masks=masks, dx=dx, dy=dy, Y=Y, y0=self.params.y0, beta=self.params.beta, transformer=self.transformer)
+        q = compute_q_from_psi(
+            psi=psi,
+            masks=masks,
+            dx=dx,
+            dy=dy,
+            Y=psi_domain.grid[..., 1],
+            y0=self.params.y0,
+            A=self.transformer.A,
+            f0=self.params.f0,
+            beta=self.params.beta,
+            )
         return q
     
     def calculate_psi_from_q(self, q: Float[Array, "Nx Ny"], masks: MaskGrid, q_domain: CartesianDomain2D) -> Float[Array, "Nx+1 Ny+1"]:
         
         Y = q_domain.grid[..., 1]
+        # Y = q_domain.coords_y
+        # Y = jnp.tile(Y, (q_domain.shape[0], 1))
         
         beta_term = self.params.beta * (Y - self.params.y0)
         
-        q_rhs = q - beta_term
+        helmholtz_rhs = q - beta_term
         
-        q_on_psi = jax.vmap(center_avg_2D)(q_rhs)
+        helmholtz_rhs = jax.vmap(center_avg_2D)(helmholtz_rhs)
         
-        psi = self.solver.solve(q_on_psi)
+        psi = self.solver.solve(helmholtz_rhs)
         
         return psi
 

@@ -8,23 +8,27 @@ from somax._src.constants import CORIOLIS
 from somax._src.masks.masks import MaskGrid
 from somax._src.operators.differential import laplacian_2D
 from somax._src.operators.average import center_avg_2D
+import einx
 
 
 def wind_curl(
     domain_size: float,
-    y_coords: Array,
+    Y: Array,
     domain_shape: Tuple[int, int],
-    tau0: float = 0.08 / 1000.0,
+    tau0: float = 0.08,
+    rho0: float = 1_000.,
+    H_0: float = 400.0
 ):  
     Nx, Ny = domain_shape
     Lx, Ly = domain_size
     curl_tau = (
-        - tau0
+        - tau0 / rho0 / H_0
         * (2 * jnp.pi / Ly)
-        * jnp.sin(2 * jnp.pi * y_coords / Ly)
+        * jnp.sin(2 * jnp.pi * Y / Ly)
     )
     
-    return jnp.tile(curl_tau, (Nx, 1))
+    # curl_tau = einx.rearrange("Ny -> Nx Ny", curl_tau, Nx=Nx)
+    return curl_tau
 
 
 class WindForcing(eqx.Module):
@@ -32,10 +36,25 @@ class WindForcing(eqx.Module):
     tau0: float = eqx.field(static=True)
     H_0: float = eqx.field(static=True)
     
-    def __init__(self, y_coords: Array, domain_size: Tuple[int, int], domain_shape: Tuple[int, int], tau0: float=0.08 / 1000.0, H_0: float=400.0):
+    def __init__(
+        self,
+        Y: Array,
+        domain_size: Tuple[int, int],
+        domain_shape: Tuple[int, int],
+        tau0: float=0.08,
+        rho0: float=1000.0,
+        H_0: float=400.0
+        ):
         self.tau0 = tau0
         self.H_0 = H_0
-        self.wind_forcing = wind_curl(domain_size, y_coords, domain_shape, tau0) / H_0
+        self.wind_forcing = wind_curl(
+            domain_size=domain_size,
+            Y=Y,
+            domain_shape=domain_shape,
+            tau0=tau0,
+            rho0=rho0,
+            H_0=H_0
+            ) 
     
     def __call__(self):
         return self.wind_forcing

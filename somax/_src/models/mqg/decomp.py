@@ -7,6 +7,17 @@ import numpy as np
 import einx
 
 
+def print_debug_quantity(quantity, name=""):
+    size = quantity.shape
+    min_ = jnp.min(quantity)
+    max_ = jnp.max(quantity)
+    mean_ = jnp.mean(quantity)
+    median_ = jnp.mean(quantity)
+    jax.debug.print(
+        f"{name}: {size} | Min: {min_:.6e} | Mean: {mean_:.6e} | Median: {median_:.6e} | Max: {max_:.6e}"
+    )
+    
+
 class Mode2LayerTransformer(eqx.Module):
     """
     Class representing a mode-to-layer transformer.
@@ -78,7 +89,7 @@ class Mode2LayerTransformer(eqx.Module):
             Array: Transformed data in layer space.
         """
         # matrix multiplication
-        u = einx.dot("l m, l x y -> m x y", self.A_layer_2_mode, u)
+        u = einx.dot("m l, l x y -> m x y", self.A_layer_2_mode, u)
         
         return u
     

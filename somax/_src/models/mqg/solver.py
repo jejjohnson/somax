@@ -30,7 +30,7 @@ class DSTSolver(eqx.Module):
         
         self.beta = transformer.lambda_sq
         # create helmholtz dst
-        Nx, Ny = np.array(mask_grid.node.shape) - 2
+        Nx, Ny = np.array(mask_grid.node.shape) - 1
         # print("node:", mask_grid.node.shape)
         H_mat = create_helmholtz_dst(Nx, Ny, dx, dy, self.beta)
         # print("H:", H_mat.shape)
@@ -53,20 +53,37 @@ class DSTSolver(eqx.Module):
     def solve(self, q: Array) -> Array:
         # transform 2 mode space
         src_modes = self.transformer.transform(q)
+        # print_debug_quantity(src_modes, "DQ_MODES")
         
         # solve the Poisson problem
         # psi_modes = jax.vmap(inverse_elliptic_dstI, in_axes=(0, 0))(src_modes, self.helmholtz_mat)
-        psi_modes = inverse_elliptic_dstI(src_modes, self.helmholtz_mat)
+        # print_debug_quantity(self.helmholtz_mat, "H_MAT")
+        psi_modes = jax.vmap(inverse_elliptic_dstI, in_axes=(0,0))(src_modes, self.helmholtz_mat)
         psi_modes = jnp.pad(psi_modes, pad_width=((0, 0), (1, 1), (1, 1)), mode="constant", constant_values=0.0)
+        
+        # print_debug_quantity(psi_modes, "DPSI_MODES")
         
         # add homogeneous solution
         psi_modes_mean = jax.vmap(center_avg_2D)(psi_modes)
         alpha = - einx.mean("Nz [Nx Ny]", psi_modes_mean) / self.homsol_mean
-        psi_modes += einx.dot("Nz, Nz Nx Ny -> Nz Nx Ny", alpha, self.homsol)
+        psi_modes += einx.multiply("Nz, Nz Nx Ny -> Nz Nx Ny", alpha, self.homsol)
+        
+        # print_debug_quantity(psi_modes, "DPSI_MODES (AFTER)")
         
         # transform 2 layer space
         psi = self.transformer.inverse_transform(psi_modes)
+        # print_debug_quantity(psi, "DPSI")
         return psi
+    
+def print_debug_quantity(quantity, name=""):
+    size = quantity.shape
+    min_ = jnp.min(quantity)
+    max_ = jnp.max(quantity)
+    mean_ = jnp.mean(quantity)
+    median_ = jnp.mean(quantity)
+    jax.debug.print(
+        f"{name}: {size} | Min: {min_:.6e} | Mean: {mean_:.6e} | Median: {median_:.6e} | Max: {max_:.6e}"
+    )
     
     
 def create_helmholtz_dst(
@@ -90,20 +107,20 @@ def create_helmholtz_dst(
     # L_mat = create_laplace_dst_dirichlet_op(
     #     Nx, Ny, dx, dy
     # )
-    # import math
-    # x, y = jnp.meshgrid(
-    #     jnp.arange(1, Ny), jnp.arange(1, Nx), indexing='ij'
-    #     )
-    # L_mat = 2*(jnp.cos(math.pi/Nx*x) - 1)/dx**2 + 2*(jnp.cos(math.pi/Ny*y) - 1)/dy**2
-    
-    # calculate wave numbers
-    x, y = jnp.arange(Nx), np.arange(Ny)
-    kx, ky = jnp.meshgrid(x, y, indexing="ij")
-    lam_kx = - 2.0 * jnp.sin( (np.pi / 2.0) * (kx + 1) / (Nx + 1) ) / dx
-    lam_ky = - 2.0 * jnp.sin( (np.pi / 2.0) * (ky + 1) / (Ny + 1) ) / dy
+    import math
+    x, y = jnp.meshgrid(
+        jnp.arange(1, Ny), jnp.arange(1, Nx), indexing='ij'
+        )
+    L_mat = 2*(jnp.cos(math.pi/Nx*x) - 1)/dx**2 + 2*(jnp.cos(math.pi/Ny*y) - 1)/dy**2
+    # print_debug_quantity(L_mat, "L_MAT")
+    # # calculate wave numbers
+    # x, y = jnp.arange(Nx), np.arange(Ny)
+    # kx, ky = jnp.meshgrid(x, y, indexing="ij")
+    # lam_kx = - 2.0 * jnp.sin( (np.pi / 2.0) * (kx + 1) / (Nx + 1) ) / dx
+    # lam_ky = - 2.0 * jnp.sin( (np.pi / 2.0) * (ky + 1) / (Ny + 1) ) / dy
 
-    # calculate Laplacian matrix
-    L_mat = - (lam_kx ** 2 + lam_ky ** 2)
+    # # calculate Laplacian matrix
+    # L_mat = - (lam_kx ** 2 + lam_ky ** 2)
 
     # calculate helmholtz dst (broadcasting)
     H_mat = einx.subtract("Nx Ny, Nz -> Nz Nx Ny", L_mat, beta)
@@ -122,7 +139,7 @@ def compute_homogeneous_solution(Nx: int, Ny: int, beta: Array, H_mat: Array):
     constant_field = jnp.pad(constant_field, total_pad, mode="constant", constant_values=1.0)
 
     # get homogeneous solution
-    sol = inverse_elliptic_dstI(constant_field[..., 1:-1, 1:-1], H_mat)
+    sol = jax.vmap(inverse_elliptic_dstI, in_axes=(0,0))(constant_field[..., 1:-1, 1:-1], H_mat)
     # sol = jax.vmap(inverse_elliptic_dstI, in_axes=(0, 0))(
     #     constant_field[..., 1:-1, 1:-1], H_mat
     # )
@@ -135,3 +152,13 @@ def compute_homogeneous_solution(Nx: int, Ny: int, beta: Array, H_mat: Array):
     # print("homsol: ", homsol.min(), homsol.mean(), homsol.max())
 
     return homsol
+
+def print_debug_quantity(quantity, name=""):
+    size = quantity.shape
+    min_ = jnp.min(quantity)
+    max_ = jnp.max(quantity)
+    mean_ = jnp.mean(quantity)
+    median_ = jnp.mean(quantity)
+    jax.debug.print(
+        f"{name}: {size} | Min: {min_:.6e} | Mean: {mean_:.6e} | Median: {median_:.6e} | Max: {max_:.6e}"
+    )

@@ -16,10 +16,15 @@ def compute_q_from_psi(
     dx: ArrayLike,
     dy: ArrayLike,
     Y: ArrayLike,
+    A: ArrayLike,
     y0: ArrayLike,
+    f0: ArrayLike,
     beta: ArrayLike,
-    transformer: Mode2LayerTransformer,
 ) -> Float[Array, "Nx Ny"]:
+    """
+    Eq:
+        qₖ = α∇²ψₖ + β(Aₖψₖ) + fₖ
+    """
     
     # calculate q
     fn = partial(laplacian_2D, step_size_x=dx, step_size_y=dy)
@@ -28,7 +33,8 @@ def compute_q_from_psi(
     # add zero boundaries
     psi_lap = jnp.pad(psi_lap, ((0, 0), (1, 1), (1, 1)), mode="constant", constant_values=0.0)
     
-    psi_beta = transformer.kappa * transformer.inverse_transform(psi)
+    # psi_beta = f0 ** 2 * einx.dot("l m, m x y -> l x y", A, psi)
+    psi_beta = f0 ** 2 * jnp.einsum("lm,mxy->lxy", A, psi)
     
     q_on_n = psi_lap - psi_beta
     
