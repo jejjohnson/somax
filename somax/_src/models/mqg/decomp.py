@@ -1,6 +1,7 @@
 from typing import List, Tuple
 import equinox as eqx
 from jaxtyping import Array
+import jax
 import jax.numpy as jnp
 import numpy as np
 import einx
@@ -33,11 +34,13 @@ class Mode2LayerTransformer(eqx.Module):
     A_layer_2_mode: Array = eqx.static_field()
     A_mode_2_layer: Array = eqx.static_field()
     ev_A: Array = eqx.static_field()
+    kappa: float = eqx.static_field()
     
     def __init__(
         self,
         heights: List[float],
         reduced_gravities: List[float],
+        kappa: float = 1.0,
         correction: bool = False
         ):
         """
@@ -58,11 +61,15 @@ class Mode2LayerTransformer(eqx.Module):
         self.A_layer_2_mode = A_layer_2_mode
         self.ev_A = ev_A
         self.A_mode_2_layer = A_mode_2_layer
+        self.kappa = kappa
         
+    @property
+    def lambda_sq(self):
+        return self.kappa * self.ev_A
     
     def transform(self, u: Array) -> Array:
         """
-        Transforms data from mode space to layer space.
+        Transforms data from layer space to mode space.
 
         Args:
             u (Array): Input data in mode space.
@@ -71,13 +78,13 @@ class Mode2LayerTransformer(eqx.Module):
             Array: Transformed data in layer space.
         """
         # matrix multiplication
-        u = einx.dot("... l, l ... -> l ...", self.A_layer_2_mode, u)
+        u = einx.dot("l m, l x y -> m x y", self.A_layer_2_mode, u)
         
         return u
     
     def inverse_transform(self, u: Array) -> Array:
         """
-        Transforms data from layer space to mode space.
+        Transforms data from mode space to layer space.
 
         Args:
             u (Array): Input data in layer space.
@@ -86,7 +93,7 @@ class Mode2LayerTransformer(eqx.Module):
             Array: Transformed data in mode space.
         """
         # matrix multiplication
-        u = einx.dot("... l, l ... -> l ...", self.A_mode_2_layer, u)
+        u = einx.dot("l m, m x y -> l x y", self.A_mode_2_layer, u)
         
         return u
 
@@ -116,7 +123,7 @@ def create_demposition_params(
     msg = "Incorrect number of heights to reduced gravities."
     msg += f"\nHeights: {heights} | {num_layers}"
     msg += f"\nReduced Gravities: {reduced_gravities} | {len(reduced_gravities)}"
-    assert num_layers - 1 == len(reduced_gravities), msg
+    assert num_layers == len(reduced_gravities), msg
     
     # calculate matrix M
     A = create_qg_multilayer_mat(heights, reduced_gravities, correction)
@@ -152,39 +159,75 @@ def create_qg_multilayer_mat(
 
     # initialize matrix
     A = np.zeros((num_heights, num_heights))
-
     if num_heights == 1:
         A[0, 0] = 1.0 / (heights[0] * reduced_gravities[0])
     else:
         # top rows
         if correction:
-            A[0, 0] = 1.0 / (heights[0] * 9.81) + 1.0 / (
-                heights[0] * reduced_gravities[0]
+            A[0, 0] = 1.0 / (heights[0] * reduced_gravities[0]) + 1.0 / (
+                heights[0] * reduced_gravities[1]
             )
         else:
-            A[0, 0] = 1.0 / (heights[0] * reduced_gravities[0])
-        A[0, 1] = -1.0 / (heights[0] * reduced_gravities[0])
+            A[0, 0] = 1.0 / (heights[0] * reduced_gravities[1])
+        A[0, 1] = -1.0 / (heights[0] * reduced_gravities[1])
 
         # interior rows
         for i in range(1, num_heights - 1):
-            A[i, i - 1] = -1.0 / (heights[i] * reduced_gravities[i - 1])
+            A[i, i - 1] = -1.0 / (heights[i] * reduced_gravities[i])
+            # A[i, i] = (
+            #     1.0
+            #     / heights[i]
+            #     * (1 / reduced_gravities[i] + 1 / reduced_gravities[i - 1])
+            # )
             A[i, i] = (
                 1.0
-                / heights[i]
-                * (1 / reduced_gravities[i] + 1 / reduced_gravities[i - 1])
+                / heights[i] * (1 / reduced_gravities[i+1] + 1 / reduced_gravities[i])
             )
             A[i, i + 1] = -1.0 / (
-                heights[i] * reduced_gravities[num_heights - 2]
+                heights[i] * reduced_gravities[i+1]
             )
 
         # bottom rows
         A[-1, -1] = 1.0 / (
-            heights[num_heights - 1] * reduced_gravities[num_heights - 2]
+            heights[num_heights - 1] * reduced_gravities[num_heights - 1]
         )
         A[-1, -2] = -1.0 / (
-            heights[num_heights - 1] * reduced_gravities[num_heights - 2]
+            heights[num_heights - 1] * reduced_gravities[num_heights - 1]
         )
     return A
+
+    # if num_heights == 1:
+    #     A[0, 0] = 1.0 / (heights[0] * reduced_gravities[0])
+    # else:
+    #     # top rows
+    #     if correction:
+    #         A[0, 0] = 1.0 / (heights[0] * 9.81) + 1.0 / (
+    #             heights[0] * reduced_gravities[0]
+    #         )
+    #     else:
+    #         A[0, 0] = 1.0 / (heights[0] * reduced_gravities[0])
+    #     A[0, 1] = -1.0 / (heights[0] * reduced_gravities[0])
+
+    #     # interior rows
+    #     for i in range(1, num_heights - 1):
+    #         A[i, i - 1] = -1.0 / (heights[i] * reduced_gravities[i - 1])
+    #         A[i, i] = (
+    #             1.0
+    #             / heights[i]
+    #             * (1 / reduced_gravities[i] + 1 / reduced_gravities[i - 1])
+    #         )
+    #         A[i, i + 1] = -1.0 / (
+    #             heights[i] * reduced_gravities[num_heights - 2]
+    #         )
+
+    #     # bottom rows
+    #     A[-1, -1] = 1.0 / (
+    #         heights[num_heights - 1] * reduced_gravities[num_heights - 2]
+    #     )
+    #     A[-1, -2] = -1.0 / (
+    #         heights[num_heights - 1] * reduced_gravities[num_heights - 2]
+    #     )
+    # return A
 
 
 def calculate_mode_matrices(A):
@@ -198,8 +241,9 @@ def calculate_mode_matrices(A):
     Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]: A tuple containing the eigenvalues of A,
     the left-to-mode matrix, and the mode-to-left matrix.
     """
-    ev_A, P = jnp.linalg.eig(A)
-    ev_A = jnp.real(ev_A)
-    Cl2m = jnp.linalg.inv(jnp.real(P))
-    Cm2l = jnp.real(P)
+    with jax.default_device(jax.devices("cpu")[0]):
+        ev_A, P = jnp.linalg.eig(A)
+        ev_A = jnp.real(ev_A)
+        Cl2m = jnp.linalg.inv(jnp.real(P))
+        Cm2l = jnp.real(P)
     return ev_A, Cl2m, Cm2l

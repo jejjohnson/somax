@@ -51,6 +51,7 @@ def compute_homogeneous_solution(u: Array, lambda_sq: Array, H_mat: Array):
     )
 
     # calculate the homogeneous solution
+    print("SOL: ", sol.min(), sol.mean(), sol.max())
     homsol = constant_field + sol * lambda_sq
 
     return homsol

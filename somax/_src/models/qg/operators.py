@@ -4,13 +4,8 @@ import einops
 from somax.domain import Domain
 from somax.masks import MaskGrid, NodeMask
 from somax.interp import y_avg_2D, center_avg_2D
-from somax.operators import (
-    divergence,
-    geostrophic_gradient,
-    laplacian,
-    reconstruct,
-)
-
+from somax._src.operators.differential import divergence_2D, perpendicular_gradient_2D, laplacian_2D
+from somax._src.reconstructions.base import reconstruct
 import jax
 import jax.numpy as jnp
 from jaxtyping import (
@@ -26,7 +21,7 @@ from somax._src.operators.dst import (
     inverse_elliptic_dst_cmm,
 )
 
-laplacian_batch = jax.vmap(laplacian, in_axes=(0, None))
+laplacian_batch = jax.vmap(laplacian_2D, in_axes=(0, None, None))
 
 
 def calculate_potential_vorticity(
@@ -38,7 +33,7 @@ def calculate_potential_vorticity(
     masks_q: Optional[MaskGrid] = None,
 ) -> Array:
     # calculate laplacian [Nx,Ny] --> [Nx-2, Ny-2]
-    psi_lap: Float[Array, "Nx-2 Ny-2"] = laplacian_batch(psi, domain.dx)
+    psi_lap: Float[Array, "Nx-2 Ny-2"] = laplacian_batch(psi, domain.dx[0], domain.dx[1])
 
     # pad (zero boundaries)
     psi_lap = jnp.pad(
@@ -171,7 +166,7 @@ def advection_rhs(
     else:
         # calculate velocities
         # u, v = -∂yΨ, ∂xΨ
-        u, v = geostrophic_gradient(u=psi, dx=dx, dy=dy)
+        u, v = perpendicular_gradient_2D(u=psi, step_size_x=dx, step_size_y=dy)
 
         # calculate fluxes
         # Note: take interior points of velocities (+ masks)
@@ -202,7 +197,7 @@ def advection_rhs(
 
         # calculate divergence
         # ∂x(flux_u) + ∂y(flux_v) = div(flux_u, flux_v)
-        div_flux: Float[Array, "Nx-1 Ny-1"] = divergence(
+        div_flux: Float[Array, "Nx-1 Ny-1"] = divergence_2D(
             q_flux_on_u, q_flux_on_v, dx, dy
         )
 
@@ -377,7 +372,6 @@ def calculate_psi_from_pv(
 
 from typing import Optional, Callable
 from jaxtyping import Float, Array
-from somax.operators import laplacian
 from somax.interp import x_avg_2D, y_avg_2D, center_avg_2D
 import jax
 import jax.numpy as jnp
@@ -404,7 +398,7 @@ def potential_vorticity(
 
     """
     # calculate laplacian
-    q: Float[Array, "Nx-2 Ny-2"] = alpha * laplacian(psi, step_size=step_size)
+    q: Float[Array, "Nx-2 Ny-2"] = alpha * laplacian_2D(psi, step_size_x=step_size[0], step_size_y=step_size[1])
 
     # pad with zeros
     if pad_bc_fn is not None:
@@ -449,9 +443,9 @@ def potential_vorticity_multilayer(
 
     """
     # calculate laplacian
-    laplacian_batch = jax.vmap(laplacian, in_axes=(0, None))
+    laplacian_batch = jax.vmap(laplacian_2D, in_axes=(0, None, None))
     q: Float[Array, "Nz Nx-2 Ny-2"] = alpha * laplacian_batch(
-        psi, step_size=step_size
+        psi, step_size[0], step_size[1]
     )
 
     # pad with zeros

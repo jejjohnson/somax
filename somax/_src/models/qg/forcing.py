@@ -2,7 +2,7 @@ import math
 
 from somax._src.domain.domain import Domain
 from somax.interp import center_avg_2D
-from somax.operators import laplacian
+from somax._src.operators.differential import laplacian_2D
 
 import jax
 import jax.numpy as jnp
@@ -67,8 +67,8 @@ def calculate_bottom_drag(
 
     # interior, vertex points on psi
     omega: Float[Array, "Nz Nx-2 Ny-2"] = jax.vmap(
-        laplacian, in_axes=(0, None)
-    )(psi, domain.dx)
+        laplacian_2D, in_axes=(0, None, None)
+    )(psi, domain.dx[0], domain.dx[1])
 
     # pad interior psi points
     omega: Float[Array, "Nz Nx Ny"] = jnp.pad(
@@ -88,9 +88,12 @@ def calculate_bottom_drag(
 
     # calculate bottom drag coefficient
     bottom_drag_coeff: Float[Array, ""] = delta_ek / H_z * f0 / 2.0
+    # bottom_drag_coeff: Float[Array, ""] = 1.43e-05
 
     # calculate bottom drag
     bottom_drag: Float[Array, "Nx Ny"] = -bottom_drag_coeff * omega[-1]
+    # bottom_drag: Float[Array, "Nx Ny"] = - 1.43e-05 * omega[-1]
+    
 
     # plot_field(omega)
     return bottom_drag

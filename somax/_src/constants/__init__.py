@@ -7,3 +7,4 @@ OMEGA = (
 )  # angular speed of the Earth (7.292e-5) (rad/s)
 DEG2M = 2 * math.pi * R_EARTH / 360.0  # Degrees to Meters
 RHO = 1.0e3  # density of water (kg/m^3)
+CORIOLIS = 9.375e-5

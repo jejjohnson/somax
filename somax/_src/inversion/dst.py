@@ -166,12 +166,8 @@ def inverse_elliptic_dstI(f, operator_dst):
     Returns:
     - The result of applying the inverse elliptic operator using the discrete sine transform.
     """
-    num_dims = f.ndim
-    padding = ((0, 0),) * (num_dims - 2) + ((1, 1), (1, 1))
     x = dstI2D(f)
     # print_debug_quantity(x)
     x /= operator_dst
     # print_debug_quantity(x)
-    return jnp.pad(
-        dstI2D(x), pad_width=padding, mode="constant", constant_values=0.0
-    )
+    return dstI2D(x)
