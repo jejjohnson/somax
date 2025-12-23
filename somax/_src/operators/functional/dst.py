@@ -85,7 +85,7 @@ def inverse_elliptic_dst(f, operator_dst):
     # print_debug_quantity(x)
     return jnp.pad(
         dstI2D(x), pad_width=padding, mode="constant", constant_values=0.0
-    ).astype(jnp.float64)
+    )
 
 
 def inverse_elliptic_dst_cmm(

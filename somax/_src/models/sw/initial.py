@@ -1,7 +1,7 @@
 from typing import Optional
 
-from fieldx._src.domain.domain import Domain
-from finitevolx import x_avg_2D
+from somax._src.domain.domain import Domain
+from somax.interp import x_avg_2D
 import jax.numpy as jnp
 from jaxtyping import (
     Array,

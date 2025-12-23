@@ -1,10 +1,9 @@
 import math
 
-from fieldx._src.domain.domain import Domain
-from finitevolx import (
-    center_avg_2D,
-    laplacian,
-)
+from somax._src.domain.domain import Domain
+from somax.interp import center_avg_2D
+from somax.operators import laplacian
+
 import jax
 import jax.numpy as jnp
 from jaxtyping import (
@@ -12,9 +11,12 @@ from jaxtyping import (
     Float,
 )
 
+from somax._src.models.qg.params import QGParams
+
 
 def calculate_wind_forcing(
     domain: Domain,
+    params: QGParams,
     H_0: float,
     tau0: float = 0.08 / 1_000.0,
 ) -> Float[Array, "Nx Ny"]:
@@ -34,7 +36,8 @@ def calculate_wind_forcing(
 
     # calculate tau
     # analytical form! =]
-    curl_tau = -tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * y_coords_center / Ly)
+    # curl_tau = -tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * y_coords_center / Ly)
+    curl_tau = tau0 * 2 * math.pi / Ly * jnp.sin(2 * math.pi * (y_coords_center-params.y0) / Ly) # ensure tau=0 at y0
 
     # print_debug_quantity(curl_tau, "CURL TAU")
 
