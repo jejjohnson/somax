@@ -49,6 +49,12 @@ lint = [
 typecheck = [
     "ty>=0.0.1a6",
 ]
+sim = [
+    "hydra-core>=1.3",
+    "hydra-zen>=0.13",
+    "omegaconf>=2.3",
+    "orbax-checkpoint>=0.6",
+]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

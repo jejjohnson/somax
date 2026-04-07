@@ -136,6 +136,20 @@ uv.lock
 # Plans (agent working docs)
 .plans/
 
+# pixi
+.pixi/
+pixi.lock
+
+# DVC
+/data/simulations/swm
+/data/simulations/mqg
+
+# MyST
+_build/
+
+# Hydra outputs
+outputs/
+
 # exclude data from source control by default
 datasets/*
 !datasets/.gitkeep

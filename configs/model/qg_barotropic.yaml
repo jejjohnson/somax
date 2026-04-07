@@ -1,0 +1,3 @@
+name: qg_barotropic
+description: Barotropic quasi-geostrophic model
+num_layers: 1

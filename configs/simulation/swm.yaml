@@ -1,0 +1,19 @@
+defaults:
+  - _self_
+
+domain:
+  nx: 200
+  ny: 100
+  dx: 5.0e3
+  dy: 5.0e3
+
+physics:
+  gravity: 9.81
+  coriolis_f0: 1.0e-4
+  coriolis_beta: 1.6e-11
+  depth_h0: 500.0
+
+timestepping:
+  dt: 300.0
+  t_end: 86400.0
+  save_interval: 3600.0

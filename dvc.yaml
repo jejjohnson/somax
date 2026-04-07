@@ -1,0 +1,28 @@
+stages:
+  simulate-swm:
+    cmd: python scripts/swm.py
+    deps:
+      - scripts/swm.py
+      - somax/_src/models/sw
+      - configs/simulation/swm.yaml
+    params:
+      - configs/simulation/swm.yaml:
+          - domain
+          - physics
+          - timestepping
+    outs:
+      - data/simulations/swm
+
+  simulate-mqg:
+    cmd: python scripts/mqg_doublegyre.py
+    deps:
+      - scripts/mqg_doublegyre.py
+      - somax/_src/models/qg
+      - configs/simulation/mqg.yaml
+    params:
+      - configs/simulation/mqg.yaml:
+          - domain
+          - physics
+          - timestepping
+    outs:
+      - data/simulations/mqg
