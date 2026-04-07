@@ -127,6 +127,15 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# ruff
+.ruff_cache/
+
+# uv
+uv.lock
+
+# Plans (agent working docs)
+.plans/
+
 # exclude data from source control by default
 datasets/*
 !datasets/.gitkeep
