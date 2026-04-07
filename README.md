@@ -1,108 +1,177 @@
-# Simple Ocean Models JAX (In Progress)
-[![CodeFactor](https://www.codefactor.io/repository/github/jejjohnson/somax/badge)](https://www.codefactor.io/repository/github/jejjohnson/somax)
+# somax — Simple Ocean Models in JAX
+
+[![Tests](https://github.com/jejjohnson/somax/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/somax/actions/workflows/ci.yml)
+[![Lint](https://github.com/jejjohnson/somax/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/somax/actions/workflows/lint.yml)
 [![codecov](https://codecov.io/gh/jejjohnson/somax/branch/main/graph/badge.svg?token=YGPQQEAK91)](https://codecov.io/gh/jejjohnson/somax)
 
-> This repo hosts some models which are useful for studying ocean dynamics via *simple* ODES/PDEs.
-> This is also a demonstration for how one can use different pieces from other packages.
-> This repo is more of a model zoo to showcase how we can stitch these different pieces together to build simple, robust PDEs for research.
-
+> A model zoo for studying ocean and atmosphere dynamics through simple ODEs/PDEs, built on JAX.
 
 ---
+
 ## Motivation
 
-There exists many large-scale general circulation models within the oceanography community, e.g. MITGCM, NEMO, MOM6, etc.
-There are even some more smaller scale GCMs that are written in more modern languages, e.g. veros, Oceananigans, etc.
-However, there is a missing step for many researchers to experiment with different, simple ocean-like dynamical systems as a stepping-stone to get to the more complex system.
-There exists a wealth of literature available for the community regarding the Lorenz family so that users can experiment with chaotic systems.
-There is also a number of key packages to allow users to experiment with simple models like the Quasigeostrophic model.
-There are also tidbit packages for shallow water models that are scattered through-out GitHub.
-However, we're missing a simple package which tries to aggregate the latest research on models like the QG and SWM.
-This package attempts to bridge this gap.
+Large-scale general circulation models (MITGCM, NEMO, MOM6) are powerful but complex. Smaller-scale GCMs in modern languages (Veros, Oceananigans) exist, but there is a gap for researchers who want to experiment with *simple* ocean-like dynamical systems as a stepping-stone to more complex models.
 
+somax bridges this gap by aggregating canonical models — from Lorenz attractors to quasi-geostrophic and shallow water systems — with a unified JAX-based API that supports automatic differentiation, GPU acceleration, and modern scientific computing workflows.
 
 ---
 
-*Functional API**.
-We use the `finitevolx` package for implementing spatial operators with finite volume considerations. 
-We also use the `spectraldiffx` package for implementing spatial operators with the pseudospectral considerations.
-For timesteppers, we use the `diffrax` package for implementing advanced time stepping schemes like N-order Runge-Kutta or Heun.
+## Architecture
 
-**Field API**. (TODO)
-We have an operator API which will allow easier use of defining PDEs. 
-This makes use of the `fieldx` package which defines custom spatiotemporal containers for fields which mimic the `xarray` package.
+somax is organized in three layers:
 
+| Layer | Location | Purpose |
+|-------|----------|---------|
+| **Installable library** | `somax/` | Reusable model classes built on [finitevolX](https://github.com/jejjohnson/finitevolX) |
+| **Simulation infrastructure** | `scripts/`, `configs/` | Ready-to-run simulations with Hydra + DVC |
+| **Jupyter Book** | `content/` | Theory and practice documentation (MyST) |
 
----
-## Key Features
+### Key Dependencies
 
-**Models**.
-* [X] Linear Shallow Water Model
-* [X] Quasi-Geostrophic Model
-* [X] Shallow Water Model
-* [X] Multi-Layer Quasi-Geostrophic Model
-* [ ] Multi-Layer Shallow Water Model
-
-**Elliptical Solvers**.
-We have the Discrete Sine Transform for the fast Poisson solver. 
-We also have other solvers available from the JAX community.
-
-**Dynamical Model API**.
-We have nicely bundled PDEs for specific use cases, e.g. shallow water, (multilayer) quasi-geostrophic, etc.
+| Package | Role |
+|---------|------|
+| [finitevolX](https://github.com/jejjohnson/finitevolX) | Discrete operators on Arakawa C-grids |
+| [diffrax](https://github.com/patrick-kidger/diffrax) | Time integration and adjoint methods |
+| [equinox](https://github.com/patrick-kidger/equinox) | PyTree-based modules |
+| [Hydra](https://hydra.cc/) / [hydra-zen](https://github.com/mit-ll-responsible-ai/hydra-zen) | Configuration composition |
+| [DVC](https://dvc.org/) | Data versioning and pipeline DAGs |
+| [pixi](https://pixi.sh/) | Environment management and task runner |
 
 ---
+
+## Models
+
+- [x] Linear Shallow Water Model
+- [x] Shallow Water Model
+- [x] Quasi-Geostrophic Model (barotropic)
+- [x] Multi-Layer Quasi-Geostrophic Model
+- [x] Lorenz '63 / '96 chaotic systems
+- [ ] Multi-Layer Shallow Water Model
+
+---
+
 ## Installation
 
+### With pixi (recommended)
 
-#### Pip Installation
-
-We can install it directly through pip.
-First we create a development environment (optional).
+[pixi](https://pixi.sh/) manages the full environment including non-Python dependencies (DVC, Node.js for docs, JupyterLab):
 
 ```bash
-conda create -n somax python=3.11 poetry
-conda activate somax
+pixi install
 ```
 
-Then we can pip install the `somax` package.
+### With uv (library only)
+
+```bash
+uv sync --all-groups
+```
+
+### With pip
 
 ```bash
 pip install git+https://github.com/jejjohnson/somax.git
 ```
 
 ---
-#### Development
 
-We also use poetry for the development environment. First, we clone the repo
+## Quick Start
+
+### Run a simulation
 
 ```bash
-git clone https://github.com/jejjohnson/somax.git
-cd somax
+# With pixi tasks
+pixi run simulate-swm
+pixi run simulate-mqg
+
+# With DVC pipelines
+pixi run dvc repro simulate-swm
 ```
 
-Then we create a conda environment (optional)
+### Override configuration from the command line (Hydra)
 
 ```bash
-conda create -n somax python=3.11 poetry
-conda activate somax
+python scripts/swm.py domain.nx=400 domain.ny=200 timestepping.dt=150
 ```
 
-We install all of the requirements using poetry
+### Run tests
 
 ```bash
-poetry install
+# With pixi
+pixi run test
+
+# With uv
+uv run pytest -v
+```
+
+### Lint and format
+
+```bash
+# With pixi
+pixi run lint
+pixi run format
+
+# With uv / make
+make lint
+make format
 ```
 
 ---
-#### Using GPUs
 
-JAX allows us to use GPUs with minimal changes to the code.
-We can use any steps above to install the package. 
-However, after installation, it may be necessary to reinstall jax with the GPU requirements. 
-This can be done through pip.
+## Project Structure
 
-```bash
-conda activate somax
-pip install --upgrade "jax[cuda]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+somax/
+├── somax/              # Installable library
+│   ├── _src/           # Internal implementation
+│   │   ├── models/     # SWM, QG, Lorenz systems
+│   │   ├── operators/  # Spatial and differential operators
+│   │   ├── domain/     # Grid and domain definitions
+│   │   └── ...
+│   └── *.py            # Public API modules
+├── scripts/            # Simulation entry points
+├── configs/            # Hydra configuration
+│   ├── simulation/     # SWM, MQG run configs
+│   └── model/          # Model variant configs
+├── content/            # Jupyter Book (MyST) documentation
+├── tests/              # Test suite
+├── data/               # DVC-managed simulation outputs
+├── pixi.toml           # pixi environment + tasks
+├── pyproject.toml      # PEP 621 project metadata (hatchling)
+├── dvc.yaml            # DVC pipeline definition
+└── myst.yml            # Jupyter Book configuration
 ```
 
-Please see the installation instructions on the [jax documentation](https://jax.readthedocs.io/en/latest/installation.html#nvidia-gpu) for further instructions.
+---
+
+## Development
+
+```bash
+# Install everything (deps + pre-commit hooks)
+make install
+
+# Run the full quality suite
+make lint          # ruff check
+make format        # ruff format + fix
+make typecheck     # ty type checker
+make test          # pytest (no coverage)
+make test-cov      # pytest with coverage
+make precommit     # all pre-commit hooks
+```
+
+---
+
+## GPU Support
+
+JAX supports GPU acceleration out of the box. After installing somax, install the GPU-enabled JAX build:
+
+```bash
+pip install --upgrade "jax[cuda12]"
+```
+
+See the [JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html) for details.
+
+---
+
+## License
+
+[MIT](LICENSE)
