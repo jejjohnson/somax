@@ -171,20 +171,28 @@ plt.show()
 # Differentiating through an ODE solve requires an **adjoint method**
 # that trades off memory, accuracy, and speed. diffrax provides three:
 #
-# | Adjoint | Memory | Gradients | Best for |
+# | Adjoint | Memory | Gradients | Use case |
 # |---------|--------|-----------|----------|
 # | `RecursiveCheckpointAdjoint` | $O(\sqrt{N})$ | Exact | **Default** |
-# | `DirectAdjoint` | $O(N)$ | Exact | Short windows, forward-mode AD |
-# | `BacksolveAdjoint` | $O(1)$ | Approximate | Very long windows, memory-critical |
+# | `DirectAdjoint` | $O(N)$ | Exact | Short windows |
+# | `BacksolveAdjoint` | $O(1)$ | Approx | Long windows |
+# | `ImplicitAdjoint` | $O(1)$ | Exact | Steady states |
 #
-# `RecursiveCheckpointAdjoint` (the default) uses Griewank--Walther
-# optimal checkpointing: it re-computes forward steps from checkpoints
-# during the backward pass, giving exact gradients with sub-linear
-# memory. `DirectAdjoint` stores the entire forward trajectory —
-# exact but $O(N)$ memory. `BacksolveAdjoint` solves the continuous
-# adjoint ODE backwards in time with $O(1)$ memory, but the gradients
-# are only approximate (discretize-then-optimize vs
-# optimize-then-discretize).
+# - **`RecursiveCheckpointAdjoint`** (the default) uses
+#   Griewank--Walther optimal checkpointing: it re-computes forward
+#   steps from saved checkpoints during the backward pass, giving
+#   exact gradients with sub-linear memory.
+# - **`DirectAdjoint`** stores the entire forward trajectory —
+#   exact but $O(N)$ memory. Also supports forward-mode AD.
+# - **`BacksolveAdjoint`** solves the continuous adjoint ODE
+#   backwards in time with $O(1)$ memory. Gradients are approximate
+#   (optimize-then-discretize $\neq$ discretize-then-optimize).
+# - **`ImplicitAdjoint`** differentiates through the implicit
+#   function theorem: if the solver finds a fixed point $u^*$ such
+#   that $g(u^*, \theta) = 0$, the gradient is
+#   $du^*/d\theta = -(dg/du)^{-1}\, dg/d\theta$. Memory is $O(1)$
+#   and gradients are exact, but only applies to steady-state /
+#   fixed-point problems (not time-stepping).
 
 # %% [markdown]
 # ### 5a. Gradient with respect to parameters

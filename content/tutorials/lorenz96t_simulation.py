@@ -259,11 +259,23 @@ plt.show()
 # than a single-scale system because the fast variables demand many
 # time steps. diffrax provides three adjoint methods:
 #
-# | Adjoint | Memory | Gradients | Best for |
+# | Adjoint | Memory | Gradients | Use case |
 # |---------|--------|-----------|----------|
 # | `RecursiveCheckpointAdjoint` | $O(\sqrt{N})$ | Exact | **Default** |
-# | `DirectAdjoint` | $O(N)$ | Exact | Short windows, forward-mode AD |
-# | `BacksolveAdjoint` | $O(1)$ | Approximate | Very long windows, memory-critical |
+# | `DirectAdjoint` | $O(N)$ | Exact | Short windows |
+# | `BacksolveAdjoint` | $O(1)$ | Approx | Long windows |
+# | `ImplicitAdjoint` | $O(1)$ | Exact | Steady states |
+#
+# - **`RecursiveCheckpointAdjoint`** (the default) uses optimal
+#   checkpointing: re-computes forward steps from saved checkpoints,
+#   giving exact gradients with $O(\sqrt{N})$ memory.
+# - **`DirectAdjoint`** stores the entire forward trajectory —
+#   exact but $O(N)$ memory.
+# - **`BacksolveAdjoint`** solves the continuous adjoint ODE
+#   backwards with $O(1)$ memory. Gradients are approximate.
+# - **`ImplicitAdjoint`** uses the implicit function theorem:
+#   $du^*/d\theta = -(dg/du)^{-1}\, dg/d\theta$. Exact and
+#   $O(1)$ memory, but only for steady-state / fixed-point solves.
 #
 # For this system with $dt = 5 \times 10^{-4}$, even a short window
 # of $T = 0.5$ requires 1000 steps. `RecursiveCheckpointAdjoint` is

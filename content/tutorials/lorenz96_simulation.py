@@ -237,16 +237,24 @@ plt.show()
 # diffrax supports several adjoint methods for backpropagating
 # through `diffeqsolve`. Each trades off memory, accuracy, and speed:
 #
-# | Adjoint | Memory | Gradients | Best for |
+# | Adjoint | Memory | Gradients | Use case |
 # |---------|--------|-----------|----------|
 # | `RecursiveCheckpointAdjoint` | $O(\sqrt{N})$ | Exact | **Default** |
-# | `DirectAdjoint` | $O(N)$ | Exact | Short windows, forward-mode AD |
-# | `BacksolveAdjoint` | $O(1)$ | Approximate | Very long windows, memory-critical |
+# | `DirectAdjoint` | $O(N)$ | Exact | Short windows |
+# | `BacksolveAdjoint` | $O(1)$ | Approx | Long windows |
+# | `ImplicitAdjoint` | $O(1)$ | Exact | Steady states |
 #
-# `RecursiveCheckpointAdjoint` (the default) uses optimal
-# checkpointing: it re-computes forward steps from saved checkpoints
-# during the backward pass, giving exact gradients with sub-linear
-# memory.
+# - **`RecursiveCheckpointAdjoint`** (the default) uses optimal
+#   checkpointing: re-computes forward steps from saved checkpoints,
+#   giving exact gradients with $O(\sqrt{N})$ memory.
+# - **`DirectAdjoint`** stores the entire forward trajectory —
+#   exact but $O(N)$ memory. Also supports forward-mode AD.
+# - **`BacksolveAdjoint`** solves the continuous adjoint ODE
+#   backwards with $O(1)$ memory. Gradients are approximate
+#   (optimize-then-discretize).
+# - **`ImplicitAdjoint`** uses the implicit function theorem:
+#   $du^*/d\theta = -(dg/du)^{-1}\, dg/d\theta$. Exact and
+#   $O(1)$ memory, but only for steady-state / fixed-point solves.
 
 # %% [markdown]
 # ### 7a. Gradient w.r.t. parameters
