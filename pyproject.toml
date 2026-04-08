@@ -29,7 +29,7 @@ dependencies = [
     "diffrax>=0.6.0",
     "lineax>=0.0.6",
     "einops>=0.8.0",
-    "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git",
+    "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.39",
     "spectraldiffx>=0.0.10",
 ]
 
