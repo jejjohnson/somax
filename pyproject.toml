@@ -94,6 +94,7 @@ lines-after-imports = 2
 python-version = "3.12"
 
 [tool.ty.rules]
+call-non-callable = "ignore"  # eqx.Module subclasses with __call__
 invalid-argument-type = "ignore"
 invalid-assignment = "ignore"
 invalid-method-override = "ignore"
@@ -101,6 +102,7 @@ invalid-parameter-default = "ignore"
 invalid-return-type = "ignore"
 not-iterable = "ignore"
 unresolved-attribute = "ignore"
+unresolved-import = "ignore"  # optional deps (orbax) + git-based deps
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
