@@ -1,0 +1,27 @@
+version: 1
+project:
+  title: "somax: Simple Ocean Models in JAX"
+  authors:
+    - name: Juan Emmanuel Johnson
+      affiliation: University of Valencia
+    - name: Takaya Uchida
+  bibliography:
+    - references.bib
+  toc:
+    - file: content/index
+    - title: Notes
+      children:
+        - file: content/notes/grids
+        - file: content/notes/shallow_water
+        - file: content/notes/quasigeostrophic
+    - title: Tutorials
+      children:
+        - file: content/tutorials/getting_started
+        - file: content/tutorials/swm_simulation
+        - file: content/tutorials/qg_simulation
+    - title: API Reference
+      children:
+        - file: content/api/reference
+site:
+  template: book-theme
+  title: "somax: Simple Ocean Models in JAX"

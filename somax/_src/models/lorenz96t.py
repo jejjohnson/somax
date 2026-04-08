@@ -1,17 +1,13 @@
 from typing import (
     Any,
     NamedTuple,
-    Tuple,
-    Union,
 )
 
 import einops
 import equinox as eqx
-from equinox import static_field
 import jax
 import jax.numpy as jnp
 import jax.random as jrandom
-from jax.random import PRNGKeyArray
 from jaxtyping import (
     Array,
     PyTree,
@@ -30,10 +26,10 @@ class L96TParams(eqx.Module):
         c (Array) : time-scale ratio
     """
 
-    F: Array = static_field()
-    h: Array = static_field()
-    b: Array = static_field()
-    c: Array = static_field()
+    F: Array = eqx.field(static=True)
+    h: Array = eqx.field(static=True)
+    b: Array = eqx.field(static=True)
+    c: Array = eqx.field(static=True)
 
 
 class L96TState(NamedTuple):
@@ -43,15 +39,17 @@ class L96TState(NamedTuple):
     @classmethod
     def init_state(
         cls,
-        ndims: Tuple[int] | int = (10, 20),
-        noise: Tuple[float] | float = 0.01,
+        ndims: tuple[int] | int = (10, 20),
+        noise: tuple[float] | float = 0.01,
         batchsize: int = 1,
         b: float = 10.0,
-        key: PRNGKeyArray = jrandom.PRNGKey(123),
+        key: jax.Array | None = None,
     ):
+        if key is None:
+            key = jrandom.PRNGKey(123)
         # check dims
-        noise: Tuple[float] = check_dims(value=noise, ndim=2, name="noise")
-        ndims: Tuple[int] = check_dims(value=ndims, ndim=2, name="ndims")
+        noise: tuple[float] = check_dims(value=noise, ndim=2, name="noise")
+        ndims: tuple[int] = check_dims(value=ndims, ndim=2, name="ndims")
 
         keyx, keyy = jrandom.split(key=key, num=2)
         if batchsize > 1:
@@ -68,14 +66,14 @@ class L96TState(NamedTuple):
 
     @staticmethod
     def init_state_and_params(
-        ndims: Tuple[int] | int = (10, 20),
-        noise: Tuple[float] | float = 0.01,
+        ndims: tuple[int] | int = (10, 20),
+        noise: tuple[float] | float = 0.01,
         batchsize: int = 1,
         b: float = 10.0,
         c: float = 10.0,
         h: float = 1.0,
         F: float = 18.0,
-        key: PRNGKeyArray = jrandom.PRNGKey(123),
+        key: jax.Array | None = None,
     ):
         return L96TState.init_state(
             ndims=ndims,
@@ -99,7 +97,7 @@ class Lorenz96t(DynamicalSystem):
         x, y = state.x, state.y
         F, h, b, c = args.F, args.h, args.b, args.c
 
-        x_dot, y_dot, coupling = rhs_lorenz_96t(
+        x_dot, y_dot, _coupling = rhs_lorenz_96t(
             x=x, y=y, F=F, h=h, c=c, b=b, advection=self.advection, return_coupling=True
         )
 
@@ -119,7 +117,7 @@ def rhs_lorenz_96t(
     c: Array | float = 10.0,
     advection: bool = True,
     return_coupling: bool = True,
-) -> Union[Array, Array, Array]:
+) -> Array | Array | Array:
     x_dims = x.shape[0]
     xy_dims = y.shape[0]
     y_dims = xy_dims // x_dims
@@ -165,9 +163,7 @@ def rhs_lorenz_96t(
 
 
 def check_dims(value: Any, ndim: int, name: str):
-    if isinstance(value, int):
-        return (value,) * ndim
-    elif isinstance(value, float):
+    if isinstance(value, (int, float)):
         return (value,) * ndim
     elif isinstance(value, jax.Array):
         return jnp.repeat(value, ndim)

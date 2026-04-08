@@ -1,0 +1,44 @@
+# Labeler configuration
+# See: https://github.com/actions/labeler
+
+"core":
+  - changed-files:
+      - any-glob-to-any-file: "somax/_src/core/**"
+
+"models":
+  - changed-files:
+      - any-glob-to-any-file: "somax/_src/models/**"
+
+"domain":
+  - changed-files:
+      - any-glob-to-any-file: "somax/_src/domain/**"
+
+"tests":
+  - changed-files:
+      - any-glob-to-any-file: "tests/**"
+
+"ci":
+  - changed-files:
+      - any-glob-to-any-file: ".github/workflows/**"
+
+"docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "content/**"
+          - "myst.yml"
+          - "README.md"
+
+"infrastructure":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "pixi.toml"
+          - "Makefile"
+          - "dvc.yaml"
+          - "configs/**"
+
+"dependencies":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "pixi.toml"

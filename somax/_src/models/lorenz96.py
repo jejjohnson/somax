@@ -1,10 +1,9 @@
 from typing import NamedTuple
 
 import equinox as eqx
-from equinox import static_field
+import jax
 import jax.numpy as jnp
 import jax.random as jrandom
-from jax.random import PRNGKeyArray
 from jaxtyping import (
     Array,
     PyTree,
@@ -14,7 +13,7 @@ from .base import DynamicalSystem
 
 
 class L96Params(eqx.Module):
-    F: Array = static_field()
+    F: Array = eqx.field(static=True)
 
 
 class L96State(NamedTuple):
@@ -27,8 +26,10 @@ class L96State(NamedTuple):
         noise: float = 0.01,
         batchsize: int = 1,
         F: float = 8.0,
-        key: PRNGKeyArray = jrandom.PRNGKey(123),
+        key: jax.Array | None = None,
     ):
+        if key is None:
+            key = jrandom.PRNGKey(123)
         if batchsize > 1:
             x0 = F * jnp.ones(shape=(batchsize, ndim))
             perturb = noise * jrandom.normal(key, shape=(batchsize,))
@@ -46,7 +47,7 @@ class L96State(NamedTuple):
         noise: float = 0.01,
         F: float = 8,
         batchsize: int = 1,
-        key: PRNGKeyArray = jrandom.PRNGKey(123),
+        key: jax.Array | None = None,
     ):
         return L96State.init_state(
             ndim=ndim, noise=noise, batchsize=batchsize, F=F, key=key

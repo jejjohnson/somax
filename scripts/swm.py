@@ -1,4 +1,4 @@
-""" swm.py
+"""swm.py
 
 2D shallow water model with:
 
@@ -10,19 +10,13 @@
     * mass term: h --> u,v
     * momentum term: q --> uh,vh
 """
+
 from typing import NamedTuple
 
-import autoroot
-from finitevolx._src.domain.domain import Domain
 import jax
 import jax.numpy as jnp
-from jaxtyping import (
-    Array,
-    Float,
-)
 import matplotlib.pyplot as plt
 import numpy as np
-
 from finitevolx import (
     MaskGrid,
     bernoulli_potential,
@@ -34,6 +28,12 @@ from finitevolx import (
     x_avg_2D,
     y_avg_2D,
 )
+from finitevolx._src.domain.domain import Domain
+from jaxtyping import (
+    Array,
+    Float,
+)
+
 
 jax.config.update("jax_enable_x64", True)
 
@@ -607,8 +607,6 @@ if __name__ == "__main__":
             # u,v --> h
             u_on_h = center_avg_2D(u)
             v_on_h = center_avg_2D(v)
-
-
 
             # update plot
             update_plot(t, h, u_on_h, v_on_h, ax)
