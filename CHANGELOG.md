@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.3](https://github.com/jejjohnson/somax/compare/somax-v0.0.2...somax-v0.0.3) (2026-04-08)
+
+
+### Features
+
+* **core:** add SeasonalWindForcing and InterpolatedForcing ([#60](https://github.com/jejjohnson/somax/issues/60)) ([2f66ab2](https://github.com/jejjohnson/somax/commit/2f66ab24b27d1fb6d8c73895b2c6f6cef24bd293))
+* migrate Lorenz models to SomaxModel + tutorial notebooks ([#30](https://github.com/jejjohnson/somax/issues/30), [#33](https://github.com/jejjohnson/somax/issues/33)) ([0290b62](https://github.com/jejjohnson/somax/commit/0290b6241bcca8cfbea1d1e94c6ee303505aef87))
+* **models:** migrate Lorenz models to SomaxModel + tutorial notebooks ([#59](https://github.com/jejjohnson/somax/issues/59)) ([0290b62](https://github.com/jejjohnson/somax/commit/0290b6241bcca8cfbea1d1e94c6ee303505aef87))
+
 ## [0.0.2](https://github.com/jejjohnson/somax/compare/somax-v0.0.1...somax-v0.0.2) (2026-04-08)
 
 
