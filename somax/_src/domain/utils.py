@@ -3,15 +3,15 @@ import typing as tp
 
 import einops
 import jax.numpy as jnp
-from jaxtyping import Array
 import numpy as np
+from jaxtyping import Array
 
 
 def make_coords(xmin, xmax, nx):
     return jnp.linspace(start=xmin, stop=xmax, num=nx, endpoint=True)
 
 
-def make_grid_from_coords(coords: tp.Iterable) -> tp.List[Array]:
+def make_grid_from_coords(coords: tp.Iterable) -> list[Array]:
     if isinstance(coords, tp.Iterable):
         return jnp.meshgrid(*coords, indexing="ij")
     elif isinstance(coords, (jnp.ndarray, np.ndarray)):
@@ -105,7 +105,7 @@ def length_and_step_to_points(Lx: float, dx: float) -> int:
     Returns:
         Nx (Array | int): the number of points
     """
-    return int(math.floor(1.0 + float(Lx) / float(dx)))
+    return math.floor(1.0 + float(Lx) / float(dx))
 
 
 def bounds_and_step_to_points(xmin: float, xmax: float, dx: float) -> int:
@@ -127,7 +127,7 @@ def bounds_and_step_to_points(xmin: float, xmax: float, dx: float) -> int:
     return length_and_step_to_points(Lx=Lx, dx=dx)
 
 
-def check_stagger(dx: tp.Tuple, stagger: tp.Tuple[str] = None):
+def check_stagger(dx: tuple, stagger: tuple[str] | None = None):
     """Creates stagger values based on semantic names.
     Useful for C-Grid operations
 
@@ -163,7 +163,7 @@ def check_stagger(dx: tp.Tuple, stagger: tp.Tuple[str] = None):
     return stagger_values
 
 
-def check_tuple_inputs(x) -> tp.Tuple:
+def check_tuple_inputs(x) -> tuple:
     if isinstance(x, tuple):
         return x
     elif isinstance(x, (int, float)):

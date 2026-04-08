@@ -1,11 +1,11 @@
+import typing as tp
 from functools import reduce
 from operator import mul
-import typing as tp
 
 import equinox as eqx
 import jax.numpy as jnp
-from jaxtyping import Array
 import numpy as np
+from jaxtyping import Array
 
 from somax._src.domain.utils import (
     bounds_and_points_to_step,
@@ -54,20 +54,20 @@ class Domain(eqx.Module):
         cell_volume (float): The total volume of a grid cell
     """
 
-    xmin: tp.Iterable[float] = eqx.static_field()
-    xmax: tp.Iterable[float] = eqx.static_field()
-    dx: tp.Iterable[float] = eqx.static_field()
-    Nx: tp.Iterable[int] = eqx.static_field()
-    Lx: tp.Iterable[float] = eqx.static_field()
-    ndim: int = eqx.static_field()
+    xmin: tp.Iterable[float] = eqx.field(static=True)
+    xmax: tp.Iterable[float] = eqx.field(static=True)
+    dx: tp.Iterable[float] = eqx.field(static=True)
+    Nx: tp.Iterable[int] = eqx.field(static=True)
+    Lx: tp.Iterable[float] = eqx.field(static=True)
+    ndim: int = eqx.field(static=True)
 
     def __init__(
         self,
-        xmin: tp.Union[float, tp.Iterable[float]],
-        xmax: tp.Union[float, tp.Iterable[float]],
-        dx: tp.Union[float, tp.Iterable[float]],
-        Nx: tp.Union[int, tp.Iterable[int]],
-        Lx: tp.Union[float, tp.Iterable[float]],
+        xmin: float | tp.Iterable[float],
+        xmax: float | tp.Iterable[float],
+        dx: float | tp.Iterable[float],
+        Nx: int | tp.Iterable[int],
+        Lx: float | tp.Iterable[float],
     ):
         xmin = check_inputs_types(xmin, name="xmin")
         xmax = check_inputs_types(xmax, name="xmax")
@@ -84,7 +84,7 @@ class Domain(eqx.Module):
         self.ndim = len(xmin)
 
     @property
-    def coords_axis(self) -> tp.List:
+    def coords_axis(self) -> list:
         return list(map(make_coords, self.xmin, self.xmax, self.Nx))
 
     @property
@@ -117,8 +117,9 @@ class Domain(eqx.Module):
         assert len(values) == len(self.coords_axis), msg
 
         # get sliced coordinates
-        # sliced_coords = [jax.lax.slice(idx, [islice.start], [slice.stop], [islice.step]) for idx, islice in zip(self.coords_axis, values)]
-        sliced_coords = [idx[islice] for idx, islice in zip(self.coords_axis, values)]
+        sliced_coords = [
+            idx[islice] for idx, islice in zip(self.coords_axis, values, strict=False)
+        ]
 
         # change Nx
         Nx = list(map(lambda x: len(x), sliced_coords))
@@ -129,7 +130,7 @@ class Domain(eqx.Module):
 
         # change Lx
         fn = lambda x: x[1] - x[0]
-        Lx = tuple(map(fn, list(zip(*(xmin, xmax)))))
+        Lx = tuple(map(fn, list(zip(*(xmin, xmax), strict=False))))
 
         return Domain(xmin=xmin, xmax=xmax, Lx=Lx, Nx=Nx, dx=self.dx)
 

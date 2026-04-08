@@ -1,5 +1,3 @@
-from typing import Optional
-
 import equinox as eqx
 from jaxtyping import PyTree
 
@@ -12,6 +10,6 @@ class DynamicalSystem(eqx.Module):
         raise NotImplementedError()
 
     def equation_of_motion(
-        self, t: float, state: PyTree, args: Optional[PyTree] = None
+        self, t: float, state: PyTree, args: PyTree | None = None
     ) -> PyTree:
         raise NotImplementedError()
