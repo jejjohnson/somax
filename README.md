@@ -41,11 +41,16 @@ somax is organized in three layers:
 
 ## Models
 
-- [x] Linear Shallow Water Model
-- [x] Shallow Water Model
-- [x] Quasi-Geostrophic Model (barotropic)
-- [x] Multi-Layer Quasi-Geostrophic Model
+### Currently shipped in the installable library (`somax/`)
+
 - [x] Lorenz '63 / '96 chaotic systems
+
+### Planned (will be rewritten against the new Core API)
+
+- [ ] Linear Shallow Water Model
+- [ ] Shallow Water Model
+- [ ] Quasi-Geostrophic Model (barotropic)
+- [ ] Multi-Layer Quasi-Geostrophic Model
 - [ ] Multi-Layer Shallow Water Model
 
 ---

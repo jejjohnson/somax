@@ -1,16 +1,26 @@
 # API Reference
 
+## Core
+
+```{autodoc} somax._src.core.types
+```
+
+```{autodoc} somax._src.core.model
+```
+
+```{autodoc} somax._src.core.forcing
+```
+
+```{autodoc} somax._src.core.transforms
+```
+
+```{autodoc} somax._src.core.helmholtz
+```
+
+```{autodoc} somax._src.core.checkpoint
+```
+
 ## Models
-
-### Shallow Water
-
-```{autodoc} somax._src.models.sw
-```
-
-### Quasi-Geostrophic
-
-```{autodoc} somax._src.models.qg
-```
 
 ### Lorenz Systems
 
@@ -23,9 +33,4 @@
 ## Domain
 
 ```{autodoc} somax._src.domain.domain
-```
-
-## Operators
-
-```{autodoc} somax._src.operators
 ```

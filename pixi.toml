@@ -63,8 +63,8 @@ lint = "ruff check ."
 format = "ruff format ."
 typecheck = "ty check somax"
 precommit = "pre-commit run --all-files"
-simulate-swm = "python scripts/swm.py"
-simulate-mqg = "python scripts/mqg_doublegyre.py"
+# simulate-swm = "python scripts/swm.py"      # disabled until SWM model rewrite
+# simulate-mqg = "python scripts/mqg_doublegyre.py"  # disabled until MQG model rewrite
 
 [feature.docs.tasks]
 docs-serve = "myst start"

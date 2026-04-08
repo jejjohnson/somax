@@ -2,10 +2,19 @@
 
 2D shallow water model with Coriolis force (f-plane).
 
+.. warning::
+    LEGACY SCRIPT — imports somax modules (operators, interp, masks) that
+    were removed during the v2 rewrite.  This script will NOT run until the
+    SWM model is reimplemented against the new Core API / finitevolX.
+
+    Retained as a reference for the future SWM rewrite.
+
 Script Taken from:
     https://github.com/dionhaefner/shallow-water/blob/master/shallow_water_simple.py
 
 """
+
+import sys
 
 import jax
 import jax.numpy as jnp
@@ -16,9 +25,18 @@ from jaxtyping import (
     Float,
 )
 from loguru import logger
-from somax._src.operators.differential import difference
-from somax.interp import center_avg_2D
-from somax.masks import MaskGrid
+
+try:
+    from somax._src.operators.differential import difference
+    from somax.interp import center_avg_2D
+    from somax.masks import MaskGrid
+except ImportError:
+    logger.error(
+        "This script requires somax modules (operators, interp, masks) "
+        "that were removed in the v2 rewrite. It will be updated once "
+        "the SWM model is reimplemented against the new Core API."
+    )
+    sys.exit(1)
 
 
 jax.config.update("jax_enable_x64", True)

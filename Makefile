@@ -136,11 +136,12 @@ clean: ## Remove build artefacts and cache directories
 ##@ Docs
 # ===========================================================================
 
-docs: ## Build documentation with mkdocs
-	uv run --group docs mkdocs build
+docs: ## Build documentation with MyST
+	uv run --group docs myst build --html
 
 docs-serve: ## Serve documentation locally
-	uv run --group docs mkdocs serve
+	uv run --group docs myst start
 
 docs-deploy: ## Deploy documentation to GitHub Pages
-	uv run --group docs mkdocs gh-deploy --force
+	uv run --group docs myst build --html
+	uv run --group docs ghp-import -n -p _build/html

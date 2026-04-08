@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 
@@ -19,7 +20,7 @@ class MyParams(Params):
 
 
 class MyConsts(PhysConsts):
-    gravity: float = 9.81
+    gravity: float = eqx.field(default=9.81, static=True)
 
 
 class MyDiagnostics(Diagnostics):
@@ -74,3 +75,11 @@ def test_params_visible_to_grad():
     grads = jax.grad(loss_fn)(params)
     assert jnp.isclose(grads.alpha, 6.0)
     assert jnp.isclose(grads.beta, 8.0)
+
+
+def test_physconsts_invisible_to_grad():
+    """PhysConsts static fields should be excluded from gradients."""
+    consts = MyConsts(gravity=9.81)
+    leaves, _ = jax.tree_util.tree_flatten(consts)
+    # Static fields are not part of the pytree leaves
+    assert len(leaves) == 0

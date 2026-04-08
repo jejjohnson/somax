@@ -39,9 +39,16 @@ class SomaxModel(eqx.Module):
     def build_terms(self) -> dfx.AbstractTerm:
         """Build diffrax term(s) for integration.
 
+        The default wraps ``vector_field`` in an ``ODETerm``, applying
+        boundary conditions to the state before each RHS evaluation.
         Override for SDE (``MultiTerm``) or IMEX splitting.
         """
-        return dfx.ODETerm(self.vector_field)
+
+        def _rhs(t, state, args=None):
+            state = self.apply_boundary_conditions(state)
+            return self.vector_field(t, state, args)
+
+        return dfx.ODETerm(_rhs)
 
     def integrate(
         self,
@@ -53,6 +60,9 @@ class SomaxModel(eqx.Module):
     ) -> dfx.Solution:
         """Forward integration using diffrax.
 
+        Boundary conditions are applied to ``state0`` before starting
+        and enforced at every RHS evaluation via ``build_terms``.
+
         Args:
             state0: Initial state.
             t0: Start time.
@@ -61,6 +71,7 @@ class SomaxModel(eqx.Module):
             **kw: Passed to ``diffrax.diffeqsolve``. Supports
                 ``solver``, ``saveat``, ``stepsize_controller``.
         """
+        state0 = self.apply_boundary_conditions(state0)
         solver = kw.pop("solver", dfx.Tsit5())
         saveat = kw.pop("saveat", dfx.SaveAt(t1=True))
         stepsize_controller = kw.pop("stepsize_controller", dfx.ConstantStepSize())
