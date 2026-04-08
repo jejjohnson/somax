@@ -87,6 +87,9 @@ exclude = ["notebooks/", "scripts/"]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E402", "E721", "E731", "E741", "F722"]
 
+[tool.ruff.lint.per-file-ignores]
+"content/tutorials/step*.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 combine-as-imports = true
 lines-after-imports = 2
