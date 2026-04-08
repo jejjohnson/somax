@@ -232,24 +232,126 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 7. Sensitivity via `jax.grad`
+# ## 7. Adjoint methods and differentiation
 #
-# We differentiate a short-horizon loss with respect to the forcing
-# parameter $F$. This is useful for parameter estimation and optimal
-# control.
+# diffrax supports several adjoint methods for backpropagating
+# through `diffeqsolve`. Each trades off memory, accuracy, and speed:
+#
+# | Adjoint | Memory | Gradients | Best for |
+# |---------|--------|-----------|----------|
+# | `RecursiveCheckpointAdjoint` | $O(\sqrt{N})$ | Exact | **Default** |
+# | `DirectAdjoint` | $O(N)$ | Exact | Short windows, forward-mode AD |
+# | `BacksolveAdjoint` | $O(1)$ | Approximate | Very long windows, memory-critical |
+#
+# `RecursiveCheckpointAdjoint` (the default) uses optimal
+# checkpointing: it re-computes forward steps from saved checkpoints
+# during the backward pass, giving exact gradients with sub-linear
+# memory.
+
+# %% [markdown]
+# ### 7a. Gradient w.r.t. parameters
+#
+# **Use case: parameter estimation.** Find the forcing $F$ that
+# minimizes a cost function over the trajectory:
+#
+# $$
+# \frac{\partial \mathcal{L}}{\partial F}
+# = \int_0^T \lambda(t)^\top
+#   \frac{\partial f}{\partial F}\, dt
+# $$
 
 # %%
 state0_grad = L96State.init_state(ndim=N, noise=0.01, F=8.0)
 
 
 @eqx.filter_grad
-def compute_grad(model):
+def grad_params(model):
     sol = model.integrate(state0_grad, t0=0.0, t1=1.0, dt=0.005)
     return jnp.sum(sol.ys.x**2)
 
 
-grads = compute_grad(model)
-print(f"dL/dF = {grads.params.F:.4f}")
+grads_theta = grad_params(model)
+print("--- Gradient w.r.t. parameters ---")
+print(f"  dL/dF = {grads_theta.params.F:.4f}")
+
+# %% [markdown]
+# ### 7b. Gradient w.r.t. initial state
+#
+# **Use case: 4D-Var data assimilation.** Find the initial condition
+# $\mathbf{X}_0$ that best fits observations. The gradient is the
+# adjoint state at $t = 0$:
+#
+# $$
+# \frac{\partial \mathcal{L}}{\partial \mathbf{X}_0} = \lambda(0)
+# $$
+
+# %%
+
+
+def loss_state(state0):
+    sol = model.integrate(state0, t0=0.0, t1=1.0, dt=0.005)
+    return jnp.sum(sol.ys.x**2)
+
+
+grads_u0 = jax.grad(loss_state)(state0_grad)
+
+print("--- Gradient w.r.t. initial state ---")
+print(f"  dL/d(X0) shape: {grads_u0.x.shape}")
+print(f"  dL/d(X0) norm:  {jnp.linalg.norm(grads_u0.x):.4f}")
+print(f"  dL/d(X0)[:5]:   {grads_u0.x[:5]}")
+
+# %% [markdown]
+# ### 7c. Joint gradient — parameters and state
+#
+# **Use case: weak-constraint 4D-Var / bi-level optimization.**
+# Simultaneously optimize the initial condition and model parameters.
+
+# %%
+
+
+def loss_joint(state0, model):
+    sol = model.integrate(state0, t0=0.0, t1=1.0, dt=0.005)
+    return jnp.sum(sol.ys.x**2)
+
+
+grads_u0_joint, grads_model_joint = jax.grad(loss_joint, argnums=(0, 1))(
+    state0_grad, model
+)
+
+print("--- Joint gradient ---")
+print(f"  dL/dF         = {grads_model_joint.params.F:.4f}")
+print(f"  dL/d(X0) norm = {jnp.linalg.norm(grads_u0_joint.x):.4f}")
+
+# %% [markdown]
+# ### 7d. Comparing adjoint methods
+#
+# We time `RecursiveCheckpointAdjoint` vs `DirectAdjoint`.
+# `BacksolveAdjoint` requires a different API pattern (explicit
+# args to `diffeqsolve`, not via closure) — see the
+# [diffrax docs](https://docs.kidger.site/diffrax/api/adjoints/).
+
+# %%
+import time
+
+
+def timed_grad(adjoint, label):
+    @eqx.filter_grad
+    def fn(model):
+        sol = model.integrate(state0_grad, t0=0.0, t1=1.0, dt=0.005, adjoint=adjoint)
+        return jnp.sum(sol.ys.x**2)
+
+    g = fn(model)
+    jax.block_until_ready(g.params.F)
+    t_start = time.perf_counter()
+    g = fn(model)
+    jax.block_until_ready(g.params.F)
+    elapsed = time.perf_counter() - t_start
+    print(f"  {label:25s}  dL/dF={g.params.F:.2f}  ({elapsed:.4f}s)")
+
+
+print("--- Adjoint method comparison ---")
+timed_grad(dfx.RecursiveCheckpointAdjoint(), "RecursiveCheckpoint")
+timed_grad(dfx.DirectAdjoint(), "Direct")
 
 # %% [markdown]
 # ## 8. Ensemble forecast divergence
@@ -319,7 +421,9 @@ plt.show()
 # | Initial condition | `L96State.init_state(ndim=40, F=8.0)` |
 # | Forward simulation | `model.integrate(state0, t0, t1, dt, saveat=...)` |
 # | Diagnostics | `model.diagnose(state)` — energy, mean |
-# | Gradients | `eqx.filter_grad(loss)(model)` — dL/dF |
+# | Grad w.r.t. params | `eqx.filter_grad(loss)(model)` — dL/dF |
+# | Grad w.r.t. state | `jax.grad(loss)(state0)` — dL/dX0 |
+# | Joint grad | `jax.grad(loss, argnums=(0, 1))(state0, model)` |
 # | Ensemble | `eqx.filter_vmap(integrate_one)(batch_states)` |
 #
 # **Key takeaways:**

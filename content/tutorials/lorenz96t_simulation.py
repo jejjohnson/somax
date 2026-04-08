@@ -64,6 +64,7 @@ from __future__ import annotations
 import diffrax as dfx
 import einops
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import jax.random as jrandom
 import matplotlib.pyplot as plt
@@ -252,26 +253,107 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 7. Sensitivity via `jax.grad`
+# ## 7. Adjoint methods and differentiation
 #
-# We differentiate through the multiscale simulation with respect
-# to all four parameters ($F$, $h$, $b$, $c$).
+# Differentiating through a stiff multiscale ODE is more challenging
+# than a single-scale system because the fast variables demand many
+# time steps. diffrax provides three adjoint methods:
+#
+# | Adjoint | Memory | Gradients | Best for |
+# |---------|--------|-----------|----------|
+# | `RecursiveCheckpointAdjoint` | $O(\sqrt{N})$ | Exact | **Default** |
+# | `DirectAdjoint` | $O(N)$ | Exact | Short windows, forward-mode AD |
+# | `BacksolveAdjoint` | $O(1)$ | Approximate | Very long windows, memory-critical |
+#
+# For this system with $dt = 5 \times 10^{-4}$, even a short window
+# of $T = 0.5$ requires 1000 steps. `RecursiveCheckpointAdjoint` is
+# the best default because it avoids storing all 1000 forward states.
+
+# %% [markdown]
+# ### 7a. Gradient w.r.t. parameters
+#
+# **Use case: parameter estimation.** All four coupling parameters
+# $(F, h, b, c)$ are differentiable. The adjoint equations are:
+#
+# $$
+# \frac{\partial \mathcal{L}}{\partial \theta}
+# = \int_0^T \lambda(t)^\top
+#   \frac{\partial f}{\partial \theta}\, dt,
+# \qquad \theta = (F, h, b, c)
+# $$
 
 # %%
 state0_grad = L96TState.init_state(ndims=(Dx, Dy), noise=0.01, b=10.0)
 
 
 @eqx.filter_grad
-def compute_grad(model):
+def grad_params(model):
     sol = model.integrate(state0_grad, t0=0.0, t1=0.5, dt=0.0005)
     return jnp.sum(sol.ys.x**2)
 
 
-grads = compute_grad(model)
-print(f"dL/dF = {grads.params.F:.4f}")
-print(f"dL/dh = {grads.params.h:.4f}")
-print(f"dL/db = {grads.params.b:.4f}")
-print(f"dL/dc = {grads.params.c:.4f}")
+grads_theta = grad_params(model)
+print("--- Gradient w.r.t. parameters ---")
+print(f"  dL/dF = {grads_theta.params.F:.4f}")
+print(f"  dL/dh = {grads_theta.params.h:.4f}")
+print(f"  dL/db = {grads_theta.params.b:.4f}")
+print(f"  dL/dc = {grads_theta.params.c:.4f}")
+
+# %% [markdown]
+# ### 7b. Gradient w.r.t. initial state
+#
+# **Use case: 4D-Var.** Find the initial condition
+# $(\mathbf{X}_0, \mathbf{Y}_0)$ that best fits observations.
+# The gradient is the adjoint state at $t = 0$:
+#
+# $$
+# \frac{\partial \mathcal{L}}{\partial \mathbf{u}_0}
+# = \lambda(0),
+# \qquad \mathbf{u}_0 = (\mathbf{X}_0, \mathbf{Y}_0)
+# $$
+#
+# In practice one often assimilates only the slow variables and
+# lets the fast variables spin up.
+
+# %%
+
+
+def loss_state(state0):
+    sol = model.integrate(state0, t0=0.0, t1=0.5, dt=0.0005)
+    return jnp.sum(sol.ys.x**2)
+
+
+grads_u0 = jax.grad(loss_state)(state0_grad)
+
+print("--- Gradient w.r.t. initial state ---")
+print(f"  dL/d(X0) shape: {grads_u0.x.shape}")
+print(f"  dL/d(X0) norm:  {jnp.linalg.norm(grads_u0.x):.4f}")
+print(f"  dL/d(Y0) shape: {grads_u0.y.shape}")
+print(f"  dL/d(Y0) norm:  {jnp.linalg.norm(grads_u0.y):.4f}")
+
+# %% [markdown]
+# ### 7c. Joint gradient — parameters and state
+#
+# **Use case: weak-constraint 4D-Var.** Simultaneously optimize
+# the initial condition and all coupling parameters.
+
+# %%
+
+
+def loss_joint(state0, model):
+    sol = model.integrate(state0, t0=0.0, t1=0.5, dt=0.0005)
+    return jnp.sum(sol.ys.x**2)
+
+
+grads_u0_joint, grads_model_joint = jax.grad(loss_joint, argnums=(0, 1))(
+    state0_grad, model
+)
+
+print("--- Joint gradient ---")
+print(f"  dL/dF         = {grads_model_joint.params.F:.4f}")
+print(f"  dL/dh         = {grads_model_joint.params.h:.4f}")
+print(f"  dL/d(X0) norm = {jnp.linalg.norm(grads_u0_joint.x):.4f}")
+print(f"  dL/d(Y0) norm = {jnp.linalg.norm(grads_u0_joint.y):.4f}")
 
 # %% [markdown]
 # ## 8. Ensemble divergence
@@ -347,7 +429,9 @@ plt.show()
 # | Create a model | `Lorenz96t.create(F=18, h=1, b=10, c=10)` |
 # | Initial condition | `L96TState.init_state(ndims=(Dx, Dy))` |
 # | Forward simulation | `model.integrate(state0, t0, t1, dt)` |
-# | Gradients | `eqx.filter_grad(loss)(model)` — all 4 params |
+# | Grad w.r.t. params | `eqx.filter_grad(loss)(model)` — all 4 params |
+# | Grad w.r.t. state | `jax.grad(loss)(state0)` — dL/d(X0, Y0) |
+# | Joint grad | `jax.grad(loss, argnums=(0, 1))(state0, model)` |
 # | Ensemble | `eqx.filter_vmap(integrate_one)(batch_states)` |
 #
 # **Key takeaways:**

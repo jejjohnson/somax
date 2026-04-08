@@ -166,30 +166,158 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 5. Sensitivity via `jax.grad`
+# ## 5. Adjoint methods for differentiation
 #
-# Because the model, state, and solver are all JAX-native, we can
-# differentiate a scalar loss through the entire simulation with
-# respect to model parameters.
+# Differentiating through an ODE solve requires an **adjoint method**
+# that trades off memory, accuracy, and speed. diffrax provides three:
 #
-# Here we compute $\partial \mathcal{L} / \partial \theta$ where
-# $\mathcal{L} = \| x(T) \|^2$ and $\theta = (\sigma, \rho, \beta)$.
+# | Adjoint | Memory | Gradients | Best for |
+# |---------|--------|-----------|----------|
+# | `RecursiveCheckpointAdjoint` | $O(\sqrt{N})$ | Exact | **Default** |
+# | `DirectAdjoint` | $O(N)$ | Exact | Short windows, forward-mode AD |
+# | `BacksolveAdjoint` | $O(1)$ | Approximate | Very long windows, memory-critical |
+#
+# `RecursiveCheckpointAdjoint` (the default) uses Griewank--Walther
+# optimal checkpointing: it re-computes forward steps from checkpoints
+# during the backward pass, giving exact gradients with sub-linear
+# memory. `DirectAdjoint` stores the entire forward trajectory —
+# exact but $O(N)$ memory. `BacksolveAdjoint` solves the continuous
+# adjoint ODE backwards in time with $O(1)$ memory, but the gradients
+# are only approximate (discretize-then-optimize vs
+# optimize-then-discretize).
+
+# %% [markdown]
+# ### 5a. Gradient with respect to parameters
+#
+# **Use case: parameter estimation.** Given observations, find the
+# parameters $\theta = (\sigma, \rho, \beta)$ that minimize a loss.
+#
+# We compute $\nabla_\theta \mathcal{L}$ where
+# $\mathcal{L} = \sum_t \| \mathbf{u}(t) \|^2$ and the state
+# $\mathbf{u}(t)$ depends on $\theta$ through the ODE:
+#
+# $$
+# \frac{\partial \mathcal{L}}{\partial \theta}
+# = \int_0^T \lambda(t)^\top
+#   \frac{\partial f}{\partial \theta}\, dt
+# $$
+#
+# where $\lambda(t)$ is the adjoint state satisfying the backward ODE
+# $\dot{\lambda} = -(\partial f / \partial u)^\top \lambda$.
 
 # %%
 state0_grad = L63State(x=jnp.array(1.0), y=jnp.array(1.0), z=jnp.array(1.0))
 
 
 @eqx.filter_grad
-def compute_grad(model):
+def grad_params(model):
     sol = model.integrate(state0_grad, t0=0.0, t1=1.0, dt=0.01)
     return jnp.sum(sol.ys.x**2 + sol.ys.y**2 + sol.ys.z**2)
 
 
-grads = compute_grad(model)
+grads_theta = grad_params(model)
 
-print(f"dL/d(sigma) = {grads.params.sigma:.4f}")
-print(f"dL/d(rho)   = {grads.params.rho:.4f}")
-print(f"dL/d(beta)  = {grads.params.beta:.4f}")
+print("--- Gradient w.r.t. parameters ---")
+print(f"  dL/d(sigma) = {grads_theta.params.sigma:.4f}")
+print(f"  dL/d(rho)   = {grads_theta.params.rho:.4f}")
+print(f"  dL/d(beta)  = {grads_theta.params.beta:.4f}")
+
+# %% [markdown]
+# ### 5b. Gradient with respect to the initial state
+#
+# **Use case: state estimation / data assimilation.** Given a model
+# with known parameters, find the initial condition $\mathbf{u}_0$
+# that best fits observations (the 4D-Var problem).
+#
+# We compute $\nabla_{\mathbf{u}_0} \mathcal{L}$:
+#
+# $$
+# \frac{\partial \mathcal{L}}{\partial \mathbf{u}_0}
+# = \lambda(0)
+# $$
+#
+# where $\lambda(t)$ is the same adjoint state, but now evaluated
+# at $t = 0$. This is the gradient that 4D-Var minimizes.
+
+# %%
+
+
+def loss_state(state0):
+    sol = model.integrate(state0, t0=0.0, t1=1.0, dt=0.01)
+    return jnp.sum(sol.ys.x**2 + sol.ys.y**2 + sol.ys.z**2)
+
+
+grads_u0 = jax.grad(loss_state)(state0_grad)
+
+print("--- Gradient w.r.t. initial state ---")
+print(f"  dL/d(x0) = {grads_u0.x:.4f}")
+print(f"  dL/d(y0) = {grads_u0.y:.4f}")
+print(f"  dL/d(z0) = {grads_u0.z:.4f}")
+
+# %% [markdown]
+# ### 5c. Joint gradient — parameters and state
+#
+# **Use case: bi-level optimization.** Simultaneously estimate the
+# initial state and model parameters (e.g. weak-constraint 4D-Var).
+#
+# We compute $(\nabla_{\mathbf{u}_0} \mathcal{L},\;
+# \nabla_\theta \mathcal{L})$ in a single backward pass using
+# `eqx.partition` to separate the differentiable leaves.
+
+# %%
+
+
+def loss_joint(state0, model):
+    sol = model.integrate(state0, t0=0.0, t1=1.0, dt=0.01)
+    return jnp.sum(sol.ys.x**2 + sol.ys.y**2 + sol.ys.z**2)
+
+
+grads_u0_joint, grads_model_joint = jax.grad(loss_joint, argnums=(0, 1))(
+    state0_grad, model
+)
+
+print("--- Joint gradient ---")
+print(f"  dL/d(x0)    = {grads_u0_joint.x:.4f}")
+print(f"  dL/d(y0)    = {grads_u0_joint.y:.4f}")
+print(f"  dL/d(z0)    = {grads_u0_joint.z:.4f}")
+print(f"  dL/d(sigma) = {grads_model_joint.params.sigma:.4f}")
+print(f"  dL/d(rho)   = {grads_model_joint.params.rho:.4f}")
+print(f"  dL/d(beta)  = {grads_model_joint.params.beta:.4f}")
+
+# %% [markdown]
+# ### 5d. Comparing adjoint methods
+#
+# We time `RecursiveCheckpointAdjoint` (default) vs `DirectAdjoint`
+# on the same problem. `BacksolveAdjoint` requires passing the model
+# as an explicit argument to `diffeqsolve` (not via closure), so it
+# needs a different API pattern — see the
+# [diffrax docs](https://docs.kidger.site/diffrax/api/adjoints/)
+# for details.
+
+# %%
+import time
+
+
+def timed_grad(adjoint, label):
+    @eqx.filter_grad
+    def fn(model):
+        sol = model.integrate(state0_grad, t0=0.0, t1=1.0, dt=0.01, adjoint=adjoint)
+        return jnp.sum(sol.ys.x**2 + sol.ys.y**2 + sol.ys.z**2)
+
+    # Warm-up (JIT compilation)
+    g = fn(model)
+    jax.block_until_ready(g.params.sigma)
+    # Timed run
+    t_start = time.perf_counter()
+    g = fn(model)
+    jax.block_until_ready(g.params.sigma)
+    elapsed = time.perf_counter() - t_start
+    print(f"  {label:35s}  dL/d(sigma)={g.params.sigma:.4f}  ({elapsed:.4f}s)")
+
+
+print("--- Adjoint method comparison ---")
+timed_grad(dfx.RecursiveCheckpointAdjoint(), "RecursiveCheckpoint")
+timed_grad(dfx.DirectAdjoint(), "Direct")
 
 # %% [markdown]
 # ## 6. Ensemble simulation with `jax.vmap`
@@ -257,7 +385,9 @@ plt.show()
 # | Initial condition | `L63State(x=..., y=..., z=...)` |
 # | Forward simulation | `model.integrate(state0, t0, t1, dt, saveat=...)` |
 # | Diagnostics | `model.diagnose(state)` |
-# | Gradients | `eqx.filter_grad(loss)(model)` |
+# | Grad w.r.t. params | `eqx.filter_grad(loss)(model)` |
+# | Grad w.r.t. state | `jax.grad(loss)(state0)` |
+# | Joint grad | `jax.grad(loss, argnums=(0, 1))(state0, model)` |
 # | Ensemble | `eqx.filter_vmap(integrate_one)(batch_states)` |
 #
 # **Next steps:**
