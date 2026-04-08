@@ -19,8 +19,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install lint dependencies
-        run: uv sync --group lint
+        run: uv sync --only-group lint
       - name: Run ruff check
-        run: uv run --group lint ruff check .
+        run: uv run --only-group lint ruff check .
       - name: Run ruff format check
-        run: uv run --group lint ruff format --check .
+        run: uv run --only-group lint ruff format --check .

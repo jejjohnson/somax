@@ -18,6 +18,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install typecheck dependencies
-        run: uv sync --group typecheck
+        run: uv sync --only-group typecheck
       - name: Run ty check
-        run: uv run --group typecheck ty check somax
+        run: uv run --only-group typecheck ty check somax
