@@ -1,31 +1,44 @@
-name: Deploy Docs
+# This file was created automatically with `myst init --gh-pages`
+# Ensure your GitHub Pages settings for this repository are set to deploy with **GitHub Actions**.
 
+name: MyST GitHub Pages Deploy
 on:
   push:
     branches: [main]
   workflow_dispatch:
+env:
+  BASE_URL: /${{ github.event.repository.name }}
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
         with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --group docs
-
-      - name: Build and deploy docs
-        run: |
-          uv run myst build --html
-          uv run ghp-import -n -p _build/html
+          node-version: 22.x
+      - name: Install MyST
+        run: npm install -g mystmd
+      - name: Build HTML Assets
+        run: myst build --html
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './_build/html'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

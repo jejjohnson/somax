@@ -1,16 +1,13 @@
-from somax._src.models.lorenz63 import L63Params, L63State, Lorenz63
-from somax._src.models.lorenz96 import L96Params, L96State, Lorenz96
-from somax._src.models.lorenz96t import L96TParams, L96TState, Lorenz96t
-
-
-__all__ = [
-    "L63Params",
-    "L63State",
-    "L96Params",
-    "L96State",
-    "L96TParams",
-    "L96TState",
-    "Lorenz63",
-    "Lorenz96",
-    "Lorenz96t",
-]
+from somax._src.models import (
+    L63Diagnostics as L63Diagnostics,
+    L63Params as L63Params,
+    L63State as L63State,
+    L96Diagnostics as L96Diagnostics,
+    L96Params as L96Params,
+    L96State as L96State,
+    L96TParams as L96TParams,
+    L96TState as L96TState,
+    Lorenz63 as Lorenz63,
+    Lorenz96 as Lorenz96,
+    Lorenz96t as Lorenz96t,
+)
