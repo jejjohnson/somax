@@ -182,15 +182,17 @@ def rhs_lorenz_96t(
     else:
         x_rhs = -x + F - hcb * y_summed
 
-    # Fast variable tendency
-    y_plus_1 = jnp.roll(y, -1)
-    y_plus_2 = jnp.roll(y, -2)
-    y_minus_1 = jnp.roll(y, 1)
+    # Fast variable tendency — reshape to (Dy, Dx), roll along j-axis only
+    y_2d = einops.rearrange(y, "(Dy Dx) -> Dy Dx", Dy=y_dims, Dx=x_dims)
+    y_j_plus_1 = jnp.roll(y_2d, -1, axis=0)
+    y_j_minus_1 = jnp.roll(y_2d, 1, axis=0)
+    y_j_minus_2 = jnp.roll(y_2d, 2, axis=0)
 
-    y_advection = y_plus_1 * (y_plus_2 - y_minus_1)
-    x_repeat = einops.repeat(x, "Dx -> (Dx Dy)", Dx=x_dims, Dy=y_dims)
+    y_advection_2d = (y_j_plus_1 - y_j_minus_2) * y_j_minus_1
+    x_broadcast = einops.repeat(x, "Dx -> Dy Dx", Dy=y_dims)
 
-    y_rhs = -b * c * y_advection - c * y + hcb * x_repeat
+    y_rhs_2d = -b * c * y_advection_2d - c * y_2d + hcb * x_broadcast
+    y_rhs = einops.rearrange(y_rhs_2d, "Dy Dx -> (Dy Dx)")
 
     if return_coupling:
         return x_rhs, y_rhs, -hcb * y_summed
@@ -199,12 +201,15 @@ def rhs_lorenz_96t(
 
 
 def check_dims(value: Any, ndim: int, name: str) -> tuple:
-    """Normalize scalar or tuple inputs to a tuple of length ``ndim``."""
+    """Normalize scalar or tuple inputs to a tuple of length ``ndim``.
+
+    Only Python scalars and tuples are accepted. JAX arrays are not
+    supported because shape parameters must be concrete (not traced).
+    """
     if isinstance(value, (int, float)):
         return (value,) * ndim
-    elif isinstance(value, jax.Array):
-        return tuple(jnp.repeat(value, ndim).tolist())
     elif isinstance(value, tuple):
         assert len(value) == ndim, f"{name} must be a tuple of length {ndim}"
         return tuple(value)
-    raise ValueError(f"Expected int or tuple for {name}, got {value}.")
+    msg = f"Expected int, float, or tuple for {name}, got {type(value).__name__}"
+    raise TypeError(msg)
