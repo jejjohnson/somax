@@ -30,7 +30,7 @@ dependencies = [
     "lineax>=0.0.6",
     "einops>=0.8.0",
     "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git",
-    "spectraldiffx @ git+https://github.com/jejjohnson/spectraldiffx.git",
+    "spectraldiffx @ git+https://github.com/jejjohnson/spectraldiffx.git@v0.0.10",
 ]
 
 [project.urls]
