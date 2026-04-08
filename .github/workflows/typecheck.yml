@@ -13,11 +13,11 @@ jobs:
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - name: Install typecheck dependencies
-        run: uv sync --only-group typecheck
+        run: uv sync --group typecheck
       - name: Run ty check
-        run: uv run --only-group typecheck ty check somax
+        run: uv run --group typecheck ty check somax

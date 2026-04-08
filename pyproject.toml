@@ -29,10 +29,6 @@ dependencies = [
     "diffrax>=0.6.0",
     "lineax>=0.0.6",
     "einops>=0.8.0",
-]
-
-[project.optional-dependencies]
-fvx = [
     "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git",
     "spectraldiffx @ git+https://github.com/jejjohnson/spectraldiffx.git",
 ]
