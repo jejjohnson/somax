@@ -48,7 +48,7 @@ class TestIncompressibleNS2D:
         assert jnp.all(jnp.isfinite(sol.ys.omega))
 
     def test_integrate_channel(self):
-        """Channel flow should integrate without NaN."""
+        """Channel flow should integrate without NaN and use periodic-x BCs."""
         model = IncompressibleNS2D.create(
             nx=16,
             ny=16,
@@ -57,6 +57,8 @@ class TestIncompressibleNS2D:
             body_force=1.0,
             u_lid=0.0,
         )
+        # Verify channel configuration
+        assert model.problem == "channel"
         omega0 = jnp.zeros((model.grid.Ny, model.grid.Nx))
         state0 = NSVorticityState(omega=omega0)
         sol = model.integrate(
@@ -67,6 +69,13 @@ class TestIncompressibleNS2D:
             saveat=dfx.SaveAt(t1=True),
         )
         assert jnp.all(jnp.isfinite(sol.ys.omega))
+        # Channel BCs enforce periodicity in x: left/right ghost cells should match
+        omega_final = sol.ys.omega[0]
+        state_bc = model.apply_boundary_conditions(NSVorticityState(omega=omega_final))
+        interior_rows = slice(1, -1)
+        assert jnp.allclose(
+            state_bc.omega[interior_rows, 0], state_bc.omega[interior_rows, -2]
+        )
 
     def test_diagnose(self):
         model = IncompressibleNS2D.create(nx=16, ny=16, nu=0.1)

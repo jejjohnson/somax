@@ -79,13 +79,12 @@ class TestHelmholtzSolver2D:
 
     def test_screening_reduces_amplitude(self):
         """Larger lambda should reduce the solution amplitude."""
-        nx, ny = 32, 32
-        x = jnp.arange(nx + 2) / nx
-        y = jnp.arange(ny + 2) / ny
+        h1 = HelmholtzSolver2D.create(nx=32, ny=32, lambda_=1.0)
+        h10 = HelmholtzSolver2D.create(nx=32, ny=32, lambda_=10.0)
+        x = jnp.arange(h1.grid.Nx) * h1.grid.dx
+        y = jnp.arange(h1.grid.Ny) * h1.grid.dy
         X, Y = jnp.meshgrid(x, y)
         rhs = jnp.sin(jnp.pi * X) * jnp.sin(jnp.pi * Y)
-        h1 = HelmholtzSolver2D.create(nx=nx, ny=ny, lambda_=1.0)
-        h10 = HelmholtzSolver2D.create(nx=nx, ny=ny, lambda_=10.0)
         phi1 = h1.solve(rhs)
         phi10 = h10.solve(rhs)
         assert float(jnp.max(jnp.abs(phi10))) < float(jnp.max(jnp.abs(phi1)))

@@ -172,6 +172,7 @@ class IncompressibleNS2D(SomaxModel):
         diff: Difference operators.
         interp: Interpolation operators.
         advection: Advection operator.
+        problem: Problem type (``"cavity"`` or ``"channel"``).
         poisson_bc: Spectral solver BC type for Poisson inversion.
         u_lid: Lid velocity for cavity flow (default 1.0).
         body_force: Constant vorticity source for channel flow.
@@ -183,6 +184,7 @@ class IncompressibleNS2D(SomaxModel):
     diff: Difference2D = eqx.field(static=True)
     interp: Interpolation2D = eqx.field(static=True)
     advection: FVXAdvection2D = eqx.field(static=True)
+    problem: str = eqx.field(static=True, default="cavity")
     poisson_bc: str = eqx.field(static=True, default="dst")
     u_lid: float = eqx.field(static=True, default=1.0)
     body_force: float = eqx.field(static=True, default=0.0)
@@ -228,13 +230,19 @@ class IncompressibleNS2D(SomaxModel):
     def apply_boundary_conditions(self, state: PyTree) -> NSVorticityState:
         """Apply vorticity boundary conditions.
 
-        For cavity flow (``poisson_bc="dst"``): Thom's formula at walls.
-        For channel flow (``poisson_bc="fft"``): periodic in x, walls in y.
+        For cavity flow (``problem="cavity"``): Thom's formula at all walls.
+        For channel flow (``problem="channel"``): periodic in x, walls in y.
         """
         omega = state.omega
-        if self.poisson_bc == "dst":
-            # Lid-driven cavity: all walls are no-slip
-            # Solve for psi to compute wall vorticity (Thom's formula)
+        if self.problem == "channel":
+            # Periodic in x, no-slip walls in y
+            omega = enforce_periodic(omega)
+            psi = self._solve_psi(omega)
+            dy2 = self.grid.dy**2
+            omega = omega.at[0, :].set(-2.0 * psi[1, :] / dy2)
+            omega = omega.at[-1, :].set(-2.0 * psi[-2, :] / dy2)
+        else:
+            # Cavity: all walls are no-slip
             psi = self._solve_psi(omega)
             dx2 = self.grid.dx**2
             dy2 = self.grid.dy**2
@@ -248,14 +256,6 @@ class IncompressibleNS2D(SomaxModel):
             omega = omega.at[:, 0].set(-2.0 * psi[:, 1] / dx2)
             # Right wall (x=Lx): omega = -2*psi[:,-2]/dx^2
             omega = omega.at[:, -1].set(-2.0 * psi[:, -2] / dx2)
-        else:
-            # Periodic in x, walls in y
-            omega = enforce_periodic(omega)
-            # No-slip walls in y via Thom's formula
-            psi = self._solve_psi(omega)
-            dy2 = self.grid.dy**2
-            omega = omega.at[0, :].set(-2.0 * psi[1, :] / dy2)
-            omega = omega.at[-1, :].set(-2.0 * psi[-2, :] / dy2)
         return NSVorticityState(omega=omega)
 
     def diagnose(self, state: PyTree) -> NSDiagnostics:
@@ -267,7 +267,6 @@ class IncompressibleNS2D(SomaxModel):
         interior_u = u_T[1:-1, 1:-1]
         interior_v = v_T[1:-1, 1:-1]
         interior_w = state.omega[1:-1, 1:-1]
-        self.grid.dx * self.grid.dy
         ke = 0.5 * jnp.mean(interior_u**2 + interior_v**2)
         enstrophy = 0.5 * jnp.mean(interior_w**2)
         return NSDiagnostics(
@@ -320,6 +319,7 @@ class IncompressibleNS2D(SomaxModel):
             diff=diff,
             interp=interp,
             advection=advection,
+            problem=problem,
             poisson_bc=poisson_bc,
             u_lid=u_lid,
             body_force=body_force,

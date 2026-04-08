@@ -81,7 +81,6 @@ class TestLinearConvection1D:
         mu0 = 2.0
         state0 = LinearConvection1DState(u=_gaussian_1d(x, mu0, 0.3))
         dt, t_final = 0.002, 0.5
-        jnp.arange(0.0, t_final, dt)
         sol = model.integrate(
             state0, t0=0.0, t1=t_final, dt=dt, saveat=dfx.SaveAt(t1=True)
         )

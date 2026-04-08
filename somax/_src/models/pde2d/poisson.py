@@ -75,14 +75,8 @@ class LaplaceSolver2D(eqx.Module):
     grid: ArakawaCGrid2D = eqx.field(static=True)
     bc_type: str = eqx.field(static=True, default="dirichlet")
 
-    def solve(
-        self, boundary_values: Float[Array, "Ny Nx"] | None = None
-    ) -> Float[Array, "Ny Nx"]:
+    def solve(self) -> Float[Array, "Ny Nx"]:
         r"""Solve :math:`\nabla^2 \phi = 0`.
-
-        Args:
-            boundary_values: Optional array with desired boundary values
-                in the ghost cells (interior is ignored).
 
         Returns:
             Solution :math:`\phi` on the full grid.
