@@ -1,5 +1,11 @@
 from somax._src.core.checkpoint import SimulationCheckpointer
-from somax._src.core.forcing import ConstantForcing, ForcingProtocol, NoForcing
+from somax._src.core.forcing import (
+    ConstantForcing,
+    ForcingProtocol,
+    InterpolatedForcing,
+    NoForcing,
+    SeasonalWindForcing,
+)
 from somax._src.core.helmholtz import (
     DirichletHelmholtzCache,
     HelmholtzCache,
@@ -18,6 +24,7 @@ __all__ = [
     "DirichletHelmholtzCache",
     "ForcingProtocol",
     "HelmholtzCache",
+    "InterpolatedForcing",
     "ModalTransform",
     "MultimodalHelmholtzCache",
     "NeumannHelmholtzCache",
@@ -25,6 +32,7 @@ __all__ = [
     "Params",
     "PeriodicHelmholtzCache",
     "PhysConsts",
+    "SeasonalWindForcing",
     "SimulationCheckpointer",
     "SomaxModel",
     "State",
