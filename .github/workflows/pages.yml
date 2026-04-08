@@ -25,7 +25,15 @@ jobs:
       - name: Install dependencies
         run: uv sync --group docs
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install MyST
+        run: npm install -g mystmd
+
       - name: Build and deploy docs
         run: |
-          uv run myst build --html
+          myst build --html
           uv run ghp-import -n -p _build/html
