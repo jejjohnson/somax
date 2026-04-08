@@ -65,12 +65,12 @@ from somax.models import L96State, Lorenz96
 # %% [markdown]
 # ## 1. Create the model
 #
-# We use $N = 120$ variables (three times Lorenz's original $N = 40$)
-# with the standard chaotic forcing $F = 8$. The higher resolution
-# reveals finer-scale wave structure in the Hovmoller diagram.
+# We use $N = 360$ variables for a smooth Hovmoller diagram.
+# Lorenz's original choice was $N = 40$; the higher resolution
+# reveals finer-scale wave structure on the periodic ring.
 
 # %%
-N = 120
+N = 360
 model = Lorenz96.create(F=8.0)
 print(model)
 
@@ -107,14 +107,15 @@ print(f"Trajectory shape: {sol.ys.x.shape}")  # (T, N)
 
 # %%
 fig, ax = plt.subplots(figsize=(10, 6))
-im = ax.pcolormesh(
-    jnp.arange(N),
-    ts,
+im = ax.imshow(
     sol.ys.x,
+    aspect="auto",
+    origin="lower",
     cmap="RdBu_r",
-    shading="auto",
     vmin=-10,
     vmax=15,
+    extent=[0, N, float(ts[0]), float(ts[-1])],
+    interpolation="bilinear",
 )
 ax.set_xlabel("Variable index $k$")
 ax.set_ylabel("Time")
@@ -136,7 +137,7 @@ fig, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
 
 # Top: a few selected variables
 ax = axes[0]
-for i, c in zip([0, 30, 60, 90], colors, strict=False):
+for i, c in zip([0, 90, 180, 270], colors, strict=False):
     ax.plot(ts, sol.ys.x[:, i], lw=0.6, alpha=0.8, color=c, label=f"$X_{{{i}}}$")
 ax.set_ylabel("$X_k$")
 ax.set_title("Selected variables")
@@ -212,8 +213,15 @@ for ax, F_val, label, color in zip(
     m = Lorenz96.create(F=F_val)
     s0 = L96State.init_state(ndim=N, noise=0.01, F=F_val)
     s = m.integrate(s0, t0=0.0, t1=20.0, dt=0.005, saveat=dfx.SaveAt(ts=ts))
-    ax.pcolormesh(
-        jnp.arange(N), ts, s.ys.x, cmap="RdBu_r", shading="auto", vmin=-10, vmax=15
+    ax.imshow(
+        s.ys.x,
+        aspect="auto",
+        origin="lower",
+        cmap="RdBu_r",
+        vmin=-10,
+        vmax=15,
+        extent=[0, N, 0, 20],
+        interpolation="bilinear",
     )
     ax.set_xlabel("Variable index $k$")
     ax.set_ylabel("Time")
