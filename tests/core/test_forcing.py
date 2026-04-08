@@ -139,6 +139,37 @@ class TestInterpolatedForcing:
         forcing = InterpolatedForcing.from_data(ts, values)
         assert isinstance(forcing, ForcingProtocol)
 
+    def test_cubic_at_known_points(self):
+        """Cubic interpolation matches exact values at knot points."""
+        ts = jnp.array([0.0, 1.0, 2.0, 3.0])
+        values = jnp.array([0.0, 1.0, 4.0, 9.0])
+        forcing = InterpolatedForcing.from_data(ts, values, method="cubic")
+        for i, t in enumerate(ts):
+            result = forcing(t=float(t), grid=DummyGrid())
+            assert jnp.isclose(result, values[i], atol=1e-5), (
+                f"Cubic mismatch at t={t}: got {result}, expected {values[i]}"
+            )
+
+    def test_cubic_midpoint_smoother_than_linear(self):
+        """Cubic interpolation of x^2 at midpoint is closer to true value."""
+        ts = jnp.array([0.0, 1.0, 2.0, 3.0])
+        values = ts**2  # [0, 1, 4, 9]
+        cubic = InterpolatedForcing.from_data(ts, values, method="cubic")
+        linear = InterpolatedForcing.from_data(ts, values, method="linear")
+        # True value at t=1.5 is 2.25
+        cubic_val = cubic(t=1.5, grid=DummyGrid())
+        linear_val = linear(t=1.5, grid=DummyGrid())
+        true_val = 1.5**2
+        assert abs(float(cubic_val) - true_val) <= abs(float(linear_val) - true_val)
+
+    def test_cubic_multidimensional(self):
+        """Cubic interpolation works with array-valued data."""
+        ts = jnp.array([0.0, 1.0, 2.0, 3.0])
+        values = jnp.stack([ts, ts**2], axis=-1)  # (4, 2)
+        forcing = InterpolatedForcing.from_data(ts, values, method="cubic")
+        result = forcing(t=1.0, grid=DummyGrid())
+        assert jnp.allclose(result, jnp.array([1.0, 1.0]), atol=1e-5)
+
     def test_invalid_method_raises(self):
         ts = jnp.array([0.0, 1.0])
         values = jnp.array([0.0, 1.0])
