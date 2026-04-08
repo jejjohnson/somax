@@ -65,11 +65,12 @@ from somax.models import L96State, Lorenz96
 # %% [markdown]
 # ## 1. Create the model
 #
-# We use $N = 40$ variables (Lorenz's original choice) with the
-# standard chaotic forcing $F = 8$.
+# We use $N = 120$ variables (three times Lorenz's original $N = 40$)
+# with the standard chaotic forcing $F = 8$. The higher resolution
+# reveals finer-scale wave structure in the Hovmoller diagram.
 
 # %%
-N = 40
+N = 120
 model = Lorenz96.create(F=8.0)
 print(model)
 
@@ -84,7 +85,7 @@ print(model)
 # %%
 state0 = L96State.init_state(ndim=N, noise=0.01, F=8.0)
 
-t0, t1, dt = 0.0, 20.0, 0.01
+t0, t1, dt = 0.0, 20.0, 0.005
 ts = jnp.arange(t0, t1, dt)
 
 sol = model.integrate(
@@ -135,7 +136,7 @@ fig, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
 
 # Top: a few selected variables
 ax = axes[0]
-for i, c in zip([0, 10, 20, 30], colors, strict=False):
+for i, c in zip([0, 30, 60, 90], colors, strict=False):
     ax.plot(ts, sol.ys.x[:, i], lw=0.6, alpha=0.8, color=c, label=f"$X_{{{i}}}$")
 ax.set_ylabel("$X_k$")
 ax.set_title("Selected variables")
@@ -210,7 +211,7 @@ for ax, F_val, label, color in zip(
 ):
     m = Lorenz96.create(F=F_val)
     s0 = L96State.init_state(ndim=N, noise=0.01, F=F_val)
-    s = m.integrate(s0, t0=0.0, t1=20.0, dt=0.01, saveat=dfx.SaveAt(ts=ts))
+    s = m.integrate(s0, t0=0.0, t1=20.0, dt=0.005, saveat=dfx.SaveAt(ts=ts))
     ax.pcolormesh(
         jnp.arange(N), ts, s.ys.x, cmap="RdBu_r", shading="auto", vmin=-10, vmax=15
     )
@@ -235,7 +236,7 @@ state0_grad = L96State.init_state(ndim=N, noise=0.01, F=8.0)
 
 @eqx.filter_grad
 def compute_grad(model):
-    sol = model.integrate(state0_grad, t0=0.0, t1=1.0, dt=0.01)
+    sol = model.integrate(state0_grad, t0=0.0, t1=1.0, dt=0.005)
     return jnp.sum(sol.ys.x**2)
 
 
@@ -256,7 +257,7 @@ perturb = 0.01 * jrandom.normal(key, shape=(n_ensemble, N))
 x0_base = 8.0 * jnp.ones(N)
 ensemble_states = L96State(x=x0_base[None, :] + perturb)
 
-ts_ens = jnp.arange(0.0, 10.0, 0.01)
+ts_ens = jnp.arange(0.0, 10.0, 0.05)
 
 
 def integrate_one(state0):
@@ -264,7 +265,7 @@ def integrate_one(state0):
         state0,
         t0=0.0,
         t1=10.0,
-        dt=0.01,
+        dt=0.005,
         saveat=dfx.SaveAt(ts=ts_ens),
     )
 
