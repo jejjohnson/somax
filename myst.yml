@@ -18,6 +18,7 @@ project:
       children:
         - file: content/tutorials/getting_started
         - file: content/tutorials/lorenz63_simulation
+        - file: content/tutorials/lorenz96_simulation
         - file: content/tutorials/swm_simulation
         - file: content/tutorials/qg_simulation
     - title: API Reference
