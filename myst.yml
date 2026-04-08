@@ -22,6 +22,21 @@ project:
         - file: content/tutorials/lorenz96t_simulation
         - file: content/tutorials/swm_simulation
         - file: content/tutorials/qg_simulation
+    - title: "13 Steps to Navier-Stokes"
+      children:
+        - file: content/tutorials/step01_linear_convection_1d
+        - file: content/tutorials/step02_nonlinear_convection_1d
+        - file: content/tutorials/step03_diffusion_1d
+        - file: content/tutorials/step04_burgers_1d
+        - file: content/tutorials/step05_linear_convection_2d
+        - file: content/tutorials/step06_nonlinear_convection_2d
+        - file: content/tutorials/step07_diffusion_2d
+        - file: content/tutorials/step08_burgers_2d
+        - file: content/tutorials/step09_laplace_2d
+        - file: content/tutorials/step10_poisson_2d
+        - file: content/tutorials/step11_helmholtz_2d
+        - file: content/tutorials/step12_cavity_flow
+        - file: content/tutorials/step13_channel_flow
     - title: API Reference
       children:
         - file: content/api/reference
