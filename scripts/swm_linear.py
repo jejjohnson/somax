@@ -1,4 +1,4 @@
-""" swm_linear.py
+"""swm_linear.py
 
 2D shallow water model with Coriolis force (f-plane).
 
@@ -6,20 +6,20 @@ Script Taken from:
     https://github.com/dionhaefner/shallow-water/blob/master/shallow_water_simple.py
 
 """
-import autoroot
+
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import numpy as np
 from jaxtyping import (
     Array,
     Float,
 )
-import matplotlib.pyplot as plt
-import numpy as np
-
-from somax.masks import MaskGrid
-from somax.interp import center_avg_2D
-from somax._src.operators.differential import difference
 from loguru import logger
+from somax._src.operators.differential import difference
+from somax.interp import center_avg_2D
+from somax.masks import MaskGrid
+
 
 jax.config.update("jax_enable_x64", True)
 
