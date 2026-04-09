@@ -1,5 +1,6 @@
 from somax._src.models.gfd_testcases import (
     barotropic_jet_instability,
+    doublegyre_baroclinic_qg,
     doublegyre_qg,
     geostrophic_adjustment_2d,
     gravity_wave_1d,
@@ -60,6 +61,11 @@ from somax._src.models.pde2d import (
     PoissonSolver2D,
 )
 from somax._src.models.qg import (
+    BaroclinicQG,
+    BaroclinicQGDiagnostics,
+    BaroclinicQGParams,
+    BaroclinicQGPhysConsts,
+    BaroclinicQGState,
     BarotropicQG,
     BarotropicQGDiagnostics,
     BarotropicQGParams,
@@ -91,6 +97,11 @@ from somax._src.models.swm import (
 
 
 __all__ = [
+    "BaroclinicQG",
+    "BaroclinicQGDiagnostics",
+    "BaroclinicQGParams",
+    "BaroclinicQGPhysConsts",
+    "BaroclinicQGState",
     "BarotropicQG",
     "BarotropicQGDiagnostics",
     "BarotropicQGParams",
@@ -165,6 +176,7 @@ __all__ = [
     "NonlinearShallowWater2D",
     "PoissonSolver2D",
     "barotropic_jet_instability",
+    "doublegyre_baroclinic_qg",
     "doublegyre_qg",
     "geostrophic_adjustment_2d",
     "gravity_wave_1d",

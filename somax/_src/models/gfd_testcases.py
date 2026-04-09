@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
+from somax._src.models.qg.baroclinic import BaroclinicQG, BaroclinicQGState
 from somax._src.models.qg.barotropic import BarotropicQG, BarotropicQGState
 from somax._src.models.swm.linear_1d import LinearShallowWater1D, LinearSW1DState
 from somax._src.models.swm.linear_2d import LinearShallowWater2D, LinearSW2DState
@@ -219,4 +220,62 @@ def doublegyre_qg(
     )
     q0 = jnp.zeros((model.grid.Ny, model.grid.Nx))
     state0 = BarotropicQGState(q=q0)
+    return model, state0
+
+
+def doublegyre_baroclinic_qg(
+    nx: int = 128,
+    ny: int = 128,
+    Lx: float = 4e6,
+    Ly: float = 4e6,
+    f0: float = 9.375e-5,
+    beta: float = 1.754e-11,
+    n_layers: int = 3,
+    H: tuple[float, ...] = (400.0, 1100.0, 2600.0),
+    g_prime: tuple[float, ...] = (9.81, 0.025, 0.0125),
+    lateral_viscosity: float = 15.0,
+    bottom_drag: float = 1e-7,
+    wind_amplitude: float = 8e-5,
+) -> tuple[BaroclinicQG, BaroclinicQGState]:
+    """Double-gyre wind-driven multilayer QG circulation.
+
+    A sinusoidal wind stress curl drives a multilayer double-gyre
+    circulation with baroclinic instability.
+
+    Default parameters follow louity/MQGeometry 3-layer config.
+
+    Args:
+        nx: Interior cells in x.
+        ny: Interior cells in y.
+        Lx: Domain length in x (m).
+        Ly: Domain length in y (m).
+        f0: Coriolis parameter (1/s).
+        beta: Beta parameter (1/(m*s)).
+        n_layers: Number of layers.
+        H: Layer thicknesses (m), top to bottom.
+        g_prime: Reduced gravities (m/s^2).
+        lateral_viscosity: Harmonic viscosity (m^2/s).
+        bottom_drag: Linear bottom drag (1/s).
+        wind_amplitude: Wind stress curl amplitude.
+
+    Returns:
+        ``(model, state0)`` tuple.
+    """
+    model = BaroclinicQG.create(
+        nx=nx,
+        ny=ny,
+        Lx=Lx,
+        Ly=Ly,
+        f0=f0,
+        beta=beta,
+        n_layers=n_layers,
+        H=H,
+        g_prime=g_prime,
+        lateral_viscosity=lateral_viscosity,
+        bottom_drag=bottom_drag,
+        wind_amplitude=wind_amplitude,
+        wind_profile="doublegyre",
+    )
+    q0 = jnp.zeros((model.consts.n_layers, model.grid.Ny, model.grid.Nx))
+    state0 = BaroclinicQGState(q=q0)
     return model, state0

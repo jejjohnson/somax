@@ -1,4 +1,9 @@
 from somax._src.models import (
+    BaroclinicQG as BaroclinicQG,
+    BaroclinicQGDiagnostics as BaroclinicQGDiagnostics,
+    BaroclinicQGParams as BaroclinicQGParams,
+    BaroclinicQGPhysConsts as BaroclinicQGPhysConsts,
+    BaroclinicQGState as BaroclinicQGState,
     BarotropicQG as BarotropicQG,
     BarotropicQGDiagnostics as BarotropicQGDiagnostics,
     BarotropicQGParams as BarotropicQGParams,
@@ -73,6 +78,7 @@ from somax._src.models import (
     NSVorticityState as NSVorticityState,
     PoissonSolver2D as PoissonSolver2D,
     barotropic_jet_instability as barotropic_jet_instability,
+    doublegyre_baroclinic_qg as doublegyre_baroclinic_qg,
     doublegyre_qg as doublegyre_qg,
     geostrophic_adjustment_2d as geostrophic_adjustment_2d,
     gravity_wave_1d as gravity_wave_1d,
