@@ -12,6 +12,10 @@ from somax._src.models.qg.barotropic import (
     BarotropicQGPhysConsts,
     BarotropicQGState,
 )
+from somax._src.models.qg.reparameterized import (
+    ReparameterizedQG,
+    ReparamQGDiagnostics,
+)
 
 
 __all__ = [
@@ -25,4 +29,6 @@ __all__ = [
     "BarotropicQGParams",
     "BarotropicQGPhysConsts",
     "BarotropicQGState",
+    "ReparamQGDiagnostics",
+    "ReparameterizedQG",
 ]

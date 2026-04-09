@@ -12,6 +12,13 @@ from somax._src.models.swm.linear_2d import (
     LinearSW2DPhysConsts,
     LinearSW2DState,
 )
+from somax._src.models.swm.multilayer import (
+    MultilayerShallowWater2D,
+    MultilayerSW2DDiagnostics,
+    MultilayerSW2DParams,
+    MultilayerSW2DPhysConsts,
+    MultilayerSW2DState,
+)
 from somax._src.models.swm.nonlinear_1d import (
     NonlinearShallowWater1D,
     NonlinearSW1DDiagnostics,
@@ -39,6 +46,11 @@ __all__ = [
     "LinearSW2DState",
     "LinearShallowWater1D",
     "LinearShallowWater2D",
+    "MultilayerSW2DDiagnostics",
+    "MultilayerSW2DParams",
+    "MultilayerSW2DPhysConsts",
+    "MultilayerSW2DState",
+    "MultilayerShallowWater2D",
     "NonlinearSW1DDiagnostics",
     "NonlinearSW1DParams",
     "NonlinearSW1DPhysConsts",
