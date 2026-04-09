@@ -80,12 +80,12 @@ class BaroclinicQGDiagnostics(Diagnostics):
     psi: Float[Array, "nl Ny Nx"]
     u: Float[Array, "nl Ny Nx"]
     v: Float[Array, "nl Ny Nx"]
-    kinetic_energy: Float[Array, " nl"]
+    kinetic_energy: Array
     total_kinetic_energy: Array
-    enstrophy: Float[Array, " nl"]
+    enstrophy: Array
     total_enstrophy: Array
     relative_vorticity: Float[Array, "nl Ny Nx"]
-    rossby_radii: Float[Array, " nl"]
+    rossby_radii: Array
 
 
 class BaroclinicQG(SomaxModel):
@@ -117,6 +117,7 @@ class BaroclinicQG(SomaxModel):
         beta_y: Precomputed beta*(y - y0) field.
         wind_forcing: Normalised wind stress curl pattern.
         helmholtz_lambdas: f0^2 * eigenvalues per mode, shape ``(nl,)``.
+        poisson_bc: Spectral solver BC type for PV inversion.
     """
 
     params: BaroclinicQGParams
@@ -128,7 +129,8 @@ class BaroclinicQG(SomaxModel):
     strat: StratificationProfile
     beta_y: Float[Array, "Ny Nx"]
     wind_forcing: Float[Array, "Ny Nx"]
-    helmholtz_lambdas: Float[Array, " nl"]
+    helmholtz_lambdas: Array
+    poisson_bc: str = eqx.field(static=True, default="dst")
 
     def _invert_pv(self, q: Float[Array, "nl Ny Nx"]) -> Float[Array, "nl Ny Nx"]:
         r"""Recover streamfunction from layer PV anomaly.
@@ -146,7 +148,7 @@ class BaroclinicQG(SomaxModel):
             self.grid.dx,
             self.grid.dy,
             lambda_=self.helmholtz_lambdas,
-            bc="dst",
+            bc=self.poisson_bc,
         )
 
         # Modal -> layer
@@ -241,6 +243,7 @@ class BaroclinicQG(SomaxModel):
         bottom_drag: float = 0.0,
         wind_amplitude: float = 0.0,
         wind_profile: str = "doublegyre",
+        poisson_bc: str = "dst",
     ) -> BaroclinicQG:
         """Convenience factory for the multilayer QG model.
 
@@ -263,9 +266,14 @@ class BaroclinicQG(SomaxModel):
             wind_amplitude: Wind forcing amplitude.
             wind_profile: Wind stress curl profile. ``"doublegyre"`` gives
                 ``-sin(2*pi*y/Ly)``, ``"single"`` gives ``sin(pi*y/Ly)``.
+            poisson_bc: Spectral solver BC type for PV inversion.
 
         Returns:
             A ``BaroclinicQG`` model instance.
+
+        Raises:
+            ValueError: If ``n_layers``, ``H``, and ``g_prime`` have
+                inconsistent lengths (when ``stratification`` is None).
         """
         grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
 
@@ -273,6 +281,12 @@ class BaroclinicQG(SomaxModel):
         if stratification is not None:
             strat = stratification
         else:
+            if len(H) != n_layers or len(g_prime) != n_layers:
+                msg = (
+                    f"n_layers ({n_layers}), len(H) ({len(H)}), and "
+                    f"len(g_prime) ({len(g_prime)}) must all be equal"
+                )
+                raise ValueError(msg)
             strat = StratificationProfile.from_layers(H=list(H), g_prime=list(g_prime))
 
         nl = strat.nl
@@ -314,4 +328,5 @@ class BaroclinicQG(SomaxModel):
             beta_y=beta_y,
             wind_forcing=wind_forcing,
             helmholtz_lambdas=helmholtz_lambdas,
+            poisson_bc=poisson_bc,
         )
