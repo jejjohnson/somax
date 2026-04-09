@@ -101,7 +101,7 @@ class TestBaroclinicQG:
             n_layers=2,
             H=(500.0, 4500.0),
             g_prime=(9.81, 0.025),
-            wind_amplitude=8e-5,
+            wind_amplitude=1e-10,
         )
         q0 = jnp.zeros((2, model.grid.Ny, model.grid.Nx))
         state0 = BaroclinicQGState(q=q0)
@@ -191,7 +191,7 @@ class TestBaroclinicQG:
             H=(500.0, 4500.0),
             g_prime=(9.81, 0.025),
             lateral_viscosity=50.0,
-            wind_amplitude=8e-5,
+            wind_amplitude=1e-10,
         )
         q0 = jnp.zeros((2, model.grid.Ny, model.grid.Nx))
         state0 = BaroclinicQGState(q=q0)
@@ -208,7 +208,7 @@ class TestBaroclinicQG:
             H=(500.0, 4500.0),
             g_prime=(9.81, 0.025),
             lateral_viscosity=50.0,
-            wind_amplitude=8e-5,
+            wind_amplitude=1e-10,
         )
         q0 = jnp.zeros((2, model.grid.Ny, model.grid.Nx))
         state0 = BaroclinicQGState(q=q0)
@@ -283,7 +283,7 @@ class TestBaroclinicQG:
             H=(400.0, 1100.0, 2500.0),
             g_prime=(9.81, 0.025, 0.0125),
             lateral_viscosity=50.0,
-            wind_amplitude=8e-5,
+            wind_amplitude=1e-10,
         )
         q0 = jnp.zeros((3, model.grid.Ny, model.grid.Nx))
         state0 = BaroclinicQGState(q=q0)

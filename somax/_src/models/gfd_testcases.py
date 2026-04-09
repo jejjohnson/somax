@@ -235,7 +235,7 @@ def doublegyre_baroclinic_qg(
     g_prime: tuple[float, ...] = (9.81, 0.025, 0.0125),
     lateral_viscosity: float = 15.0,
     bottom_drag: float = 1e-7,
-    wind_amplitude: float = 8e-5,
+    wind_amplitude: float = 1.3e-10,
 ) -> tuple[BaroclinicQG, BaroclinicQGState]:
     """Double-gyre wind-driven multilayer QG circulation.
 
@@ -243,6 +243,7 @@ def doublegyre_baroclinic_qg(
     circulation with baroclinic instability.
 
     Default parameters follow louity/MQGeometry 3-layer config.
+    Wind amplitude corresponds to tau0=0.08 Pa scaled by 2*pi/(Ly*rho0).
 
     Args:
         nx: Interior cells in x.
