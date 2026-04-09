@@ -14,7 +14,7 @@ from somax._src.core.helmholtz import (
     PeriodicHelmholtzCache,
 )
 from somax._src.core.model import SomaxModel
-from somax._src.core.transforms import ModalTransform
+from somax._src.core.transforms import ModalTransform, StratificationProfile
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State
 
 
@@ -36,4 +36,5 @@ __all__ = [
     "SimulationCheckpointer",
     "SomaxModel",
     "State",
+    "StratificationProfile",
 ]
