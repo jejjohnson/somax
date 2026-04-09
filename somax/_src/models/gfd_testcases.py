@@ -294,7 +294,6 @@ def baroclinic_instability_swm(
     Ly: float = 1e6,
     f0: float = 1e-4,
     beta: float = 1.6e-11,
-    n_layers: int = 2,
     H: tuple[float, ...] = (500.0, 4500.0),
     g_prime: tuple[float, ...] = (9.81, 0.025),
     lateral_viscosity: float = 100.0,
@@ -306,7 +305,8 @@ def baroclinic_instability_swm(
     """2-layer baroclinic instability in the multilayer shallow water model.
 
     A zonal jet with opposite sign in each layer and a small
-    perturbation develops baroclinic instability.
+    perturbation develops baroclinic instability. Hard-coded to
+    2 layers (opposite jets require exactly 2 layers).
 
     Args:
         nx: Interior cells in x.
@@ -315,9 +315,8 @@ def baroclinic_instability_swm(
         Ly: Domain length in y (m).
         f0: Coriolis parameter (1/s).
         beta: Beta parameter (1/(m*s)).
-        n_layers: Number of layers.
-        H: Layer thicknesses (m), top to bottom.
-        g_prime: Reduced gravities (m/s^2).
+        H: Layer thicknesses (m), top to bottom (must have length 2).
+        g_prime: Reduced gravities (m/s^2) (must have length 2).
         lateral_viscosity: Harmonic viscosity (m^2/s).
         bottom_drag: Linear bottom drag (1/s).
         jet_speed: Peak jet velocity (m/s).
@@ -327,6 +326,7 @@ def baroclinic_instability_swm(
     Returns:
         ``(model, state0)`` tuple.
     """
+    nl = 2
     model = MultilayerShallowWater2D.create(
         nx=nx,
         ny=ny,
@@ -334,7 +334,7 @@ def baroclinic_instability_swm(
         Ly=Ly,
         f0=f0,
         beta=beta,
-        n_layers=n_layers,
+        n_layers=nl,
         H=H,
         g_prime=g_prime,
         lateral_viscosity=lateral_viscosity,
@@ -342,7 +342,6 @@ def baroclinic_instability_swm(
         bc="periodic",
     )
     grid = model.grid
-    nl = model.consts.n_layers
     x = jnp.arange(grid.Nx) * grid.dx
     y = jnp.arange(grid.Ny) * grid.dy
     X, Y = jnp.meshgrid(x, y)
@@ -418,7 +417,7 @@ def doublegyre_reparameterized_qg(
         bottom_drag=bottom_drag,
         wind_amplitude=wind_amplitude,
         wind_profile="doublegyre",
-        bc="periodic",
+        bc="wall",
     )
     nl = model.consts.n_layers
     Ny, Nx = model.grid.Ny, model.grid.Nx

@@ -237,9 +237,7 @@ class MultilayerShallowWater2D(SomaxModel):
 
         # Energy per layer: KE + PE
         ke_sum = jnp.sum(ke[s], axis=(-2, -1)) * cell_area
-        pe_sum = (
-            0.5 * g_prime[:, None, None] * jnp.sum(h[s] ** 2, axis=(-2, -1)) * cell_area
-        )
+        pe_sum = 0.5 * g_prime * jnp.sum(h[s] ** 2, axis=(-2, -1)) * cell_area
         energy_per_layer = ke_sum + pe_sum
 
         # Potential enstrophy per layer: 0.5 * q^2 * h

@@ -167,9 +167,8 @@ class ReparameterizedQG(SomaxModel):
         psi = self._solve_helmholtz(q)
 
         # --- G: streamfunction -> geostrophic state ---
-        # u_g = -dpsi/dy,  v_g = dpsi/dx  (same as BaroclinicQG)
-        u_g = -multilayer(self.diff.diff_y_T_to_V)(psi)
-        v_g = multilayer(self.diff.diff_x_T_to_U)(psi)
+        # grad_perp returns (u@U, v@V) = (-dpsi/dy, dpsi/dx) directly
+        u_g, v_g = multilayer(self.diff.grad_perp)(psi)
         # h_g = H + f0 * H * (A @ psi)
         # A @ psi = Cm2l @ (diag(eigenvalues) @ (Cl2m @ psi))
         psi_modal = self.modal.to_modal(psi)
@@ -202,9 +201,8 @@ class ReparameterizedQG(SomaxModel):
         q = zeta - f0 * eta / H[:, None, None]
         psi = self._solve_helmholtz(q)
 
-        # Geostrophic velocity (psi is streamfunction, not pressure)
-        u_g = -multilayer(self.diff.diff_y_T_to_V)(psi)
-        v_g = multilayer(self.diff.diff_x_T_to_U)(psi)
+        # Geostrophic velocity via grad_perp: (u@U, v@V)
+        u_g, v_g = multilayer(self.diff.grad_perp)(psi)
 
         # Ageostrophic velocity = total - geostrophic
         u_ageo = u - u_g
@@ -240,7 +238,7 @@ class ReparameterizedQG(SomaxModel):
         bottom_drag: float = 0.0,
         wind_amplitude: float = 0.0,
         wind_profile: str = "doublegyre",
-        bc: str = "periodic",
+        bc: str = "wall",
         method: str = "upwind1",
         poisson_bc: str = "dst",
     ) -> ReparameterizedQG:
@@ -248,6 +246,11 @@ class ReparameterizedQG(SomaxModel):
 
         Accepts all arguments of ``MultilayerShallowWater2D.create()``
         plus ``poisson_bc`` for the Helmholtz solver.
+
+        Note:
+            The geostrophic projection uses a Dirichlet (DST) Helmholtz
+            solver and ``zero_boundaries``, so only wall/Dirichlet BCs
+            are consistent. Periodic BCs are not supported.
 
         Args:
             nx: Number of interior cells in x.
@@ -265,13 +268,24 @@ class ReparameterizedQG(SomaxModel):
             bottom_drag: Linear bottom drag (1/s).
             wind_amplitude: Wind stress amplitude (m/s^2).
             wind_profile: Wind stress pattern.
-            bc: Boundary condition type.
+            bc: Boundary condition type (must be ``"wall"``).
             method: Advection reconstruction method.
             poisson_bc: Spectral solver BC type for Helmholtz.
 
         Returns:
             A ``ReparameterizedQG`` model instance.
+
+        Raises:
+            ValueError: If ``bc`` is not ``"wall"``.
         """
+        if bc != "wall":
+            msg = (
+                f"ReparameterizedQG requires wall BCs (got bc={bc!r}). "
+                "The geostrophic projection uses Dirichlet Helmholtz "
+                "inversion which is incompatible with periodic BCs."
+            )
+            raise ValueError(msg)
+
         swm = MultilayerShallowWater2D.create(
             nx=nx,
             ny=ny,
