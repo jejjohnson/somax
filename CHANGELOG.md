@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.5](https://github.com/jejjohnson/somax/compare/somax-v0.0.4...somax-v0.0.5) (2026-04-09)
+
+
+### Features
+
+* add baroclinic (multilayer) quasi-geostrophic model ([#67](https://github.com/jejjohnson/somax/issues/67)) ([d993046](https://github.com/jejjohnson/somax/commit/d993046687ce7553b046acfcce174b0baf2b212f))
+* add multilayer SWM and reparameterized QG models ([#69](https://github.com/jejjohnson/somax/issues/69)) ([0a52fbd](https://github.com/jejjohnson/somax/commit/0a52fbd1afaa63957d5961c6c88827b1326ee857))
+
 ## [0.0.4](https://github.com/jejjohnson/somax/compare/somax-v0.0.3...somax-v0.0.4) (2026-04-09)
 
 
