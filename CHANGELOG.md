@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.4](https://github.com/jejjohnson/somax/compare/somax-v0.0.3...somax-v0.0.4) (2026-04-09)
+
+
+### Features
+
+* add StratificationProfile and refactor ModalTransform ([#66](https://github.com/jejjohnson/somax/issues/66)) ([62e1da8](https://github.com/jejjohnson/somax/commit/62e1da81b1bb722f135a43630de30d89ac852506))
+* phase 1-2 PDE models + 13 Steps to Navier-Stokes tutorials ([#62](https://github.com/jejjohnson/somax/issues/62)) ([9621419](https://github.com/jejjohnson/somax/commit/962141943d5cae9cf2c3c7bb3e10f3d5d783cef7))
+* phase 4 GFD planar models — shallow water + quasi-geostrophic ([#65](https://github.com/jejjohnson/somax/issues/65)) ([0a6182c](https://github.com/jejjohnson/somax/commit/0a6182c78262618addde38f5a5dcf5a98790e1c5))
+
 ## [0.0.3](https://github.com/jejjohnson/somax/compare/somax-v0.0.2...somax-v0.0.3) (2026-04-08)
 
 
