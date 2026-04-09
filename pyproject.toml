@@ -1,6 +1,6 @@
 [project]
 name = "somax"
-version = "0.0.3"
+version = "0.0.4"
 description = "Simple Ocean Models in JAX."
 authors = [
     {name = "Juan Emmanuel Johnson", email = "jemanjohnson34@gmail.com"},
