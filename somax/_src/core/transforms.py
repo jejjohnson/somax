@@ -33,9 +33,9 @@ class StratificationProfile(eqx.Module):
         return self.H.shape[0]
 
     @property
-    def total_depth(self) -> float:
-        """Total ocean depth [m]."""
-        return float(jnp.sum(self.H))
+    def total_depth(self) -> Array:
+        """Total ocean depth [m] (JAX scalar, safe under jit)."""
+        return jnp.sum(self.H)
 
     @staticmethod
     def from_N2_constant(
@@ -129,7 +129,17 @@ class StratificationProfile(eqx.Module):
 
         Returns:
             A ``StratificationProfile`` instance.
+
+        Raises:
+            ValueError: If ``H`` and ``g_prime`` have different lengths,
+                or if ``rho`` is provided with a different length.
         """
+        if len(H) != len(g_prime):
+            msg = f"H ({len(H)}) and g_prime ({len(g_prime)}) must have the same length"
+            raise ValueError(msg)
+        if rho is not None and len(rho) != len(H):
+            msg = f"rho ({len(rho)}) must have the same length as H ({len(H)})"
+            raise ValueError(msg)
         rho_arr = jnp.array(rho) if rho is not None else None
         return StratificationProfile(
             H=jnp.array(H),
