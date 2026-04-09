@@ -10,8 +10,13 @@ import jax.numpy as jnp
 
 from somax._src.models.qg.baroclinic import BaroclinicQG, BaroclinicQGState
 from somax._src.models.qg.barotropic import BarotropicQG, BarotropicQGState
+from somax._src.models.qg.reparameterized import ReparameterizedQG
 from somax._src.models.swm.linear_1d import LinearShallowWater1D, LinearSW1DState
 from somax._src.models.swm.linear_2d import LinearShallowWater2D, LinearSW2DState
+from somax._src.models.swm.multilayer import (
+    MultilayerShallowWater2D,
+    MultilayerSW2DState,
+)
 from somax._src.models.swm.nonlinear_2d import (
     NonlinearShallowWater2D,
     NonlinearSW2DState,
@@ -279,4 +284,146 @@ def doublegyre_baroclinic_qg(
     )
     q0 = jnp.zeros((model.consts.n_layers, model.grid.Ny, model.grid.Nx))
     state0 = BaroclinicQGState(q=q0)
+    return model, state0
+
+
+def baroclinic_instability_swm(
+    nx: int = 64,
+    ny: int = 64,
+    Lx: float = 1e6,
+    Ly: float = 1e6,
+    f0: float = 1e-4,
+    beta: float = 1.6e-11,
+    n_layers: int = 2,
+    H: tuple[float, ...] = (500.0, 4500.0),
+    g_prime: tuple[float, ...] = (9.81, 0.025),
+    lateral_viscosity: float = 100.0,
+    bottom_drag: float = 1e-7,
+    jet_speed: float = 0.5,
+    jet_width: float = 5e4,
+    perturbation: float = 0.01,
+) -> tuple[MultilayerShallowWater2D, MultilayerSW2DState]:
+    """2-layer baroclinic instability in the multilayer shallow water model.
+
+    A zonal jet with opposite sign in each layer and a small
+    perturbation develops baroclinic instability.
+
+    Args:
+        nx: Interior cells in x.
+        ny: Interior cells in y.
+        Lx: Domain length in x (m).
+        Ly: Domain length in y (m).
+        f0: Coriolis parameter (1/s).
+        beta: Beta parameter (1/(m*s)).
+        n_layers: Number of layers.
+        H: Layer thicknesses (m), top to bottom.
+        g_prime: Reduced gravities (m/s^2).
+        lateral_viscosity: Harmonic viscosity (m^2/s).
+        bottom_drag: Linear bottom drag (1/s).
+        jet_speed: Peak jet velocity (m/s).
+        jet_width: Gaussian half-width of jet (m).
+        perturbation: Amplitude of initial perturbation.
+
+    Returns:
+        ``(model, state0)`` tuple.
+    """
+    model = MultilayerShallowWater2D.create(
+        nx=nx,
+        ny=ny,
+        Lx=Lx,
+        Ly=Ly,
+        f0=f0,
+        beta=beta,
+        n_layers=n_layers,
+        H=H,
+        g_prime=g_prime,
+        lateral_viscosity=lateral_viscosity,
+        bottom_drag=bottom_drag,
+        bc="periodic",
+    )
+    grid = model.grid
+    nl = model.consts.n_layers
+    x = jnp.arange(grid.Nx) * grid.dx
+    y = jnp.arange(grid.Ny) * grid.dy
+    X, Y = jnp.meshgrid(x, y)
+
+    y0 = Ly / 2.0
+    jet_profile = jnp.exp(-0.5 * ((Y - y0) / jet_width) ** 2)
+
+    # Opposite jets in each layer (baroclinic shear)
+    signs = jnp.array([1.0, -1.0])[:nl]
+    u0 = signs[:, None, None] * jet_speed * jet_profile[None]
+    v0 = jnp.broadcast_to(
+        perturbation * jnp.sin(4.0 * jnp.pi * X / Lx)[None] * jet_profile[None],
+        (nl, grid.Ny, grid.Nx),
+    ).copy()
+    h0 = jnp.ones((nl, grid.Ny, grid.Nx)) * model.strat.H[:, None, None]
+
+    state0 = MultilayerSW2DState(h=h0, u=u0, v=v0)
+    return model, state0
+
+
+def doublegyre_reparameterized_qg(
+    nx: int = 128,
+    ny: int = 128,
+    Lx: float = 4e6,
+    Ly: float = 4e6,
+    f0: float = 9.375e-5,
+    beta: float = 1.754e-11,
+    n_layers: int = 3,
+    H: tuple[float, ...] = (400.0, 1100.0, 2600.0),
+    g_prime: tuple[float, ...] = (9.81, 0.025, 0.0125),
+    lateral_viscosity: float = 15.0,
+    bottom_drag: float = 3.6e-8,
+    wind_amplitude: float = 8e-5,
+) -> tuple[ReparameterizedQG, MultilayerSW2DState]:
+    """Double-gyre reparameterized QG model (QG = SWM + projection).
+
+    A wind-driven multilayer double-gyre using the reparameterized QG
+    approach (Thiry et al. 2024). Same physics as
+    ``doublegyre_baroclinic_qg`` but solved in (u, v, h) state space
+    with geostrophic projection.
+
+    Default parameters follow louity/qgsw-pytorch 3-layer config.
+    Wind amplitude is tau0/rho0 = 0.08/1000 = 8e-5 m^2/s^2.
+
+    Args:
+        nx: Interior cells in x.
+        ny: Interior cells in y.
+        Lx: Domain length in x (m).
+        Ly: Domain length in y (m).
+        f0: Coriolis parameter (1/s).
+        beta: Beta parameter (1/(m*s)).
+        n_layers: Number of layers.
+        H: Layer thicknesses (m), top to bottom.
+        g_prime: Reduced gravities (m/s^2).
+        lateral_viscosity: Harmonic viscosity (m^2/s).
+        bottom_drag: Linear bottom drag (1/s).
+        wind_amplitude: Wind stress amplitude (m/s^2).
+
+    Returns:
+        ``(model, state0)`` tuple.
+    """
+    model = ReparameterizedQG.create(
+        nx=nx,
+        ny=ny,
+        Lx=Lx,
+        Ly=Ly,
+        f0=f0,
+        beta=beta,
+        n_layers=n_layers,
+        H=H,
+        g_prime=g_prime,
+        lateral_viscosity=lateral_viscosity,
+        bottom_drag=bottom_drag,
+        wind_amplitude=wind_amplitude,
+        wind_profile="doublegyre",
+        bc="periodic",
+    )
+    nl = model.consts.n_layers
+    Ny, Nx = model.grid.Ny, model.grid.Nx
+    h0 = jnp.ones((nl, Ny, Nx)) * model.strat.H[:, None, None]
+    u0 = jnp.zeros((nl, Ny, Nx))
+    v0 = jnp.zeros((nl, Ny, Nx))
+    state0 = MultilayerSW2DState(h=h0, u=u0, v=v0)
     return model, state0
