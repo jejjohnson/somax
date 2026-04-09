@@ -160,7 +160,8 @@ class LinearShallowWater2D(SomaxModel):
         H0 = self.consts.H0
         h, u, v = state.h, state.u, state.v
         s = (slice(1, -1), slice(1, -1))
-        energy = 0.5 * jnp.sum(g * h[s] ** 2 + H0 * (u[s] ** 2 + v[s] ** 2))
+        cell_area = self.grid.dx * self.grid.dy
+        energy = 0.5 * jnp.sum(g * h[s] ** 2 + H0 * (u[s] ** 2 + v[s] ** 2)) * cell_area
         zeta = self.diff.curl(u, v)
         return LinearSW2DDiagnostics(energy=energy, relative_vorticity=zeta)
 

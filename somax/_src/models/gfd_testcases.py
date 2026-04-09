@@ -104,11 +104,8 @@ def geostrophic_adjustment_2d(
     )
     x = jnp.arange(model.grid.Nx) * model.grid.dx
     X = jnp.broadcast_to(x[None, :], (model.grid.Ny, model.grid.Nx))
-    # Step in x: positive for x < Lx/2, negative otherwise
-    h0 = eta_max * jnp.where(Lx / 2.0 > X, 1.0, -1.0)
-    # Smooth the step with a tanh profile
-    h0 = eta_max * jnp.tanh((X - Lx / 2.0) / (Lx / 20.0))
-    h0 = -h0  # High on left, low on right
+    # Smooth tanh height step: high on left, low on right
+    h0 = -eta_max * jnp.tanh((X - Lx / 2.0) / (Lx / 20.0))
     u0 = jnp.zeros_like(h0)
     v0 = jnp.zeros_like(h0)
     state0 = LinearSW2DState(h=h0, u=u0, v=v0)

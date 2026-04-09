@@ -22,7 +22,9 @@ class BarotropicQGState(State):
     """State for the barotropic quasi-geostrophic model.
 
     Args:
-        q: Potential vorticity on T-points, shape ``(Ny, Nx)``.
+        q: PV anomaly (relative vorticity, zeta = nabla^2 psi)
+            on T-points, shape ``(Ny, Nx)``. The total PV is
+            ``q + beta * y``; the inversion solves ``nabla^2 psi = q``.
     """
 
     q: Float[Array, "Ny Nx"]
@@ -82,10 +84,11 @@ class BarotropicQG(SomaxModel):
         dq/dt = -J(ψ, q) + tau0*F_wind - kappa*laplacian(psi) + nu*laplacian(q)
 
     where:
-        - q is potential vorticity
-        - ψ is the streamfunction from PV inversion: ∇²ψ = q - β·y
-        - J(ψ, q) is the Arakawa Jacobian (energy+enstrophy conserving)
-        - u = -∂ψ/∂y, v = ∂ψ/∂x (geostrophic velocity)
+        - q is the PV anomaly (relative vorticity, nabla^2 psi)
+        - total PV is q + beta*y
+        - psi is the streamfunction from inversion: nabla^2 psi = q
+        - J(psi, q + beta*y) is the Arakawa Jacobian (energy+enstrophy conserving)
+        - u = -dpsi/dy, v = dpsi/dx (geostrophic velocity)
 
     Args:
         params: Differentiable parameters.
@@ -165,9 +168,10 @@ class BarotropicQG(SomaxModel):
         s = (slice(1, -1), slice(1, -1))
         u_T = self.interp.V_to_T(u)
         v_T = self.interp.U_to_T(v)
-        ke = 0.5 * jnp.sum(u_T[s] ** 2 + v_T[s] ** 2)
+        cell_area = self.grid.dx * self.grid.dy
+        ke = 0.5 * jnp.sum(u_T[s] ** 2 + v_T[s] ** 2) * cell_area
         zeta = self.diff.laplacian(psi)
-        enstrophy = 0.5 * jnp.sum(q[s] ** 2)
+        enstrophy = 0.5 * jnp.sum(q[s] ** 2) * cell_area
 
         return BarotropicQGDiagnostics(
             psi=psi,

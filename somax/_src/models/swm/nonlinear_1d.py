@@ -103,8 +103,9 @@ class NonlinearShallowWater1D(SomaxModel):
         # Mass equation: dh/dt = -d(hu)/dx (via advection operator)
         dh_dt = self.advection(h, u, method=self.method)
 
-        # Momentum: -u * du/dx (advection of u by u)
-        du_adv = self.advection(u, u, method=self.method)
+        # Momentum advection: -u * du/dx, implemented in conservative
+        # flux form as -d(u^2 / 2)/dx using the existing advection operator.
+        du_adv = 0.5 * self.advection(u, u, method=self.method)
 
         # Pressure gradient: -g * dh/dx
         pressure_grad = -g * self.diff.diff_x_T_to_U(h)
@@ -136,12 +137,18 @@ class NonlinearShallowWater1D(SomaxModel):
     def diagnose(self, state: PyTree) -> NonlinearSW1DDiagnostics:
         """Compute energy and mass."""
         g = self.consts.gravity
+        dx = self.grid.dx
         h, u, v = state.h, state.u, state.v
         interior = slice(1, -1)
-        energy = 0.5 * jnp.sum(
-            g * h[interior] ** 2 + h[interior] * (u[interior] ** 2 + v[interior] ** 2)
+        energy = (
+            0.5
+            * dx
+            * jnp.sum(
+                g * h[interior] ** 2
+                + h[interior] * (u[interior] ** 2 + v[interior] ** 2)
+            )
         )
-        mass = jnp.sum(h[interior])
+        mass = dx * jnp.sum(h[interior])
         return NonlinearSW1DDiagnostics(energy=energy, mass=mass)
 
     @staticmethod

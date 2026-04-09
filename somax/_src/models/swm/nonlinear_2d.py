@@ -217,11 +217,13 @@ class NonlinearShallowWater2D(SomaxModel):
         zeta = self.vorticity.relative_vorticity(u, v)
         q = self.vorticity.potential_vorticity(u, v, h, self.f_field)
 
+        cell_area = self.grid.dx * self.grid.dy
+
         # Total energy: KE + PE
-        energy = jnp.sum(ke[s] + 0.5 * g * h[s] ** 2)
+        energy = cell_area * jnp.sum(ke[s] + 0.5 * g * h[s] ** 2)
         # Potential enstrophy: 0.5 * q^2 * h
         h_on_X = self.interp.T_to_X(h)
-        enstrophy = 0.5 * jnp.sum(q[s] ** 2 * h_on_X[s])
+        enstrophy = 0.5 * cell_area * jnp.sum(q[s] ** 2 * h_on_X[s])
 
         return NonlinearSW2DDiagnostics(
             energy=energy,

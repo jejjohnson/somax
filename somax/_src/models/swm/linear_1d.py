@@ -138,9 +138,12 @@ class LinearShallowWater1D(SomaxModel):
         H0 = self.consts.H0
         h, u, v = state.h, state.u, state.v
         interior = slice(1, -1)
-        # Energy: 0.5 * (g*h² + H0*(u² + v²))
-        energy = 0.5 * jnp.sum(
-            g * h[interior] ** 2 + H0 * (u[interior] ** 2 + v[interior] ** 2)
+        dx = self.grid.dx
+        # Energy: 0.5 * (g*h² + H0*(u² + v²)) * dx
+        energy = (
+            0.5
+            * dx
+            * jnp.sum(g * h[interior] ** 2 + H0 * (u[interior] ** 2 + v[interior] ** 2))
         )
         phase_speed = jnp.sqrt(g * H0)
         return LinearSW1DDiagnostics(energy=energy, phase_speed=phase_speed)
