@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/jejjohnson/somax/compare/somax-v0.0.5...somax-v0.0.6) (2026-04-10)
+
+
+### Features
+
+* somax-sim CLI + DVC pipelines for reference simulations ([#71](https://github.com/jejjohnson/somax/issues/71)) ([a0220b2](https://github.com/jejjohnson/somax/commit/a0220b277b76b41ffe09c7eb4e26f00b4ac6d3b0))
+
 ## [0.0.5](https://github.com/jejjohnson/somax/compare/somax-v0.0.4...somax-v0.0.5) (2026-04-09)
 
 
