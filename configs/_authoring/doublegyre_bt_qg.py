@@ -36,4 +36,14 @@ DoubleGyreBTQGConfig: dict = {
     ),
     "output": output_full(),
     "debug": default_debug(),
+    # Advection CFL: with peak velocities of order 1 m/s and dx=15.6 km,
+    # CFL ≈ 1 * 600 / 15625 ≈ 0.04 → very safe.
+    "assertions": {
+        "cfl": {"wave_speed_m_per_s": 2.0, "max_cfl": 0.5},
+        "bounded_metric": {
+            "name": "kinetic_energy",
+            "min": 0.0,
+            "max": 1.0e15,
+        },
+    },
 }

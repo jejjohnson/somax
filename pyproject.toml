@@ -62,6 +62,7 @@ sim = [
     "xarray>=2024.10",
     "pyyaml>=6",
     "dvc>=3.0",
+    "loguru>=0.7",
 ]
 docs = [
     "mkdocs>=1.6",

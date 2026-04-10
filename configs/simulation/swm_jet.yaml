@@ -19,7 +19,7 @@ testcase:
     - 9.81
     - 0.025
   params:
-    lateral_viscosity: 100.0
+    lateral_viscosity: 1000.0
     bottom_drag: 1.0e-07
     jet_speed: 0.5
     jet_width: 50000.0
@@ -27,7 +27,7 @@ testcase:
 timestepping:
   t0: 0.0
   t1: 2592000.0
-  dt: 300.0
+  dt: 20.0
   save_interval: 86400.0
 output:
   write_snapshots: true
@@ -40,3 +40,7 @@ debug:
   timestepping:
     t1: 86400.0
     save_interval: 600.0
+assertions:
+  cfl:
+    wave_speed_m_per_s: 221.0
+    max_cfl: 0.5

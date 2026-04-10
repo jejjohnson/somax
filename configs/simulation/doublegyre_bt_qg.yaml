@@ -32,3 +32,11 @@ debug:
   timestepping:
     t1: 86400.0
     save_interval: 600.0
+assertions:
+  cfl:
+    wave_speed_m_per_s: 2.0
+    max_cfl: 0.5
+  bounded_metric:
+    name: kinetic_energy
+    min: 0.0
+    max: 1000000000000000.0

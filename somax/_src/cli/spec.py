@@ -118,12 +118,19 @@ class RunSpec:
         timestepping: Integration window and snapshot cadence.
         output: Output-side toggles.
         debug: Debug-mode overrides (only applied if ``--debug`` is set).
+        assertions: Optional opt-in preflight + postflight assertions.
+            Each entry is ``{name: params_dict}`` where ``name`` is a
+            registered assertion (see :mod:`somax._src.cli._assertions`)
+            and ``params_dict`` is its kwargs. Empty by default — runs
+            without any opt-in assertions still get the unconditional
+            non-finite-state safety check from the runner.
     """
 
     testcase: TestCaseSpec
     timestepping: TimesteppingSpec
     output: OutputSpec = field(default_factory=OutputSpec)
     debug: DebugSpec = field(default_factory=DebugSpec)
+    assertions: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Validation
@@ -244,6 +251,7 @@ class RunSpec:
                 "testcase": copy.deepcopy(self.debug.testcase),
                 "timestepping": copy.deepcopy(self.debug.timestepping),
             },
+            "assertions": copy.deepcopy(self.assertions),
         }
 
     @classmethod
@@ -285,11 +293,17 @@ class RunSpec:
             testcase=dict(dbg_data.get("testcase", {})),
             timestepping=dict(dbg_data.get("timestepping", {})),
         )
+        assertions_data = data.get("assertions", {}) or {}
+        # Each entry: name -> params (dict) | None.
+        assertions: dict[str, dict[str, Any]] = {
+            str(name): dict(params or {}) for name, params in assertions_data.items()
+        }
         return cls(
             testcase=testcase,
             timestepping=timestepping,
             output=output,
             debug=debug,
+            assertions=assertions,
         )
 
 

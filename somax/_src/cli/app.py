@@ -13,28 +13,41 @@ discovery commands (``list-testcases`` / ``list-models`` /
 
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
 from typing import Annotated
 
 from cyclopts import App, Parameter
+from loguru import logger
 
 from somax._src.cli import _factories, _run
 from somax._src.cli.spec import RunSpec, load_yaml
 
 
 # ----------------------------------------------------------------------
-# Logging setup — friendly but quiet by default
+# Logging setup — loguru with a compact, colored sink
 # ----------------------------------------------------------------------
 
 
 def _configure_logging(verbose: bool = False) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
+    """Reset loguru's sinks to a single colored stderr sink for the CLI.
+
+    Loguru ships with a default stderr sink that is fine for libraries
+    but a little verbose for an interactive CLI; we replace it with a
+    short, colored format that matches what users expect from a
+    well-behaved tool. ``--verbose`` raises the level from INFO to DEBUG.
+    """
+    level = "DEBUG" if verbose else "INFO"
+    logger.remove()
+    logger.add(
+        sys.stderr,
         level=level,
-        format="[%(asctime)s] %(name)s | %(levelname)s | %(message)s",
-        datefmt="%H:%M:%S",
+        format=(
+            "<green>{time:HH:mm:ss}</green> "
+            "<level>{level: <7}</level> "
+            "<cyan>somax-sim</cyan> | <level>{message}</level>"
+        ),
+        colorize=True,
     )
 
 
@@ -69,17 +82,36 @@ def run(
         bool,
         Parameter(help="Apply the cfg.debug overrides (smaller grid, shorter run)."),
     ] = False,
-    verbose: Annotated[bool, Parameter(help="Enable DEBUG-level logging.")] = False,
+    diagnostics_per_save: Annotated[
+        int,
+        Parameter(
+            help=(
+                "Number of diagnostic sub-chunks logged per save interval. "
+                "1 (default) = one log line per snapshot. Higher values give "
+                "finer-grained monitoring in <output_dir>/run.log without "
+                "changing the snapshot cadence."
+            ),
+        ),
+    ] = 1,
+    verbose: Annotated[
+        bool,
+        Parameter(
+            help=(
+                "Enable DEBUG-level logging on stderr (also tees the per-chunk "
+                "diagnostics from run.log to the terminal)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run a fresh simulation from factory-built initial conditions.
 
     Reads ``config`` (YAML), optionally merges the ``debug`` block, then
     integrates the model and writes ``snapshots.zarr``, ``final_state.zarr``,
-    and ``metrics.json`` under ``output_dir``.
+    ``metrics.json``, and ``run.log`` under ``output_dir``.
     """
     _configure_logging(verbose)
     spec = _load_and_prepare(config, debug=debug)
-    _run.simulate(spec, output_dir)
+    _run.simulate(spec, output_dir, diagnostics_per_save=diagnostics_per_save)
 
 
 # ----------------------------------------------------------------------
@@ -101,7 +133,24 @@ def spinup(
         bool,
         Parameter(help="Apply the cfg.debug overrides (smaller grid, shorter run)."),
     ] = False,
-    verbose: Annotated[bool, Parameter(help="Enable DEBUG-level logging.")] = False,
+    diagnostics_per_save: Annotated[
+        int,
+        Parameter(
+            help=(
+                "Number of diagnostic sub-chunks logged per save interval "
+                "(default 1). Higher values give finer monitoring."
+            ),
+        ),
+    ] = 1,
+    verbose: Annotated[
+        bool,
+        Parameter(
+            help=(
+                "Enable DEBUG-level logging on stderr (also tees per-chunk "
+                "diagnostics to the terminal)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run a spinup integration. Saves only the endpoint state.
 
@@ -110,11 +159,12 @@ def spinup(
     snapshots, no metrics — just the equilibrium state.
 
     Pass ``--debug`` to smoke-test the spinup → restart chain quickly;
-    DVC stages should not pass ``--debug``.
+    DVC stages should not pass ``--debug``. A structured ``run.log`` is
+    always written under ``output_dir``.
     """
     _configure_logging(verbose)
     spec = _load_and_prepare(config, debug=debug)
-    _run.spinup(spec, output_dir)
+    _run.spinup(spec, output_dir, diagnostics_per_save=diagnostics_per_save)
 
 
 # ----------------------------------------------------------------------
@@ -145,7 +195,24 @@ def restart(
         ),
     ],
     debug: Annotated[bool, Parameter(help="Apply the cfg.debug overrides.")] = False,
-    verbose: Annotated[bool, Parameter(help="Enable DEBUG-level logging.")] = False,
+    diagnostics_per_save: Annotated[
+        int,
+        Parameter(
+            help=(
+                "Number of diagnostic sub-chunks logged per save interval "
+                "(default 1). Higher values give finer monitoring."
+            ),
+        ),
+    ] = 1,
+    verbose: Annotated[
+        bool,
+        Parameter(
+            help=(
+                "Enable DEBUG-level logging on stderr (also tees per-chunk "
+                "diagnostics to the terminal)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Resume a simulation from a previously saved state.
 
@@ -155,7 +222,12 @@ def restart(
     """
     _configure_logging(verbose)
     spec = _load_and_prepare(config, debug=debug)
-    _run.restart(spec, output_dir, restart_from=from_)
+    _run.restart(
+        spec,
+        output_dir,
+        restart_from=from_,
+        diagnostics_per_save=diagnostics_per_save,
+    )
 
 
 # ----------------------------------------------------------------------
