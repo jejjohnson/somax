@@ -14,6 +14,7 @@ project:
         - file: content/notes/grids
         - file: content/notes/shallow_water
         - file: content/notes/quasigeostrophic
+        - file: content/notes/qg_spinup_durations
     - title: Tutorials
       children:
         - file: content/tutorials/getting_started

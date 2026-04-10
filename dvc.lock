@@ -1,0 +1,87 @@
+schema: '2.0'
+stages:
+  build-configs:
+    cmd: python scripts/build_configs.py
+    deps:
+    - path: configs/_authoring
+      hash: md5
+      md5: ee84580f018c1313dba6ea9cf20ac1a4.dir
+      size: 8539
+      nfiles: 6
+    - path: scripts/build_configs.py
+      hash: md5
+      md5: 6354e102388fdabc9b86aeceacdca18b
+      size: 1959
+    outs:
+    - path: configs/simulation/doublegyre_bc_qg.yaml
+      hash: md5
+      md5: 954cac8cdcc5a07d44b0bfeb6ea5278e
+      size: 803
+    - path: configs/simulation/doublegyre_bt_qg.yaml
+      hash: md5
+      md5: 3b7f7453edd367604ae2e63fc02ce1c6
+      size: 679
+    - path: configs/simulation/spinup_bc_qg.yaml
+      hash: md5
+      md5: adc4e76c0404cd16d2e3b22a9ead406b
+      size: 808
+    - path: configs/simulation/swm_jet.yaml
+      hash: md5
+      md5: 58e4890ee26310ced237554ea26191cc
+      size: 791
+  simulate-swm-jet:
+    cmd: somax-sim run --config configs/simulation/swm_jet.yaml --output-dir 
+      data/simulations/swm_jet
+    deps:
+    - path: configs/simulation/swm_jet.yaml
+      hash: md5
+      md5: 58e4890ee26310ced237554ea26191cc
+      size: 791
+    - path: somax/_src
+      hash: md5
+      md5: 71717ba32e937595ed97e10d6ab701f2.dir
+      size: 237928
+      nfiles: 48
+    outs:
+    - path: data/simulations/swm_jet/final_state.zarr
+      hash: md5
+      md5: f936a4bdc996cf4b8080f3d01ebfd2e9.dir
+      size: 5003
+      nfiles: 9
+    - path: data/simulations/swm_jet/metrics.json
+      hash: md5
+      md5: 8e362a0e63706060f835ed9236a77908
+      size: 605
+    - path: data/simulations/swm_jet/snapshots.zarr
+      hash: md5
+      md5: fb680a3adaefdd82e489c9b567d77bbf.dir
+      size: 28793
+      nfiles: 16
+  simulate-bt-qg:
+    cmd: somax-sim run --config configs/simulation/doublegyre_bt_qg.yaml 
+      --output-dir data/simulations/doublegyre_bt_qg
+    deps:
+    - path: configs/simulation/doublegyre_bt_qg.yaml
+      hash: md5
+      md5: 3b7f7453edd367604ae2e63fc02ce1c6
+      size: 679
+    - path: somax/_src
+      hash: md5
+      md5: 71717ba32e937595ed97e10d6ab701f2.dir
+      size: 237928
+      nfiles: 48
+    outs:
+    - path: data/simulations/doublegyre_bt_qg/final_state.zarr
+      hash: md5
+      md5: 0933a490efddb9513c724450013bd305.dir
+      size: 17700
+      nfiles: 5
+    - path: data/simulations/doublegyre_bt_qg/metrics.json
+      hash: md5
+      md5: 48dd72b0aad122a36d69bbc2b5892329
+      size: 654
+    - path: data/simulations/doublegyre_bt_qg/snapshots.zarr
+      hash: md5
+      md5: 9d4daef19e2f471c32f505b818196977.dir
+      size: 188406
+      nfiles: 5

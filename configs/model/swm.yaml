@@ -1,4 +1,0 @@
-name: swm
-description: Nonlinear shallow water model
-num_layers: 1
-nonlinear: true

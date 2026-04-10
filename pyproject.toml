@@ -36,6 +36,9 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/jejjohnson/somax"
 
+[project.scripts]
+somax-sim = "somax._src.cli.app:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
@@ -54,6 +57,12 @@ sim = [
     "hydra-zen>=0.13",
     "omegaconf>=2.3",
     "orbax-checkpoint>=0.6",
+    "cyclopts>=3.0",
+    "zarr>=3.0",
+    "xarray>=2024.10",
+    "pyyaml>=6",
+    "dvc>=3.0",
+    "loguru>=0.7",
 ]
 docs = [
     "mkdocs>=1.6",

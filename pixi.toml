@@ -9,17 +9,19 @@ platforms = ["linux-64", "osx-arm64"]
 python = ">=3.12"
 numpy = "*"
 scipy = "*"
-xarray = "*"
-netcdf4 = "*"
+xarray = ">=2024.10"
+zarr = ">=3"
 matplotlib = "*"
 dvc = ">=3"
 hydra-core = ">=1.3"
+pyyaml = ">=6"
 
 [pypi-dependencies]
 somax = { path = ".", editable = true }
 hydra-zen = ">=0.13"
 omegaconf = ">=2.3"
 orbax-checkpoint = "*"
+cyclopts = ">=3"
 
 [feature.dev.dependencies]
 pytest = ">=8"
@@ -63,8 +65,23 @@ lint = "ruff check ."
 format = "ruff format ."
 typecheck = "ty check somax"
 precommit = "pre-commit run --all-files"
-# simulate-swm = "python scripts/swm.py"      # disabled until SWM model rewrite
-# simulate-mqg = "python scripts/mqg_doublegyre.py"  # disabled until MQG model rewrite
+
+# DVC pipelines (production runs — see dvc.yaml).
+sim = "dvc repro"
+build-configs = "dvc repro build-configs"
+sim-swm-jet = "dvc repro simulate-swm-jet"
+sim-bt-qg = "dvc repro simulate-bt-qg"
+sim-bc-qg = "dvc repro simulate-bc-qg"
+spinup-bc-qg = "dvc repro spinup-bc-qg"
+
+# Cyclopts CLI pass-through for ad-hoc / debug runs.
+sim-cli = "somax-sim"
+sim-debug = "somax-sim run --debug"
+
+# DVC experiments.
+exp-run = "dvc exp run"
+exp-show = "dvc exp show"
+exp-diff = "dvc exp diff"
 
 [feature.docs.tasks]
 docs-serve = "myst start"
