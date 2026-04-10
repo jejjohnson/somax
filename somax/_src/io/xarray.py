@@ -203,6 +203,17 @@ def dataset_to_state(
                 "dataset_to_state called without state_class and the Dataset "
                 "is missing 'state_class'/'state_module' attrs"
             ) from exc
+        # Auto-import is allowlisted to modules under ``somax.`` so that
+        # loading a zarr store with attacker-controlled attrs cannot
+        # trigger arbitrary import side effects. If the persisted
+        # ``state_module`` is anywhere else, the caller must pass
+        # ``state_class`` explicitly.
+        if not (module_name == "somax" or module_name.startswith("somax.")):
+            raise ValueError(
+                f"refusing to auto-import state_module {module_name!r}: only "
+                f"modules under 'somax.' are allowlisted for auto-recovery. "
+                f"Pass state_class explicitly to load this dataset."
+            )
         module = importlib.import_module(module_name)
         state_class = getattr(module, class_name)
 

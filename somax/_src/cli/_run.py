@@ -91,6 +91,16 @@ def _build_save_times(spec: RunSpec, *, only_final: bool = False) -> jnp.ndarray
     only need the endpoint state, but the chunked-integration path
     still needs the t0 anchor.
 
+    Cadence semantics: snapshots are placed at exactly ``save_interval``
+    apart, starting from ``t0`` — i.e. ``[t0, t0+SI, t0+2*SI, ...]`` —
+    and ``t1`` is appended as the final snapshot if it isn't already a
+    multiple of ``save_interval``. The last interval may therefore be
+    shorter than ``save_interval`` (this is the desired behavior for
+    cadences like "monthly snapshots over a year": you get 12 monthly
+    snapshots plus a final snapshot at year's end). Earlier versions
+    used ``linspace`` which silently rescaled the spacing to fit
+    ``round((t1-t0)/SI) + 1`` evenly-spaced points; that hid mismatches.
+
     Args:
         spec: Validated run spec.
         only_final: If ``True``, snapshot only the endpoint (used by
@@ -102,10 +112,22 @@ def _build_save_times(spec: RunSpec, *, only_final: bool = False) -> jnp.ndarray
     ts_data = spec.timestepping
     if only_final:
         return jnp.asarray([ts_data.t0, ts_data.t1])
-    # Inclusive endpoint, evenly spaced.
-    n_save = round((ts_data.t1 - ts_data.t0) / ts_data.save_interval) + 1
-    n_save = max(int(n_save), 2)
-    return jnp.linspace(ts_data.t0, ts_data.t1, n_save)
+
+    # Build [t0, t0+SI, t0+2*SI, ...] strictly less than t1, then append
+    # t1 as the closing snapshot. Use float64 throughout for predictable
+    # rounding when dt and save_interval span many orders of magnitude.
+    t0 = float(ts_data.t0)
+    t1 = float(ts_data.t1)
+    si = float(ts_data.save_interval)
+    n_full = int((t1 - t0) // si)  # number of complete save_interval steps
+    interior = np.asarray([t0 + i * si for i in range(n_full + 1)], dtype=np.float64)
+    # Append t1 unless the last interior point already equals t1 to
+    # within float tolerance.
+    if interior.size == 0 or abs(interior[-1] - t1) > 1e-9 * max(abs(t1), 1.0):
+        ts_arr = np.concatenate([interior, np.asarray([t1], dtype=np.float64)])
+    else:
+        ts_arr = interior
+    return jnp.asarray(ts_arr)
 
 
 # ----------------------------------------------------------------------
@@ -155,15 +177,20 @@ def _ensure_clean_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _attrs_for(spec: RunSpec, *, mode: str) -> dict[str, str]:
-    """Standard Dataset attrs that document where this artifact came from."""
+def _attrs_for(spec: RunSpec, *, mode: str) -> dict[str, Any]:
+    """Standard Dataset attrs that document where this artifact came from.
+
+    Numeric metadata is stored as native floats so downstream tooling
+    (xarray comparisons, plotting, dataset filtering) doesn't have to
+    parse strings.
+    """
     return {
         "somax_sim_mode": mode,
         "testcase_name": spec.testcase.name,
-        "t0": str(spec.timestepping.t0),
-        "t1": str(spec.timestepping.t1),
-        "dt": str(spec.timestepping.dt),
-        "save_interval": str(spec.timestepping.save_interval),
+        "t0": float(spec.timestepping.t0),
+        "t1": float(spec.timestepping.t1),
+        "dt": float(spec.timestepping.dt),
+        "save_interval": float(spec.timestepping.save_interval),
     }
 
 
@@ -818,7 +845,30 @@ def restart(
     restart_path = Path(restart_from)
     logger.info("restart loading state from {}", restart_path)
     ds = io.load_dataset(restart_path)
-    state0 = io.dataset_to_state(ds)
+
+    # Build the adapter first to learn the *expected* state class for
+    # this testcase, then load the zarr with that class as the target.
+    # Catches the common footgun: --from runs/swm/final_state.zarr +
+    # --config configs/doublegyre_qg.yaml would otherwise crash deep
+    # inside JAX with an inscrutable trace.
+    adapter = get_adapter(spec.testcase.name)
+    _model, factory_state0 = adapter(
+        grid=spec.testcase.grid,
+        consts=spec.testcase.consts,
+        stratification=spec.testcase.stratification,
+        params=spec.testcase.params,
+    )
+    expected_state_class = type(factory_state0)
+    state0 = io.dataset_to_state(ds, state_class=expected_state_class)
+    if not isinstance(state0, expected_state_class):
+        raise TypeError(
+            f"restart artifact at {restart_path} contains a "
+            f"{type(state0).__name__}, but the testcase "
+            f"{spec.testcase.name!r} expects {expected_state_class.__name__}. "
+            f"Check that --from points at a final_state.zarr written by a "
+            f"compatible run."
+        )
+
     return _integrate_and_write(
         spec,
         Path(output_dir),

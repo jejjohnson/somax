@@ -262,3 +262,45 @@ class TestZarrPersistence:
         recovered = io.dataset_to_state(loaded)
         assert isinstance(recovered, LinearSW2DState)
         np.testing.assert_array_equal(np.asarray(recovered.h), np.asarray(state.h))
+
+
+# ----------------------------------------------------------------------
+# Allowlisted auto-import — Copilot review on PR #71 flagged that the
+# attr-driven importlib.import_module call is a sharp edge for untrusted
+# zarr stores. The loader now allowlists modules under ``somax.``.
+# ----------------------------------------------------------------------
+
+
+class TestAutoImportAllowlist:
+    def _make_dataset_with_module(self, tmp_path: Path, module_name: str):
+        import xarray as xr
+
+        ds = xr.Dataset(
+            {"h": (("y", "x"), np.zeros((4, 4)))},
+            attrs={"state_class": "Whatever", "state_module": module_name},
+        )
+        store = tmp_path / "tampered.zarr"
+        io.save_dataset(ds, store)
+        return io.load_dataset(store)
+
+    def test_non_somax_module_rejected(self, tmp_path: Path) -> None:
+        loaded = self._make_dataset_with_module(tmp_path, "os")
+        with pytest.raises(ValueError, match=r"refusing to auto-import"):
+            io.dataset_to_state(loaded)
+
+    def test_somax_prefix_required_not_substring(self, tmp_path: Path) -> None:
+        # 'somaxxx' starts with 'somax' as a substring but is not under
+        # the somax namespace; the prefix check uses 'somax.' explicitly.
+        loaded = self._make_dataset_with_module(tmp_path, "somaxxx.evil")
+        with pytest.raises(ValueError, match=r"refusing to auto-import"):
+            io.dataset_to_state(loaded)
+
+    def test_explicit_state_class_bypasses_allowlist(self, tmp_path: Path) -> None:
+        # If the caller passes state_class explicitly, the auto-import
+        # path is skipped entirely — no allowlist check is needed.
+        loaded = self._make_dataset_with_module(tmp_path, "os")
+        # NonlinearSW2DState has fields h, u, v — h is present, u/v are
+        # missing, so we expect a "missing variable" error from the
+        # downstream field walk, NOT the allowlist refusal.
+        with pytest.raises(ValueError, match=r"missing variable"):
+            io.dataset_to_state(loaded, state_class=NonlinearSW2DState)

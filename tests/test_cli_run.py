@@ -304,3 +304,152 @@ class TestSpinupRestartChain:
         for key, value in metrics.items():
             if isinstance(value, (int, float)):
                 assert np.isfinite(value), f"restart metric {key!r} non-finite: {value}"
+
+
+# ----------------------------------------------------------------------
+# _build_save_times — Copilot review on PR #71 flagged that the previous
+# linspace path silently rescaled the snapshot spacing when save_interval
+# did not divide (t1 - t0) evenly. The function now uses arange semantics:
+# spacing is exactly save_interval and t1 is appended as the closing
+# snapshot if it isn't already a multiple.
+# ----------------------------------------------------------------------
+
+
+class TestBuildSaveTimes:
+    def _spec(self, *, t0=0.0, t1=10.0, dt=0.1, save_interval=1.0):
+        return RunSpec(
+            testcase=TestCaseSpec(
+                name="baroclinic_instability_swm",
+                grid={"nx": 16, "ny": 16, "Lx": 1.0e6, "Ly": 1.0e6},
+                consts={"f0": 1.0e-4, "beta": 1.6e-11},
+                stratification={"H": [500.0, 4500.0], "g_prime": [9.81, 0.025]},
+                params={
+                    "lateral_viscosity": 100.0,
+                    "bottom_drag": 1.0e-7,
+                    "jet_speed": 0.5,
+                    "jet_width": 5.0e4,
+                    "perturbation": 0.01,
+                },
+            ),
+            timestepping=TimesteppingSpec(
+                t0=t0, t1=t1, dt=dt, save_interval=save_interval
+            ),
+            output=OutputSpec(write_snapshots=True, write_metrics=True),
+            debug=DebugSpec(),
+        )
+
+    def test_evenly_dividing_window_matches_legacy_shape(self) -> None:
+        ts = np.asarray(
+            _run._build_save_times(self._spec(t0=0.0, t1=10.0, save_interval=1.0))
+        )
+        # 11 snapshots: t0, t0+SI, ..., t1.
+        assert ts.shape == (11,)
+        np.testing.assert_array_almost_equal(ts, np.arange(11.0))
+
+    def test_uneven_window_appends_t1_as_final_snapshot(self) -> None:
+        # Window=10, save_interval=6. Legacy linspace would have produced
+        # 3 snapshots at spacing 5 (silently rescaled). The arange path
+        # produces snapshots at t0, t0+6, then appends t1=10 as the
+        # closing snapshot. The first interval is exactly 6 — the
+        # *requested* cadence — and only the trailing interval is shorter.
+        ts = np.asarray(
+            _run._build_save_times(self._spec(t0=0.0, t1=10.0, save_interval=6.0))
+        )
+        np.testing.assert_array_almost_equal(ts, np.asarray([0.0, 6.0, 10.0]))
+        # The first save_interval is exactly 6 (the requested cadence).
+        assert float(ts[1] - ts[0]) == 6.0
+
+    def test_monthly_over_year_yields_12_full_intervals_plus_closing(self) -> None:
+        # The motivating real config: 1 Julian year, monthly cadence.
+        # 365.25 / 30 = 12.175, so we get 12 complete monthly snapshots
+        # plus a final t1 snapshot for the partial 13th interval.
+        year = 365.25 * 86400.0
+        month = 30 * 86400.0
+        ts = np.asarray(
+            _run._build_save_times(self._spec(t0=0.0, t1=year, save_interval=month))
+        )
+        # 0, 1*30d, 2*30d, ..., 12*30d, plus t1.
+        assert ts.shape == (14,)
+        for i in range(13):
+            assert float(ts[i]) == i * month
+        assert float(ts[-1]) == year
+
+    def test_only_final_returns_endpoints(self) -> None:
+        ts = np.asarray(
+            _run._build_save_times(self._spec(t0=0.0, t1=10.0), only_final=True)
+        )
+        np.testing.assert_array_almost_equal(ts, np.asarray([0.0, 10.0]))
+
+
+# ----------------------------------------------------------------------
+# _attrs_for — Copilot review on PR #71 asked for native numeric types
+# in zarr attrs (no str() wrappers).
+# ----------------------------------------------------------------------
+
+
+class TestAttrsForNumericMetadata:
+    def test_attrs_use_native_floats(self) -> None:
+        spec = RunSpec(
+            testcase=TestCaseSpec(name="x"),
+            timestepping=TimesteppingSpec(
+                t0=0.0, t1=600.0, dt=10.0, save_interval=600.0
+            ),
+        )
+        attrs = _run._attrs_for(spec, mode="run")
+        assert attrs["t0"] == 0.0 and isinstance(attrs["t0"], float)
+        assert attrs["t1"] == 600.0 and isinstance(attrs["t1"], float)
+        assert attrs["dt"] == 10.0 and isinstance(attrs["dt"], float)
+        assert attrs["save_interval"] == 600.0 and isinstance(
+            attrs["save_interval"], float
+        )
+        # Strings still belong to the string fields.
+        assert isinstance(attrs["somax_sim_mode"], str)
+        assert isinstance(attrs["testcase_name"], str)
+
+
+# ----------------------------------------------------------------------
+# restart() — Copilot review on PR #71 asked us to fail fast when the
+# restart artifact's state class doesn't match what the testcase expects,
+# instead of crashing deep inside JAX with an inscrutable trace.
+# ----------------------------------------------------------------------
+
+
+class TestRestartStateValidation:
+    def test_mismatched_state_class_raises_clear_error(self, tmp_path: Path) -> None:
+        # Step 1: write a final_state.zarr from a SWM (multilayer) run.
+        spinup_dir = tmp_path / "spinup_swm"
+        swm_spec = _swm_jet_spec(t1_seconds=600.0, dt=10.0, nx=16, ny=16)
+        _run.spinup(swm_spec, spinup_dir)
+        final_state_path = spinup_dir / "final_state.zarr"
+        assert final_state_path.is_dir()
+
+        # Step 2: try to restart a *different testcase* (doublegyre_qg's
+        # State class has different fields from the multilayer SWM
+        # written above).
+        prod_dir = tmp_path / "prod_qg"
+        wrong_spec = RunSpec(
+            testcase=TestCaseSpec(
+                name="doublegyre_qg",
+                grid={"nx": 16, "ny": 16, "Lx": 1.0e6, "Ly": 1.0e6},
+                consts={"f0": 1.0e-4, "beta": 1.6e-11},
+                stratification={},
+                params={
+                    "lateral_viscosity": 100.0,
+                    "bottom_drag": 1.0e-7,
+                    "wind_amplitude": 1.0e-12,
+                },
+            ),
+            timestepping=TimesteppingSpec(
+                t0=0.0, t1=600.0, dt=10.0, save_interval=600.0
+            ),
+            output=OutputSpec(write_snapshots=True, write_metrics=True),
+            debug=DebugSpec(),
+        )
+        # The mismatch is detected as a missing/extra State field at
+        # dataset_to_state time, with a clear error pointing the user at
+        # the wrong --from store. The error type may be either ValueError
+        # (missing field) or TypeError (isinstance check), depending on
+        # which State classes are involved — both are clearer than the
+        # legacy deep-JAX trace.
+        with pytest.raises((ValueError, TypeError)):
+            _run.restart(wrong_spec, prod_dir, restart_from=final_state_path)
