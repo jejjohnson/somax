@@ -1,4 +1,0 @@
-name: swm_linear
-description: Linear shallow water model
-num_layers: 1
-nonlinear: false

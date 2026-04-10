@@ -140,9 +140,9 @@ uv.lock
 .pixi/
 pixi.lock
 
-# DVC
-/data/simulations/swm
-/data/simulations/mqg
+# DVC pipeline outputs (tracked by DVC, not git)
+/data/simulations/
+/data/spinup/
 
 # MyST
 _build/
