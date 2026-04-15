@@ -59,6 +59,12 @@ Somax uses a two-layer epic model:
 
 Use the issue templates in [.github/ISSUE_TEMPLATE](/home/azureuser/localfiles/somax/.github/ISSUE_TEMPLATE) to keep that structure consistent.
 
+For algorithmic or numerical issues, treat the `Mathematical Notes`
+section as required. That section should carry the equations,
+parameterization/sign conventions, approximations, and invariants to
+test so another contributor can implement the issue without reopening
+the source design docs.
+
 ## Relationships
 
 Record relationships in the issue body and also apply the matching native GitHub relationship:
@@ -95,6 +101,11 @@ Use the right template for the work:
 - `research.md` for prior-art or comparative analysis
 - `epic-wave.md` for release waves
 - `epic-theme.md` for wave sub-groups
+
+When drafting a whole wave before opening issues, start from
+[.github/templates/wave-backlog.md](/home/azureuser/localfiles/somax/.github/templates/wave-backlog.md)
+so the shared context, math, and cross-issue references are reviewed in
+one place first.
 
 ## Commit And PR Conventions
 

@@ -23,6 +23,13 @@ labels: ["type:epic-theme"]
 ## Execution Notes
 <!-- Delete if the issues are fully parallel. -->
 
+<!--
+If this theme is algorithmic / numerical, use this section to record
+the shared mathematical conventions all child issues must preserve:
+parameterization choice, sign conventions, factorization form, or the
+equations the child issues are expected to implement.
+-->
+
 ## Parallelism
 - Can run in parallel with: #
 - Blocked by (inside this wave): #
