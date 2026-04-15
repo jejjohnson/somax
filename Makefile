@@ -5,6 +5,7 @@
 # PREREQUISITES:
 #   - uv installed  (https://github.com/astral-sh/uv)
 #   - git available in PATH
+#   - Copy .env.example to .env for local overrides (optional)
 #
 # QUICK START:
 #   make help          # Show all available commands
@@ -14,6 +15,15 @@
 #   make format        # Format with ruff
 #
 # =============================================================================
+
+# ---------------------------------------------------------------------------
+# .env support
+# ---------------------------------------------------------------------------
+-include .env
+ifneq (,$(wildcard .env))
+ENV_VARS := $(shell grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env | cut -d= -f1 | xargs)
+export $(ENV_VARS)
+endif
 
 # ---------------------------------------------------------------------------
 # Calculated variables
@@ -40,7 +50,8 @@ RESET  := \033[0m
 # Phony declarations
 # ---------------------------------------------------------------------------
 .PHONY: help install lint format typecheck test test-cov \
-        precommit build clean version docs docs-serve docs-deploy
+	precommit build clean version docs docs-serve docs-deploy \
+	init gh-labels gh-sub gh-block gh-show
 
 .DEFAULT_GOAL := help
 
@@ -71,6 +82,14 @@ install: ## Install all dependency groups via uv + pre-commit hooks
 	uv sync --all-groups
 	uv run pre-commit install
 	@printf "$(GREEN)>>> Installation complete!$(RESET)\n"
+
+init: ## Bootstrap .env from .env.example if needed
+	@if [ -f .env ]; then \
+		printf "$(YELLOW)>>> .env already exists — skipping.$(RESET)\n"; \
+	else \
+		cp .env.example .env; \
+		printf "$(GREEN)>>> .env created from .env.example$(RESET)\n"; \
+	fi
 
 # ===========================================================================
 ##@ Quality
@@ -145,3 +164,20 @@ docs-serve: ## Serve documentation locally
 docs-deploy: ## Deploy documentation to GitHub Pages
 	uv run --group docs myst build --html
 	uv run --group docs ghp-import -n -p _build/html
+
+gh-labels: ## Bootstrap the GitHub label taxonomy
+	bash .github/scripts/create-labels.sh
+
+gh-sub: ## Link CHILDREN as sub-issues of PARENT
+	@test -n "$(PARENT)"   || { echo "error: PARENT=<issue-number> required" >&2; exit 1; }
+	@test -n "$(CHILDREN)" || { echo "error: CHILDREN=\"<a> <b> ...\" required" >&2; exit 1; }
+	bash .github/scripts/link-issues.sh sub $(PARENT) $(CHILDREN)
+
+gh-block: ## Mark ISSUE as blocked by BLOCKED_BY
+	@test -n "$(ISSUE)"      || { echo "error: ISSUE=<issue-number> required" >&2; exit 1; }
+	@test -n "$(BLOCKED_BY)" || { echo "error: BLOCKED_BY=<issue-number> required" >&2; exit 1; }
+	bash .github/scripts/link-issues.sh block $(ISSUE) $(BLOCKED_BY)
+
+gh-show: ## Show parent / sub-issues / blocking state for ISSUE
+	@test -n "$(ISSUE)" || { echo "error: ISSUE=<issue-number> required" >&2; exit 1; }
+	bash .github/scripts/link-issues.sh show $(ISSUE)
