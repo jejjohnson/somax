@@ -104,10 +104,13 @@ class TestCoastalMaskNonlinearSWM2D:
             nx=nx - 2, ny=ny - 2, bc="wall", mask=mask
         )
         rng = np.random.default_rng(0)
-        h0 = jnp.asarray(0.1 * rng.standard_normal((ny, nx)))
+        # h is layer thickness in PV q = (ζ+f)/h, so keep wet-cell
+        # thickness strictly positive (baseline ~1 + small perturbation)
+        # to avoid division blow-ups; mask is applied on top to enforce
+        # the dry-cell invariant.
+        h0 = jnp.ones((ny, nx)) + jnp.asarray(0.01 * rng.standard_normal((ny, nx)))
         u0 = jnp.asarray(0.01 * rng.standard_normal((ny, nx)))
         v0 = jnp.asarray(0.01 * rng.standard_normal((ny, nx)))
-        # Apply mask to enforce the dry-cell invariant on the initial state
         h0 = h0 * mask.h
         u0 = u0 * mask.u
         v0 = v0 * mask.v
