@@ -22,7 +22,9 @@
 -include .env
 ifneq (,$(wildcard .env))
 ENV_VARS := $(shell grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env | cut -d= -f1 | xargs)
+ifneq ($(strip $(ENV_VARS)),)
 export $(ENV_VARS)
+endif
 endif
 
 # ---------------------------------------------------------------------------

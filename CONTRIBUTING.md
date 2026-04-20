@@ -57,7 +57,7 @@ Somax uses a two-layer epic model:
 2. Theme epic: a parallel-safe slice within that wave
 3. Concrete issues: feature, bug, design, research, docs, or chores
 
-Use the issue templates in [.github/ISSUE_TEMPLATE](/home/azureuser/localfiles/somax/.github/ISSUE_TEMPLATE) to keep that structure consistent.
+Use the issue templates in [.github/ISSUE_TEMPLATE](.github/ISSUE_TEMPLATE) to keep that structure consistent.
 
 For algorithmic or numerical issues, treat the `Mathematical Notes`
 section as required. That section should carry the equations,
@@ -82,12 +82,12 @@ make gh-block ISSUE=<issue#> BLOCKED_BY=<other#>
 make gh-show ISSUE=<issue#>
 ```
 
-The underlying helper is [.github/scripts/link-issues.sh](/home/azureuser/localfiles/somax/.github/scripts/link-issues.sh).
+The underlying helper is [.github/scripts/link-issues.sh](.github/scripts/link-issues.sh).
 
 ## Docs And Examples
 
-- Documentation source lives in [content](/home/azureuser/localfiles/somax/content)
-- Ad hoc notebooks live in [notebooks](/home/azureuser/localfiles/somax/notebooks)
+- Documentation source lives in [content](content/)
+- Ad hoc notebooks live in [notebooks](notebooks/)
 - Docs build locally with `make docs-serve`
 - If a notebook produces figures for docs, save committed artifacts under `content/images/<notebook_name>/`
 
@@ -103,7 +103,7 @@ Use the right template for the work:
 - `epic-theme.md` for wave sub-groups
 
 When drafting a whole wave before opening issues, start from
-[.github/templates/wave-backlog.md](/home/azureuser/localfiles/somax/.github/templates/wave-backlog.md)
+[.github/templates/wave-backlog.md](.github/templates/wave-backlog.md)
 so the shared context, math, and cross-issue references are reviewed in
 one place first.
 

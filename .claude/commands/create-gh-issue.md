@@ -98,17 +98,17 @@ Every issue carries exactly one `type:*`, one or more `area:*`, at most one `lay
 
 | Work type | Labels |
 |---|---|
-| Core numerics / primitives | `type:feature`, `area:core`, `layer:0-core`, `wave:N-…`, `priority:p1` |
-| Model implementation | `type:feature`, `area:models`, `layer:1-models`, `wave:N-…` |
-| CLI / runner orchestration | `type:feature`, `area:cli`, `layer:2-runner`, `wave:N-…` |
-| IO / persistence | `type:feature`, `area:io`, `wave:N-…` |
-| Test coverage | `type:feature`, `area:testing`, `wave:N-…` |
-| Notebook / docs page | `type:docs`, `area:docs`, `wave:N-…` |
-| Design / ADR | `type:design`, `area:core` (or `area:engineering`), `wave:N-…` |
+| Core numerics / primitives | `type:feature`, `area:core`, `layer:0-core`, `wave:N`, `priority:p1` |
+| Model implementation | `type:feature`, `area:models`, `layer:1-models`, `wave:N` |
+| CLI / runner orchestration | `type:feature`, `area:cli`, `layer:2-runner`, `wave:N` |
+| IO / persistence | `type:feature`, `area:io`, `wave:N` |
+| Test coverage | `type:feature`, `area:testing`, `wave:N` |
+| Notebook / docs page | `type:docs`, `area:docs`, `wave:N` |
+| Design / ADR | `type:design`, `area:core` (or `area:engineering`), `wave:N` |
 | Research / survey | `type:research`, `area:core` (or relevant area) |
-| Engineering / CI / packaging | `type:chore`, `area:engineering`, `wave:0-bootstrap` |
+| Engineering / CI / packaging | `type:chore`, `area:engineering`, `wave:0` |
 
-Wave labels and milestones are project-specific — check `CONTRIBUTING.md` for the current taxonomy before picking.
+`make gh-labels` bootstraps the plain `wave:0` … `wave:4` labels. If the project later adopts slugged wave labels (e.g. `wave:1-qg`), update `.github/scripts/create-labels.sh` and `CONTRIBUTING.md` together so the taxonomy, bootstrap, and examples stay in sync.
 
 ### Step 5 — Create the issue
 
@@ -120,7 +120,7 @@ Write the drafted body to a temporary file, then:
 gh issue create \
   --title "feat(models): multilayer QG reparameterization" \
   --body-file /tmp/issue-body.md \
-  --label "type:feature,area:models,layer:1-models,wave:1-qg,priority:p1" \
+  --label "type:feature,area:models,layer:1-models,wave:1,priority:p1" \
   --milestone "v0.1-qg"
 ```
 

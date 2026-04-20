@@ -12,8 +12,18 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-node_id_for() {
+normalize_issue_number() {
+  # Accept inputs like "123", "#123", or " #123 " and echo the bare number.
   local number="$1"
+  number="${number#"${number%%[![:space:]]*}"}"
+  number="${number%"${number##*[![:space:]]}"}"
+  number="${number#\#}"
+  printf '%s\n' "$number"
+}
+
+node_id_for() {
+  local number
+  number=$(normalize_issue_number "$1")
   gh api "repos/:owner/:repo/issues/${number}" --jq '.node_id' 2>/dev/null \
     || { echo "error: could not resolve issue #${number}" >&2; return 1; }
 }
@@ -83,7 +93,8 @@ remove_blocked_by() {
 }
 
 show_issue() {
-  local number="$1"
+  local number
+  number=$(normalize_issue_number "$1")
   local owner repo
   owner=$(gh repo view --json owner --jq '.owner.login')
   repo=$(gh repo view --json name --jq '.name')
@@ -116,6 +127,14 @@ EOF
 }
 
 cmd="${1:-}"; shift || true
+# Normalize all remaining args (strip leading '#' and surrounding whitespace)
+# so inputs like `#123` or ` 123 ` work interchangeably with `123`.
+args=()
+for arg in "$@"; do
+  args+=("$(normalize_issue_number "$arg")")
+done
+set -- "${args[@]}"
+
 case "$cmd" in
   sub)
     [[ $# -ge 2 ]] || usage

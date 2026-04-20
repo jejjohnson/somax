@@ -49,7 +49,7 @@ uv run --group typecheck ty check somax
 
 ### Package structure
 
-The public package lives in [somax](/home/azureuser/localfiles/somax/somax). Internal implementation details live in [somax/_src](/home/azureuser/localfiles/somax/somax/_src).
+The public package lives in [somax](somax/). Internal implementation details live in [somax/_src](somax/_src/).
 
 ### Key directories
 
@@ -69,14 +69,14 @@ The public package lives in [somax](/home/azureuser/localfiles/somax/somax). Int
 
 ## Documentation Examples
 
-Docs pages live in [content](/home/azureuser/localfiles/somax/content). Notebooks may live in [notebooks](/home/azureuser/localfiles/somax/notebooks) as `.ipynb` files or jupytext percent-format `.py` files. When notebooks produce figures for docs pages:
+Docs pages live in [content](content/). Notebooks may live in [notebooks](notebooks/) as `.ipynb` files or jupytext percent-format `.py` files. When notebooks produce figures for docs pages:
 
 1. Run them locally
 2. Save figures under `content/images/{notebook_name}/`
 3. Reference those assets from the relevant MyST page in `content/`
 4. Commit the notebook source and the generated assets together
 
-See [.github/instructions/docs-examples.instructions.md](/home/azureuser/localfiles/somax/.github/instructions/docs-examples.instructions.md) for the workflow expectations.
+See [.github/instructions/docs-examples.instructions.md](.github/instructions/docs-examples.instructions.md) for the workflow expectations.
 
 ## Coding Conventions
 
@@ -92,8 +92,8 @@ Plans and scratch implementation docs go in `.plans/` and should not be committe
 
 ## PR Review Comments
 
-When addressing PR review comments, resolve each review thread after fixing it via the GitHub GraphQL API. Use the workflow documented in [AGENTS.md](/home/azureuser/localfiles/somax/AGENTS.md).
+When addressing PR review comments, resolve each review thread after fixing it via the GitHub GraphQL API. Use the workflow documented in [AGENTS.md](AGENTS.md).
 
 ## Code Review
 
-Follow the guidance in [/CODE_REVIEW.md](/home/azureuser/localfiles/somax/CODE_REVIEW.md) for all code review tasks.
+Follow the guidance in [CODE_REVIEW.md](CODE_REVIEW.md) for all code review tasks.
