@@ -60,7 +60,7 @@ sim = [
     "cyclopts>=3.0",
     "zarr>=3.0",
     "xarray>=2024.10",
-    "pyyaml>=6",
+    "pyyaml>=6.0.3",
     "dvc>=3.0",
     "loguru>=0.7.3",
 ]
