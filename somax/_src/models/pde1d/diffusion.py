@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import ArakawaCGrid1D, Difference1D
+from finitevolx import CartesianGrid1D, Difference1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -51,12 +51,14 @@ class Diffusion1D(SomaxModel):
         params: Differentiable parameters (viscosity ``nu``).
         grid: 1D Arakawa C-grid.
         diff: Difference operators.
+        mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
         periodic: Whether to use periodic boundary conditions.
     """
 
     params: Diffusion1DParams
-    grid: ArakawaCGrid1D = eqx.field(static=True)
-    diff: Difference1D = eqx.field(static=True)
+    grid: CartesianGrid1D = eqx.field(static=True)
+    diff: Difference1D
+    mask: Mask1D | None
     periodic: bool = eqx.field(static=True, default=True)
 
     def vector_field(
@@ -89,6 +91,7 @@ class Diffusion1D(SomaxModel):
         Lx: float = 2.0,
         nu: float = 0.01,
         periodic: bool = True,
+        mask: Mask1D | None = None,
     ) -> Diffusion1D:
         """Convenience factory.
 
@@ -97,16 +100,18 @@ class Diffusion1D(SomaxModel):
             Lx: Domain length.
             nu: Kinematic viscosity.
             periodic: Use periodic BCs if True, Dirichlet if False.
+            mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``Diffusion1D`` model instance.
         """
-        grid = ArakawaCGrid1D.from_interior(nx, Lx)
+        grid = CartesianGrid1D.from_interior(nx, Lx)
         params = Diffusion1DParams(nu=jnp.array(nu))
-        diff = Difference1D(grid=grid)
+        diff = Difference1D(grid=grid, mask=mask)
         return Diffusion1D(
             params=params,
             grid=grid,
             diff=diff,
+            mask=mask,
             periodic=periodic,
         )

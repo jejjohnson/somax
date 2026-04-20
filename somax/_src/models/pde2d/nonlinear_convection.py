@@ -6,8 +6,9 @@ import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
     Advection2D as FVXAdvection2D,
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Interpolation2D,
+    Mask2D,
     enforce_periodic,
 )
 from jaxtyping import Array, PyTree
@@ -52,12 +53,14 @@ class NonlinearConvection2D(SomaxModel):
         grid: 2D Arakawa C-grid.
         advection: Advection operator.
         interp: Interpolation operators.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         method: Reconstruction method (default ``"upwind1"``).
     """
 
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    advection: FVXAdvection2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    advection: FVXAdvection2D
+    interp: Interpolation2D
+    mask: Mask2D | None
     method: str = eqx.field(static=True, default="upwind1")
 
     def vector_field(
@@ -92,6 +95,7 @@ class NonlinearConvection2D(SomaxModel):
         Lx: float = 2.0,
         Ly: float = 2.0,
         method: str = "upwind1",
+        mask: Mask2D | None = None,
     ) -> NonlinearConvection2D:
         """Convenience factory.
 
@@ -101,13 +105,14 @@ class NonlinearConvection2D(SomaxModel):
             Lx: Domain length in x.
             Ly: Domain length in y.
             method: Advection reconstruction method.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``NonlinearConvection2D`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
-        advection = FVXAdvection2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
+        advection = FVXAdvection2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
         return NonlinearConvection2D(
-            grid=grid, advection=advection, interp=interp, method=method
+            grid=grid, advection=advection, interp=interp, mask=mask, method=method
         )

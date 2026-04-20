@@ -5,9 +5,10 @@ from __future__ import annotations
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Difference2D,
     Interpolation2D,
+    Mask2D,
     arakawa_jacobian,
     streamfunction_from_vorticity,
     zero_boundaries,
@@ -96,6 +97,7 @@ class BarotropicQG(SomaxModel):
         grid: 2D Arakawa C-grid.
         diff: Difference operators.
         interp: Interpolation operators.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         beta_y: Precomputed β·y field.
         wind_forcing: Precomputed wind stress curl pattern (normalised).
         poisson_bc: Spectral solver BC type for PV inversion.
@@ -103,9 +105,10 @@ class BarotropicQG(SomaxModel):
 
     params: BarotropicQGParams
     consts: BarotropicQGPhysConsts = eqx.field(static=True)
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    interp: Interpolation2D
+    mask: Mask2D | None
     beta_y: Float[Array, "Ny Nx"]
     wind_forcing: Float[Array, "Ny Nx"]
     poisson_bc: str = eqx.field(static=True, default="dst")
@@ -194,6 +197,7 @@ class BarotropicQG(SomaxModel):
         bottom_drag: float = 0.0,
         wind_amplitude: float = 0.0,
         wind_profile: str = "doublegyre",
+        mask: Mask2D | None = None,
     ) -> BarotropicQG:
         """Convenience factory.
 
@@ -209,19 +213,20 @@ class BarotropicQG(SomaxModel):
             wind_amplitude: Wind forcing amplitude.
             wind_profile: Wind stress curl profile. ``"doublegyre"``
                 gives sin(2πy/Ly), ``"single"`` gives sin(πy/Ly).
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``BarotropicQG`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = BarotropicQGParams(
             lateral_viscosity=jnp.array(lateral_viscosity),
             bottom_drag=jnp.array(bottom_drag),
             wind_amplitude=jnp.array(wind_amplitude),
         )
         consts = BarotropicQGPhysConsts(f0=f0, beta=beta)
-        diff = Difference2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
+        diff = Difference2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
 
         # Precompute β·y field
         y = jnp.arange(grid.Ny) * grid.dy
@@ -242,6 +247,7 @@ class BarotropicQG(SomaxModel):
             grid=grid,
             diff=diff,
             interp=interp,
+            mask=mask,
             beta_y=beta_y,
             wind_forcing=wind_forcing,
             poisson_bc="dst",

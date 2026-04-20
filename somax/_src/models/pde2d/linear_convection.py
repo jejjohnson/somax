@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import ArakawaCGrid2D, Difference2D, Interpolation2D, enforce_periodic
+from finitevolx import (
+    CartesianGrid2D,
+    Difference2D,
+    Interpolation2D,
+    Mask2D,
+    enforce_periodic,
+)
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -53,12 +59,14 @@ class LinearConvection2D(SomaxModel):
         grid: 2D Arakawa C-grid.
         diff: Difference operators.
         interp: Interpolation operators.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
     """
 
     params: LinearConvection2DParams
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    interp: Interpolation2D
+    mask: Mask2D | None
 
     def vector_field(
         self, t: float, state: PyTree, args: PyTree | None = None
@@ -89,6 +97,7 @@ class LinearConvection2D(SomaxModel):
         Ly: float = 2.0,
         cx: float = 1.0,
         cy: float = 1.0,
+        mask: Mask2D | None = None,
     ) -> LinearConvection2D:
         """Convenience factory.
 
@@ -99,12 +108,15 @@ class LinearConvection2D(SomaxModel):
             Ly: Domain length in y.
             cx: Wave speed in x.
             cy: Wave speed in y.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``LinearConvection2D`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = LinearConvection2DParams(cx=jnp.array(cx), cy=jnp.array(cy))
-        diff = Difference2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
-        return LinearConvection2D(params=params, grid=grid, diff=diff, interp=interp)
+        diff = Difference2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
+        return LinearConvection2D(
+            params=params, grid=grid, diff=diff, interp=interp, mask=mask
+        )

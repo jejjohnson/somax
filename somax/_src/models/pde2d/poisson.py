@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import ArakawaCGrid2D, streamfunction_from_vorticity
+from finitevolx import CartesianGrid2D, streamfunction_from_vorticity
 from jaxtyping import Array, Float
 
 
@@ -21,7 +21,7 @@ class PoissonSolver2D(eqx.Module):
             or ``"periodic"``).
     """
 
-    grid: ArakawaCGrid2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
     bc_type: str = eqx.field(static=True, default="dirichlet")
 
     def solve(self, rhs: Float[Array, "Ny Nx"]) -> Float[Array, "Ny Nx"]:
@@ -57,7 +57,7 @@ class PoissonSolver2D(eqx.Module):
         Returns:
             A ``PoissonSolver2D`` instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         return PoissonSolver2D(grid=grid, bc_type=bc)
 
 
@@ -72,7 +72,7 @@ class LaplaceSolver2D(eqx.Module):
         bc_type: Boundary condition type.
     """
 
-    grid: ArakawaCGrid2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
     bc_type: str = eqx.field(static=True, default="dirichlet")
 
     def solve(self) -> Float[Array, "Ny Nx"]:
@@ -95,7 +95,7 @@ class LaplaceSolver2D(eqx.Module):
         bc: str = "dirichlet",
     ) -> LaplaceSolver2D:
         """Convenience factory."""
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         return LaplaceSolver2D(grid=grid, bc_type=bc)
 
 
@@ -113,7 +113,7 @@ class HelmholtzSolver2D(eqx.Module):
         lambda_: Helmholtz parameter (screening coefficient).
     """
 
-    grid: ArakawaCGrid2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
     bc_type: str = eqx.field(static=True, default="dirichlet")
     lambda_: float = eqx.field(static=True, default=1.0)
 
@@ -154,5 +154,5 @@ class HelmholtzSolver2D(eqx.Module):
         Returns:
             A ``HelmholtzSolver2D`` instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         return HelmholtzSolver2D(grid=grid, bc_type=bc, lambda_=lambda_)

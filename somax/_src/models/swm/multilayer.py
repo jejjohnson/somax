@@ -8,11 +8,12 @@ import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
     Advection2D as FVXAdvection2D,
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Coriolis2D,
     Difference2D,
     Diffusion2D as FVXDiffusion2D,
     Interpolation2D,
+    Mask2D,
     Vorticity2D,
     coriolis_fn,
     enforce_periodic,
@@ -119,6 +120,7 @@ class MultilayerShallowWater2D(SomaxModel):
         vorticity: Vorticity/PV operator.
         advection: Scalar advection operator (for mass).
         diffusion: Diffusion operator.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         strat: Stratification profile (layer depths and reduced gravities).
         modal: Precomputed modal transform.
         f_field: Precomputed Coriolis field f(y) at T-points.
@@ -131,13 +133,14 @@ class MultilayerShallowWater2D(SomaxModel):
 
     params: MultilayerSW2DParams
     consts: MultilayerSW2DPhysConsts = eqx.field(static=True)
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
-    coriolis: Coriolis2D = eqx.field(static=True)
-    vorticity: Vorticity2D = eqx.field(static=True)
-    advection: FVXAdvection2D = eqx.field(static=True)
-    diffusion: FVXDiffusion2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    interp: Interpolation2D
+    coriolis: Coriolis2D
+    vorticity: Vorticity2D
+    advection: FVXAdvection2D
+    diffusion: FVXDiffusion2D
+    mask: Mask2D | None
     strat: StratificationProfile
     modal: ModalTransform
     f_field: Float[Array, "Ny Nx"]
@@ -274,6 +277,7 @@ class MultilayerShallowWater2D(SomaxModel):
         wind_profile: str = "doublegyre",
         bc: str = "periodic",
         method: str = "upwind1",
+        mask: Mask2D | None = None,
     ) -> MultilayerShallowWater2D:
         """Convenience factory for the multilayer shallow water model.
 
@@ -302,6 +306,7 @@ class MultilayerShallowWater2D(SomaxModel):
                 tau_x = -cos(pi*y/Ly).
             bc: Boundary condition type.
             method: Advection reconstruction method for mass.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``MultilayerShallowWater2D`` model instance.
@@ -310,7 +315,7 @@ class MultilayerShallowWater2D(SomaxModel):
             ValueError: If ``n_layers``, ``H``, and ``g_prime`` have
                 inconsistent lengths (when ``stratification`` is None).
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
 
         # Stratification
         if stratification is not None:
@@ -335,12 +340,12 @@ class MultilayerShallowWater2D(SomaxModel):
             wind_amplitude=jnp.array(wind_amplitude),
         )
         consts = MultilayerSW2DPhysConsts(gravity=g, f0=f0, beta=beta, n_layers=nl)
-        diff = Difference2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
-        coriolis = Coriolis2D(grid=grid)
-        vorticity_op = Vorticity2D(grid=grid)
-        advection = FVXAdvection2D(grid=grid)
-        diffusion = FVXDiffusion2D(grid=grid)
+        diff = Difference2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
+        coriolis = Coriolis2D(grid=grid, mask=mask)
+        vorticity_op = Vorticity2D(grid=grid, mask=mask)
+        advection = FVXAdvection2D(grid=grid, mask=mask)
+        diffusion = FVXDiffusion2D(grid=grid, mask=mask)
 
         # Precompute Coriolis field
         y = jnp.arange(grid.Ny) * grid.dy
@@ -366,6 +371,7 @@ class MultilayerShallowWater2D(SomaxModel):
             vorticity=vorticity_op,
             advection=advection,
             diffusion=diffusion,
+            mask=mask,
             strat=strat,
             modal=modal,
             f_field=f_field,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import Advection1D, ArakawaCGrid1D, Difference1D
+from finitevolx import Advection1D, CartesianGrid1D, Difference1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -53,14 +53,16 @@ class Burgers1D(SomaxModel):
         grid: 1D Arakawa C-grid.
         diff: Difference operators (for diffusion).
         advection: Advection operator (for nonlinear convection).
+        mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
         periodic: Whether to use periodic boundary conditions.
         method: Reconstruction method for advection (default ``"upwind1"``).
     """
 
     params: Burgers1DParams
-    grid: ArakawaCGrid1D = eqx.field(static=True)
-    diff: Difference1D = eqx.field(static=True)
-    advection: Advection1D = eqx.field(static=True)
+    grid: CartesianGrid1D = eqx.field(static=True)
+    diff: Difference1D
+    advection: Advection1D
+    mask: Mask1D | None
     periodic: bool = eqx.field(static=True, default=True)
     method: str = eqx.field(static=True, default="upwind1")
 
@@ -95,6 +97,7 @@ class Burgers1D(SomaxModel):
         nu: float = 0.01,
         periodic: bool = True,
         method: str = "upwind1",
+        mask: Mask1D | None = None,
     ) -> Burgers1D:
         """Convenience factory.
 
@@ -104,19 +107,21 @@ class Burgers1D(SomaxModel):
             nu: Kinematic viscosity.
             periodic: Use periodic BCs if True, Dirichlet if False.
             method: Advection reconstruction method.
+            mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``Burgers1D`` model instance.
         """
-        grid = ArakawaCGrid1D.from_interior(nx, Lx)
+        grid = CartesianGrid1D.from_interior(nx, Lx)
         params = Burgers1DParams(nu=jnp.array(nu))
-        diff = Difference1D(grid=grid)
-        advection = Advection1D(grid=grid)
+        diff = Difference1D(grid=grid, mask=mask)
+        advection = Advection1D(grid=grid, mask=mask)
         return Burgers1D(
             params=params,
             grid=grid,
             diff=diff,
             advection=advection,
+            mask=mask,
             periodic=periodic,
             method=method,
         )

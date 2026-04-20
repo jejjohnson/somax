@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import ArakawaCGrid1D, Difference1D, Interpolation1D
+from finitevolx import CartesianGrid1D, Difference1D, Interpolation1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -81,13 +81,15 @@ class LinearShallowWater1D(SomaxModel):
         grid: 1D Arakawa C-grid.
         diff: Difference operators.
         interp: Interpolation operators.
+        mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
     """
 
     params: LinearSW1DParams
     consts: LinearSW1DPhysConsts = eqx.field(static=True)
-    grid: ArakawaCGrid1D = eqx.field(static=True)
-    diff: Difference1D = eqx.field(static=True)
-    interp: Interpolation1D = eqx.field(static=True)
+    grid: CartesianGrid1D = eqx.field(static=True)
+    diff: Difference1D
+    interp: Interpolation1D
+    mask: Mask1D | None
 
     def vector_field(
         self, t: float, state: PyTree, args: PyTree | None = None
@@ -157,6 +159,7 @@ class LinearShallowWater1D(SomaxModel):
         H0: float = 100.0,
         lateral_viscosity: float = 0.0,
         bottom_drag: float = 0.0,
+        mask: Mask1D | None = None,
     ) -> LinearShallowWater1D:
         """Convenience factory.
 
@@ -168,18 +171,24 @@ class LinearShallowWater1D(SomaxModel):
             H0: Mean layer depth (m).
             lateral_viscosity: Harmonic viscosity (m²/s).
             bottom_drag: Linear bottom drag (1/s).
+            mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``LinearShallowWater1D`` model instance.
         """
-        grid = ArakawaCGrid1D.from_interior(nx, Lx)
+        grid = CartesianGrid1D.from_interior(nx, Lx)
         params = LinearSW1DParams(
             lateral_viscosity=jnp.array(lateral_viscosity),
             bottom_drag=jnp.array(bottom_drag),
         )
         consts = LinearSW1DPhysConsts(gravity=g, f0=f0, H0=H0)
-        diff = Difference1D(grid=grid)
-        interp = Interpolation1D(grid=grid)
+        diff = Difference1D(grid=grid, mask=mask)
+        interp = Interpolation1D(grid=grid, mask=mask)
         return LinearShallowWater1D(
-            params=params, consts=consts, grid=grid, diff=diff, interp=interp
+            params=params,
+            consts=consts,
+            grid=grid,
+            diff=diff,
+            interp=interp,
+            mask=mask,
         )

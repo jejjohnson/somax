@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import ArakawaCGrid1D, Difference1D, Interpolation1D
+from finitevolx import CartesianGrid1D, Difference1D, Interpolation1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -52,13 +52,15 @@ class LinearConvection1D(SomaxModel):
         grid: 1D Arakawa C-grid.
         diff: Difference operators.
         interp: Interpolation operators.
+        mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
         periodic: Whether to use periodic boundary conditions.
     """
 
     params: LinearConvection1DParams
-    grid: ArakawaCGrid1D = eqx.field(static=True)
-    diff: Difference1D = eqx.field(static=True)
-    interp: Interpolation1D = eqx.field(static=True)
+    grid: CartesianGrid1D = eqx.field(static=True)
+    diff: Difference1D
+    interp: Interpolation1D
+    mask: Mask1D | None
     periodic: bool = eqx.field(static=True, default=True)
 
     def vector_field(
@@ -95,6 +97,7 @@ class LinearConvection1D(SomaxModel):
         Lx: float = 2.0,
         c: float = 1.0,
         periodic: bool = True,
+        mask: Mask1D | None = None,
     ) -> LinearConvection1D:
         """Convenience factory.
 
@@ -103,18 +106,20 @@ class LinearConvection1D(SomaxModel):
             Lx: Domain length.
             c: Wave speed.
             periodic: Use periodic BCs if True, Dirichlet if False.
+            mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``LinearConvection1D`` model instance.
         """
-        grid = ArakawaCGrid1D.from_interior(nx, Lx)
+        grid = CartesianGrid1D.from_interior(nx, Lx)
         params = LinearConvection1DParams(c=jnp.array(c))
-        diff = Difference1D(grid=grid)
-        interp = Interpolation1D(grid=grid)
+        diff = Difference1D(grid=grid, mask=mask)
+        interp = Interpolation1D(grid=grid, mask=mask)
         return LinearConvection1D(
             params=params,
             grid=grid,
             diff=diff,
             interp=interp,
+            mask=mask,
             periodic=periodic,
         )

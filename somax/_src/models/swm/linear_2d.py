@@ -5,10 +5,11 @@ from __future__ import annotations
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Coriolis2D,
     Difference2D,
     Interpolation2D,
+    Mask2D,
     coriolis_fn,
     enforce_periodic,
 )
@@ -90,16 +91,18 @@ class LinearShallowWater2D(SomaxModel):
         diff: Difference operators.
         interp: Interpolation operators.
         coriolis: Coriolis operator.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         f_field: Precomputed Coriolis parameter field f(y).
         bc_type: Boundary condition type (``"periodic"`` or ``"wall"``).
     """
 
     params: LinearSW2DParams
     consts: LinearSW2DPhysConsts = eqx.field(static=True)
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
-    coriolis: Coriolis2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    interp: Interpolation2D
+    coriolis: Coriolis2D
+    mask: Mask2D | None
     f_field: Float[Array, "Ny Nx"]
     bc_type: str = eqx.field(static=True, default="periodic")
 
@@ -178,6 +181,7 @@ class LinearShallowWater2D(SomaxModel):
         lateral_viscosity: float = 0.0,
         bottom_drag: float = 0.0,
         bc: str = "periodic",
+        mask: Mask2D | None = None,
     ) -> LinearShallowWater2D:
         """Convenience factory.
 
@@ -193,19 +197,20 @@ class LinearShallowWater2D(SomaxModel):
             lateral_viscosity: Harmonic viscosity (m²/s).
             bottom_drag: Linear bottom drag (1/s).
             bc: Boundary condition type (``"periodic"`` or ``"wall"``).
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``LinearShallowWater2D`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = LinearSW2DParams(
             lateral_viscosity=jnp.array(lateral_viscosity),
             bottom_drag=jnp.array(bottom_drag),
         )
         consts = LinearSW2DPhysConsts(gravity=g, f0=f0, beta=beta, H0=H0)
-        diff = Difference2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
-        coriolis = Coriolis2D(grid=grid)
+        diff = Difference2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
+        coriolis = Coriolis2D(grid=grid, mask=mask)
 
         # Build f(y) = f0 + beta * (y - y0) on full grid
         y = jnp.arange(grid.Ny) * grid.dy
@@ -220,6 +225,7 @@ class LinearShallowWater2D(SomaxModel):
             diff=diff,
             interp=interp,
             coriolis=coriolis,
+            mask=mask,
             f_field=f_field,
             bc_type=bc,
         )

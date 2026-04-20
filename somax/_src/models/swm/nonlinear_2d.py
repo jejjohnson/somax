@@ -6,11 +6,12 @@ import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
     Advection2D as FVXAdvection2D,
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Coriolis2D,
     Difference2D,
     Diffusion2D as FVXDiffusion2D,
     Interpolation2D,
+    Mask2D,
     Vorticity2D,
     coriolis_fn,
     enforce_periodic,
@@ -107,6 +108,7 @@ class NonlinearShallowWater2D(SomaxModel):
         vorticity: Vorticity/PV operator.
         advection: Scalar advection operator (for mass).
         diffusion: Diffusion operator.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         f_field: Precomputed Coriolis field f(y).
         wind_stress_x: Precomputed x-wind stress pattern (normalised).
         wind_stress_y: Precomputed y-wind stress pattern (normalised).
@@ -116,13 +118,14 @@ class NonlinearShallowWater2D(SomaxModel):
 
     params: NonlinearSW2DParams
     consts: NonlinearSW2DPhysConsts = eqx.field(static=True)
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
-    coriolis: Coriolis2D = eqx.field(static=True)
-    vorticity: Vorticity2D = eqx.field(static=True)
-    advection: FVXAdvection2D = eqx.field(static=True)
-    diffusion: FVXDiffusion2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    interp: Interpolation2D
+    coriolis: Coriolis2D
+    vorticity: Vorticity2D
+    advection: FVXAdvection2D
+    diffusion: FVXDiffusion2D
+    mask: Mask2D | None
     f_field: Float[Array, "Ny Nx"]
     wind_stress_x: Float[Array, "Ny Nx"]
     wind_stress_y: Float[Array, "Ny Nx"]
@@ -249,6 +252,7 @@ class NonlinearShallowWater2D(SomaxModel):
         wind_profile: str = "doublegyre",
         bc: str = "periodic",
         method: str = "upwind1",
+        mask: Mask2D | None = None,
     ) -> NonlinearShallowWater2D:
         """Convenience factory.
 
@@ -269,23 +273,24 @@ class NonlinearShallowWater2D(SomaxModel):
                 tau_x = -cos(pi*y/Ly).
             bc: Boundary condition type.
             method: Advection reconstruction method for mass.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``NonlinearShallowWater2D`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = NonlinearSW2DParams(
             lateral_viscosity=jnp.array(lateral_viscosity),
             bottom_drag=jnp.array(bottom_drag),
             wind_amplitude=jnp.array(wind_amplitude),
         )
         consts = NonlinearSW2DPhysConsts(gravity=g, f0=f0, beta=beta, H0=H0)
-        diff = Difference2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
-        coriolis = Coriolis2D(grid=grid)
-        vorticity_op = Vorticity2D(grid=grid)
-        advection = FVXAdvection2D(grid=grid)
-        diffusion = FVXDiffusion2D(grid=grid)
+        diff = Difference2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
+        coriolis = Coriolis2D(grid=grid, mask=mask)
+        vorticity_op = Vorticity2D(grid=grid, mask=mask)
+        advection = FVXAdvection2D(grid=grid, mask=mask)
+        diffusion = FVXDiffusion2D(grid=grid, mask=mask)
 
         y = jnp.arange(grid.Ny) * grid.dy
         y0 = Ly / 2.0
@@ -310,6 +315,7 @@ class NonlinearShallowWater2D(SomaxModel):
             vorticity=vorticity_op,
             advection=advection,
             diffusion=diffusion,
+            mask=mask,
             f_field=f_field,
             wind_stress_x=wind_stress_x,
             wind_stress_y=wind_stress_y,

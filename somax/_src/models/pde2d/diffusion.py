@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import ArakawaCGrid2D, Difference2D, enforce_periodic
+from finitevolx import CartesianGrid2D, Difference2D, Mask2D, enforce_periodic
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -50,11 +50,13 @@ class Diffusion2D(SomaxModel):
         params: Differentiable parameters (viscosity ``nu``).
         grid: 2D Arakawa C-grid.
         diff: Difference operators.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
     """
 
     params: Diffusion2DParams
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    mask: Mask2D | None
 
     def vector_field(
         self, t: float, state: PyTree, args: PyTree | None = None
@@ -80,6 +82,7 @@ class Diffusion2D(SomaxModel):
         Lx: float = 2.0,
         Ly: float = 2.0,
         nu: float = 0.01,
+        mask: Mask2D | None = None,
     ) -> Diffusion2D:
         """Convenience factory.
 
@@ -89,11 +92,12 @@ class Diffusion2D(SomaxModel):
             Lx: Domain length in x.
             Ly: Domain length in y.
             nu: Kinematic viscosity.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``Diffusion2D`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = Diffusion2DParams(nu=jnp.array(nu))
-        diff = Difference2D(grid=grid)
-        return Diffusion2D(params=params, grid=grid, diff=diff)
+        diff = Difference2D(grid=grid, mask=mask)
+        return Diffusion2D(params=params, grid=grid, diff=diff, mask=mask)
