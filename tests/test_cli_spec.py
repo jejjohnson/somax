@@ -153,6 +153,38 @@ class TestDebugMerge:
         with pytest.raises(ValueError, match="merge requires both sides to be dicts"):
             spec.with_debug_applied()
 
+    def test_debug_deep_merges_nested_dicts(self) -> None:
+        """Overriding a single leaf inside ``initial_condition.params`` must
+        preserve sibling params (Codex review on PR #100). A shallow
+        ``dict.update`` would drop ``jet_speed`` / ``jet_width`` and fall
+        back to model defaults, materially changing the physics.
+        """
+        spec = _make_spec(
+            scenario=ScenarioSpec(
+                name="double_gyre",
+                grid={"nx": 128, "ny": 128, "Lx": 4.0e6, "Ly": 4.0e6},
+                consts={"f0": 1.0e-4, "beta": 1.6e-11},
+                forcing={},
+                initial_condition={
+                    "type": "jet",
+                    "params": {
+                        "jet_speed": 0.5,
+                        "jet_width": 5.0e4,
+                        "perturbation": 0.01,
+                    },
+                },
+            ),
+            debug=DebugSpec(
+                scenario={"initial_condition": {"params": {"perturbation": 0.5}}}
+            ),
+        )
+        merged = spec.with_debug_applied()
+        # type + sibling params preserved, perturbation overridden.
+        assert merged.scenario.initial_condition["type"] == "jet"
+        assert merged.scenario.initial_condition["params"]["jet_speed"] == 0.5
+        assert merged.scenario.initial_condition["params"]["jet_width"] == 5.0e4
+        assert merged.scenario.initial_condition["params"]["perturbation"] == 0.5
+
 
 # ----------------------------------------------------------------------
 # Round trip — dict / YAML

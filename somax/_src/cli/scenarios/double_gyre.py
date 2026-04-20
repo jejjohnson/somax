@@ -35,15 +35,30 @@ _VALID_IC_TYPES: tuple[InitialConditionKind, ...] = (
     "gaussian_eddy",
 )
 
+# Scenario-level allowlist for ``forcing:`` block keys. Catching typos
+# here (e.g. ``wing_amplitude``) is important because most Phase-3 model
+# adapters accept a zero-valued wind amplitude as a legitimate no-wind
+# regime — so a silent typo would not blow up the integration; it would
+# just produce corrupt experiment outputs.
+_VALID_FORCING_KEYS: frozenset[str] = frozenset({"wind_amplitude", "wind_profile"})
+
 
 def _build(params: dict[str, Any]) -> ScenarioBundle:
     """Assemble a :class:`ScenarioBundle` from a ``scenario:`` YAML block.
 
     Args:
         params: Nested dict with ``grid``, ``consts``, ``forcing``, and
-            ``initial_condition`` sub-blocks. Missing sub-blocks get
-            sensible defaults (the basin is 1000 km² with f-plane
-            defaults if nothing is specified).
+            ``initial_condition`` sub-blocks.
+
+            - ``grid.nx`` and ``grid.ny`` are **required**; ``Lx`` and
+              ``Ly`` default to ``1.0e6`` m.
+            - ``consts.f0`` and ``consts.beta`` default to
+              mid-latitude values (``1.0e-4``, ``1.6e-11``); ``rho0``
+              and ``g`` default to standard seawater constants.
+            - ``forcing`` is free-form but keys are validated against
+              :data:`_VALID_FORCING_KEYS` to catch typos.
+            - ``initial_condition.type`` defaults to ``"at_rest"``;
+              its params default to ``{}``.
     """
     grid = dict(params.get("grid", {}))
     consts = dict(params.get("consts", {}))
@@ -58,6 +73,15 @@ def _build(params: dict[str, Any]) -> ScenarioBundle:
             f"double_gyre: scenario.grid missing required key {exc.args[0]!r}; "
             "both 'nx' and 'ny' are required."
         ) from exc
+
+    unknown_forcing = set(forcing) - _VALID_FORCING_KEYS
+    if unknown_forcing:
+        raise ValueError(
+            f"double_gyre: scenario.forcing has unknown key(s) "
+            f"{sorted(unknown_forcing)!r}; supported keys are "
+            f"{sorted(_VALID_FORCING_KEYS)!r}. A typo here would otherwise "
+            "silently disable forcing and corrupt the run."
+        )
 
     geometry = Geometry(
         kind="rectangular",

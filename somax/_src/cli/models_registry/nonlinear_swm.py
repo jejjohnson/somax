@@ -83,10 +83,29 @@ def _initial_state(
             * jnp.exp(-0.5 * ((Y - y0) / jet_width) ** 2)
         )
         return state_cls(h=jnp.full_like(u0, H0), u=u0, v=v0)
+    if ic.type == "gaussian_eddy":
+        ic_params = ic.params
+        amplitude = float(ic_params.get("amplitude", 1.0))
+        sigma = float(ic_params.get("sigma", 5.0e4))
+        Lx = float(scenario.geometry.Lx)
+        Ly = float(scenario.geometry.Ly)
+        x0 = float(ic_params.get("x0", Lx / 2.0))
+        y0 = float(ic_params.get("y0", Ly / 2.0))
+        x = jnp.arange(nx) * grid.dx
+        y = jnp.arange(ny) * grid.dy
+        X, Y = jnp.meshgrid(x, y)
+        bump = amplitude * jnp.exp(
+            -0.5 * (((X - x0) / sigma) ** 2 + ((Y - y0) / sigma) ** 2)
+        )
+        return state_cls(
+            h=jnp.full_like(bump, H0) + bump,
+            u=jnp.zeros_like(bump),
+            v=jnp.zeros_like(bump),
+        )
 
     raise NotImplementedError(
         f"nonlinear_swm: initial_condition.type={ic.type!r} not supported "
-        "(expected 'at_rest' or 'jet')."
+        "(expected 'at_rest', 'jet', or 'gaussian_eddy')."
     )
 
 

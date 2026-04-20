@@ -359,9 +359,14 @@ def _merge_block_dict(
     """Apply a ``debug.<owner>`` block-shaped override dict onto ``target``.
 
     Each top-level key in ``override`` must name a dict-valued field on
-    ``target``; its value must itself be a dict, which is
-    shallow-merged onto the existing block (only the keys present in
-    the override are touched).
+    ``target``; its value must itself be a dict. The merge recurses one
+    level deeper so a debug override like
+    ``debug.scenario.initial_condition = {"params": {"perturbation": 0.5}}``
+    only touches ``perturbation`` and leaves the sibling ``type`` and
+    other ``params`` keys intact. Without the recursion, the default
+    ``dict.update`` would replace whole sub-dicts, which in practice
+    silently drops base-config parameters like ``jet_speed`` and
+    changes the physics of a debug run.
     """
     spec_cls = type(target).__name__
     for block_name, block_override in override.items():
@@ -376,7 +381,22 @@ def _merge_block_dict(
                 f"to be dicts; got {type(existing).__name__} and "
                 f"{type(block_override).__name__}"
             )
-        existing.update(block_override)
+        _deep_update_dict(existing, block_override)
+
+
+def _deep_update_dict(base: dict[str, Any], override: dict[str, Any]) -> None:
+    """Recursively merge ``override`` into ``base`` in place.
+
+    Dict-valued keys in both sides are merged recursively; any other
+    key is replaced outright. This preserves sibling entries when the
+    caller only wants to override a single leaf value.
+    """
+    for key, value in override.items():
+        existing = base.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            _deep_update_dict(existing, value)
+        else:
+            base[key] = value
 
 
 def load_yaml(path: str) -> RunSpec:

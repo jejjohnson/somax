@@ -13,6 +13,7 @@ import jax.numpy as jnp
 
 from somax._src.cli.scenarios import ScenarioBundle
 
+from ._helpers import require_stratification
 from ._types import BuiltModel, ModelEntry, SupportFlags
 
 
@@ -27,16 +28,9 @@ def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
         )
     consts = scenario.constants
     forcing = scenario.forcing_params
-    stratification = dict(params.get("stratification", {}))
     model_params = dict(params.get("params", {}))
 
-    H = tuple(float(v) for v in stratification["H"])
-    g_prime = tuple(float(v) for v in stratification["g_prime"])
-    if len(H) != len(g_prime):
-        raise ValueError(
-            f"multilayer_nonlinear_swm: len(H)={len(H)} but "
-            f"len(g_prime)={len(g_prime)}; both must match n_layers."
-        )
+    H, g_prime = require_stratification(params, "multilayer_nonlinear_swm")
 
     model = MultilayerShallowWater2D.create(
         nx=geometry.nx,
