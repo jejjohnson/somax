@@ -25,7 +25,7 @@ jobs:
       - name: Run pre-commit autoupdate
         run: pre-commit autoupdate
 
-      - uses: peter-evans/create-pull-request@v6
+      - uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore: update pre-commit hooks"
           title: "chore: update pre-commit hooks"
