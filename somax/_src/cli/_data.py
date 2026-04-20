@@ -118,8 +118,10 @@ def init(
         somax-sim data init --backend local --url /data/somax
 
     The gdrive / s3 / azure / gcs backends need their DVC extra
-    installed (``pip install 'dvc[gdrive]'``). ``init`` detects missing
-    extras and prints a pip-install hint rather than silently failing.
+    installed (``pip install 'dvc[gdrive]'``). ``init`` prints an
+    advisory pip-install hint but cannot reliably preflight the extra;
+    the authoritative error — if the extra is missing — surfaces on
+    the first ``fetch`` / ``push`` that tries to touch the remote.
     """
     _require_dvc()
 
@@ -292,15 +294,30 @@ def _remote_configured() -> bool:
 
 
 def _remote_url() -> str | None:
-    """Return the URL of the 'somax-data' remote, or None if not configured."""
+    """Return the URL of the '<REMOTE_NAME>' remote, or ``None`` if absent.
+
+    ``None`` means the remote is not configured. It does **not** mean
+    "DVC itself failed" — those cases raise :class:`SystemExit` with an
+    actionable message so ``fetch`` / ``build --push`` / ``status`` do
+    not silently masquerade a broken DVC setup as "no remote configured".
+    """
+    # Guard 1: are we inside a DVC repo at all?
+    root = subprocess.run(["dvc", "root"], check=False, capture_output=True, text=True)
+    if root.returncode != 0:
+        raise SystemExit(
+            f"dvc reports this isn't a DVC repo (dvc root exited "
+            f"{root.returncode}). basin-data helpers assume you're inside "
+            "a somax checkout."
+        )
+    # Guard 2: listing remotes succeeded?
     result = subprocess.run(
-        ["dvc", "remote", "list"],
-        check=False,
-        capture_output=True,
-        text=True,
+        ["dvc", "remote", "list"], check=False, capture_output=True, text=True
     )
     if result.returncode != 0:
-        return None
+        raise SystemExit(
+            f"`dvc remote list` failed (exit {result.returncode}): "
+            f"{(result.stderr or '').strip() or '<no stderr>'}"
+        )
     for line in result.stdout.splitlines():
         # `dvc remote list` outputs one line per remote: "<name>\t<url>"
         parts = line.split(maxsplit=1)
@@ -310,21 +327,23 @@ def _remote_url() -> str | None:
 
 
 def _check_backend_installed(backend: RemoteBackend) -> None:
-    """Error out with a pip-install hint if the backend's DVC extra is missing."""
+    """Log installation guidance for backend-specific DVC extras.
+
+    somax does not reliably preflight whether a backend extra is
+    installed — a real check would require importing DVC internals or
+    probing a configured remote, both brittle across DVC versions. The
+    authoritative error comes from DVC itself on the next fetch/push.
+    This helper is advisory-only: print the pip hint up front so users
+    know what to install when a later DVC call complains.
+    """
     extra = _BACKEND_EXTRAS[backend]
     if extra is None:
         return  # 'local' needs no extra.
-    # Rather than doing a shallow import probe (fragile across DVC
-    # versions), rely on `dvc remote modify` — but that requires an
-    # existing remote. Simplest: rely on DVC's own error, but surface
-    # a clearer hint to the user up front.
     pip_hint = f"pip install 'dvc[{extra}]'"
-    # We cannot cheaply detect installation without importing DVC
-    # internals, so just mention the extra in the log and let DVC raise
-    # its own error on the subsequent fetch/push if it's missing.
     logger.info(
-        f"backend '{backend}' uses the '{extra}' DVC extra; "
-        f"if fetch/push fails with an import error, install it: {pip_hint}"
+        f"backend '{backend}' may require the '{extra}' DVC extra; "
+        f"if a later DVC fetch/push reports a missing dependency, "
+        f"install it with: {pip_hint}"
     )
 
 

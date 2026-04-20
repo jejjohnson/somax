@@ -90,50 +90,50 @@ stages:
     deps:
     - path: scripts/data/build_basin.py
       hash: md5
-      md5: 23b374f49cb7d866c754a479d5d1df60
-      size: 14697
+      md5: 4432e1912a9b9f99e6f1bf5c3ff08c1f
+      size: 16889
     outs:
     - path: data/basin/southern_ocean.zarr
       hash: md5
-      md5: 1ed8a923d77b52ce7428f9858c9ca2d6.dir
-      size: 8597
+      md5: 0f0bb0c39e83ea86579c86d577bcae4d.dir
+      size: 8407
       nfiles: 15
   build-basin-north-atlantic:
     cmd: python scripts/data/build_basin.py north_atlantic --source synthetic
     deps:
     - path: scripts/data/build_basin.py
       hash: md5
-      md5: 23b374f49cb7d866c754a479d5d1df60
-      size: 14697
+      md5: 4432e1912a9b9f99e6f1bf5c3ff08c1f
+      size: 16889
     outs:
     - path: data/basin/north_atlantic.zarr
       hash: md5
-      md5: 3e07a3e2b984243c6d5469b39a3c57f6.dir
-      size: 12868
+      md5: 76c20d417b0fb36d677202af7dca67e5.dir
+      size: 12064
       nfiles: 21
   build-basin-gulf-stream:
     cmd: python scripts/data/build_basin.py gulf_stream --source synthetic
     deps:
     - path: scripts/data/build_basin.py
       hash: md5
-      md5: 23b374f49cb7d866c754a479d5d1df60
-      size: 14697
+      md5: 4432e1912a9b9f99e6f1bf5c3ff08c1f
+      size: 16889
     outs:
     - path: data/basin/gulf_stream.zarr
       hash: md5
-      md5: aaf1f76956b8b21e112e224bb8c720fe.dir
-      size: 9435
+      md5: 3c5c0eea00ab3523a916f8e3997128d2.dir
+      size: 9310
       nfiles: 15
   build-basin-med-sea:
     cmd: python scripts/data/build_basin.py med_sea --source synthetic
     deps:
     - path: scripts/data/build_basin.py
       hash: md5
-      md5: 23b374f49cb7d866c754a479d5d1df60
-      size: 14697
+      md5: 4432e1912a9b9f99e6f1bf5c3ff08c1f
+      size: 16889
     outs:
     - path: data/basin/med_sea.zarr
       hash: md5
-      md5: 1df4d580d61d69268a39b98268e3b507.dir
-      size: 8691
+      md5: 79cafa532edbfc7ece918726fc36874c.dir
+      size: 8472
       nfiles: 15

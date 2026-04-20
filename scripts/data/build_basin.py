@@ -190,10 +190,39 @@ def build_basin(
     # zarr_format=3 + consolidated=False matches somax/_src/io/xarray.py
     # (consolidated metadata is not part of the v3 spec; xarray warns).
     if out.exists():
-        import shutil
-        shutil.rmtree(out)
+        _safe_rmtree_zarr(out)
     ds.to_zarr(out, mode="w", zarr_format=3, consolidated=False)
     return out.resolve()
+
+
+def _safe_rmtree_zarr(out: Path) -> None:
+    """Remove an existing Zarr store with guardrails.
+
+    A plain ``shutil.rmtree(out)`` would recursively delete *any* path
+    the caller passes — so a typo like ``--out data/basin`` would wipe
+    every materialized bundle. Guard against that:
+
+    - The path must have a ``.zarr`` suffix.
+    - If it's a directory, it must contain a Zarr root marker
+      (``zarr.json`` for v3, ``.zgroup`` / ``.zarray`` for v2).
+
+    Otherwise we refuse and ask the user for a clean output path.
+    """
+    import shutil
+
+    if out.suffix != ".zarr":
+        raise ValueError(
+            f"refusing to overwrite existing path {out!r}: output must have "
+            "'.zarr' suffix so build_basin doesn't wipe unrelated directories."
+        )
+    if out.is_dir():
+        markers = ("zarr.json", ".zgroup", ".zarray")
+        if not any((out / m).exists() for m in markers):
+            raise ValueError(
+                f"refusing to remove existing directory {out!r}: no Zarr root "
+                f"marker found ({markers!r}). Pass a fresh output path."
+            )
+    shutil.rmtree(out)
 
 
 # ----------------------------------------------------------------------
@@ -231,7 +260,8 @@ def _build_synthetic(
     tau_x, tau_y = _synthetic_wind_stress(lat, lat_min, lat_max, tau0=spec.tau0)
     heat = np.zeros_like(lon, dtype=np.float32)
 
-    # Apply mask: land cells get NaN forcing + 0 bathymetry + 0 stress.
+    # Apply mask: land cells get zero-valued forcing in this placeholder
+    # (real data may prefer NaN or a sentinel; Phase 4 / #78 will decide).
     tau_x = np.where(mask, tau_x, 0.0).astype(np.float32)
     tau_y = np.where(mask, tau_y, 0.0).astype(np.float32)
 
@@ -324,17 +354,43 @@ def _synthetic_bathymetry(
 
     Returns positive-downward depth in metres. Land cells get 0.
     """
-    # Distance (in cells) to the nearest land cell, approximated via a
-    # simple iterative dilation — cheap and good enough for a placeholder.
-    from scipy.ndimage import distance_transform_edt  # local import; SciPy is a soft dep
-
-    dist = distance_transform_edt(mask)
-    # Shelf ramps from min_depth at the coast to depth_abyss past ~8 cells in.
-    shelf_width_cells = 8.0
-    frac = np.clip(dist / shelf_width_cells, 0.0, 1.0)
+    shelf_width_cells = 8
+    dist = _bfs_distance_to_land(mask, max_dist=shelf_width_cells)
+    frac = np.clip(dist / float(shelf_width_cells), 0.0, 1.0)
     depth = min_depth + (depth_abyss - min_depth) * frac
     depth = np.where(mask, depth, 0.0)
     return depth
+
+
+def _bfs_distance_to_land(mask: np.ndarray, *, max_dist: int) -> np.ndarray:
+    """4-connected cell-distance from each ocean cell to the nearest land cell.
+
+    Clipped at ``max_dist`` — anything farther than that returns
+    ``max_dist``. Pure numpy (no SciPy), since we only need a few
+    iterations for the shelf-ramp application. Boundary handling uses
+    edge-replication, so we do not pull spurious "land" across the
+    domain edges (important for ``southern_ocean``, which is zonally
+    periodic but we treat as non-periodic for this placeholder).
+    """
+    is_ocean = mask.astype(bool)
+    # -1 marks "unset"; 0 is set immediately for land cells.
+    dist = np.where(is_ocean, -1, 0).astype(np.int32)
+    frontier = ~is_ocean  # current set of "just-reached" cells
+    for step in range(1, max_dist + 1):
+        padded = np.pad(frontier, 1, mode="edge")
+        neighbors = (
+            padded[:-2, 1:-1]
+            | padded[2:, 1:-1]
+            | padded[1:-1, :-2]
+            | padded[1:-1, 2:]
+        )
+        new_cells = neighbors & (dist == -1)
+        if not new_cells.any():
+            break
+        dist = np.where(new_cells, step, dist)
+        frontier = new_cells
+    dist = np.where(dist == -1, max_dist, dist)
+    return dist.astype(np.float64)
 
 
 def _synthetic_wind_stress(

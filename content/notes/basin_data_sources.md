@@ -28,7 +28,7 @@ Each basin ships at **one** canonical grid chosen to keep smoke tests fast and p
 | `north_atlantic` | 256x256 | ~7000 x 7000 km, ~25-30 km/cell        | Full-basin QG reference                |
 | `southern_ocean` | 360x90  | 0-360E, 70S-30S (spherical cap)        | ACC-relevant; eddy-permitting on sphere |
 
-Users who want a different resolution invoke `somax-sim data build <name> --nx <N> --ny <M>`. The *committed* pipeline output is one canonical grid per basin.
+Users who want the canonical bundle invoke `somax-sim data build <name>`. For a non-default resolution, invoke `python scripts/data/build_basin.py <name> --nx <N> --ny <M>` directly — the DVC stage and the CLI helper both bake in the canonical shape. The *committed* pipeline output is one canonical grid per basin.
 
 ## Bathymetry: GEBCO 2024
 
@@ -128,21 +128,19 @@ The user brings their own remote. First-time setup:
 ```console
 $ somax-sim data init
 Pick a DVC remote backend:
-  [1] Google Drive  (free, personal projects)
-  [2] Amazon S3
-  [3] Azure Blob
-  [4] Local filesystem  (single machine / NFS)
-  [q] Quit
+  [1] gdrive
+  [2] s3
+  [3] azure
+  [4] gcs
+  [5] local
 > 1
-Folder ID (from your Google Drive URL): 1a2b3c...
-Installing dvc-gdrive ...
-Adding DVC remote 'somax-data' ...
+Google Drive folder URL format: gdrive://<folder-id>
+remote URL: gdrive://1a2b3c...
 $ somax-sim data fetch med_sea
-Fetching data/basin/med_sea.zarr from remote 'somax-data' ...
 $ somax-sim data build gulf_stream --push
-Building data/basin/gulf_stream.zarr (takes ~5 min) ...
-Pushing to remote 'somax-data' ...
 ```
+
+Install the corresponding DVC extra manually (``pip install 'dvc[gdrive]'`` for gdrive, and similarly for ``s3`` / ``azure`` / ``gs``). ``data init`` prints an advisory hint but does not install anything on your behalf.
 
 ### Rejected alternatives
 

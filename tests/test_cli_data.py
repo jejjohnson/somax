@@ -137,6 +137,33 @@ class TestBuildBasinSynthetic:
         build_basin("med_sea", source="synthetic", nx=16, ny=8, out_path=out)
         assert out.exists()
 
+    def test_refuses_to_overwrite_non_zarr_path(self, tmp_path):
+        """Codex PR-#101 P1: a typo like --out data/basin would wipe the
+        whole bundle dir. Require a ``.zarr`` suffix so ``shutil.rmtree``
+        can't recursively nuke unrelated paths.
+        """
+        victim = tmp_path / "precious_data"
+        victim.mkdir()
+        (victim / "important.bin").write_text("do not delete")
+        with pytest.raises(ValueError, match=r"'\.zarr' suffix"):
+            build_basin("med_sea", source="synthetic", nx=8, ny=8, out_path=victim)
+        # The victim dir + file must still exist.
+        assert victim.exists()
+        assert (victim / "important.bin").read_text() == "do not delete"
+
+    def test_refuses_to_overwrite_zarr_named_non_zarr_dir(self, tmp_path):
+        """Even if the path has ``.zarr`` suffix, refuse if it's not an
+        actual Zarr store (no zarr.json / .zgroup / .zarray marker). This
+        catches the case where someone accidentally named an unrelated
+        directory ``foo.zarr`` and would otherwise lose its contents.
+        """
+        victim = tmp_path / "looks_like.zarr"
+        victim.mkdir()
+        (victim / "a_file.txt").write_text("not a zarr store")
+        with pytest.raises(ValueError, match="no Zarr root marker"):
+            build_basin("med_sea", source="synthetic", nx=8, ny=8, out_path=victim)
+        assert (victim / "a_file.txt").read_text() == "not a zarr store"
+
 
 # ----------------------------------------------------------------------
 # BASIN_SPECS integrity
