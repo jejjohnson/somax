@@ -1,44 +1,89 @@
-# Labeler configuration
-# See: https://github.com/actions/labeler
+# PR auto-labeling rules for Somax.
 
-"core":
+"area:engineering":
   - changed-files:
-      - any-glob-to-any-file: "somax/_src/core/**"
+    - any-glob-to-any-file:
+      - ".github/**"
+      - "pyproject.toml"
+      - "pixi.toml"
+      - "Makefile"
+      - ".pre-commit-config.yaml"
+      - "dvc.yaml"
+      - "dvc.lock"
+      - "uv.lock"
 
-"models":
+"area:docs":
   - changed-files:
-      - any-glob-to-any-file: "somax/_src/models/**"
+    - any-glob-to-any-file:
+      - "content/**"
+      - "notebooks/**"
+      - "myst.yml"
+      - "README.md"
+      - "CONTRIBUTING.md"
 
-"domain":
+"area:testing":
   - changed-files:
-      - any-glob-to-any-file: "somax/_src/domain/**"
+    - any-glob-to-any-file: "tests/**"
 
-"tests":
+"area:core":
   - changed-files:
-      - any-glob-to-any-file: "tests/**"
+    - any-glob-to-any-file:
+      - "somax/_src/core/**"
+      - "somax/_src/domain/**"
+      - "somax/_src/constants/**"
+      - "somax/core/**"
+      - "somax/domain/**"
 
-"ci":
+"area:models":
   - changed-files:
-      - any-glob-to-any-file: ".github/workflows/**"
+    - any-glob-to-any-file:
+      - "somax/_src/models/**"
+      - "somax/models/**"
 
-"docs":
+"area:cli":
   - changed-files:
-      - any-glob-to-any-file:
-          - "content/**"
-          - "myst.yml"
-          - "README.md"
+    - any-glob-to-any-file:
+      - "somax/_src/cli/**"
+      - "configs/**"
+      - "scripts/**"
 
-"infrastructure":
+"area:io":
   - changed-files:
-      - any-glob-to-any-file:
-          - "pyproject.toml"
-          - "pixi.toml"
-          - "Makefile"
-          - "dvc.yaml"
-          - "configs/**"
+    - any-glob-to-any-file:
+      - "somax/_src/io/**"
+      - "somax/io.py"
+
+"area:code":
+  - changed-files:
+    - any-glob-to-any-file: "somax/**/*.py"
+
+"layer:0-core":
+  - changed-files:
+    - any-glob-to-any-file:
+      - "somax/_src/core/**"
+      - "somax/_src/domain/**"
+      - "somax/_src/constants/**"
+
+"layer:1-models":
+  - changed-files:
+    - any-glob-to-any-file:
+      - "somax/_src/models/**"
+      - "somax/models/**"
+
+"layer:2-runner":
+  - changed-files:
+    - any-glob-to-any-file:
+      - "somax/_src/cli/**"
+      - "configs/**"
+      - "scripts/**"
+      - "dvc.yaml"
+      - "dvc.lock"
+      - "content/**"
 
 "dependencies":
   - changed-files:
-      - any-glob-to-any-file:
-          - "pyproject.toml"
-          - "pixi.toml"
+    - any-glob-to-any-file:
+      - "pyproject.toml"
+      - "pixi.toml"
+      - ".pre-commit-config.yaml"
+      - "uv.lock"

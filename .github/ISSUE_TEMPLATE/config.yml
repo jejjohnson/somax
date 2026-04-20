@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+# Uncomment and replace with your Discussions URL once Somax uses GitHub Discussions.
+# contact_links:
+#   - name: Question / discussion
+#     url: https://github.com/jejjohnson/somax/discussions
+#     about: Ask a question or start a discussion rather than opening an issue.
