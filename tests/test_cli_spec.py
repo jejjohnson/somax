@@ -8,25 +8,26 @@ import pytest
 
 from somax._src.cli.spec import (
     DebugSpec,
+    ModelSpec,
     RunSpec,
-    TestCaseSpec,
+    ScenarioSpec,
     TimesteppingSpec,
     dump_yaml,
     load_yaml,
 )
 
 
-# pytest tries to collect anything named Test* as a test class. TestCaseSpec
-# is a dataclass, not a test fixture — opt out of collection.
-TestCaseSpec.__test__ = False
-
-
 def _make_spec(**overrides) -> RunSpec:
     base = dict(
-        testcase=TestCaseSpec(
-            name="doublegyre_baroclinic_qg",
+        scenario=ScenarioSpec(
+            name="double_gyre",
             grid={"nx": 128, "ny": 128, "Lx": 4.0e6, "Ly": 4.0e6},
-            consts={"f0": 9.375e-5, "beta": 1.754e-11, "n_layers": 3},
+            consts={"f0": 9.375e-5, "beta": 1.754e-11},
+            forcing={"wind_amplitude": 1.3e-10, "wind_profile": "doublegyre"},
+            initial_condition={"type": "at_rest"},
+        ),
+        model=ModelSpec(
+            name="multilayer_qg",
             stratification={
                 "H": [400.0, 1100.0, 2600.0],
                 "g_prime": [9.81, 0.025, 0.0125],
@@ -34,7 +35,6 @@ def _make_spec(**overrides) -> RunSpec:
             params={
                 "lateral_viscosity": 15.0,
                 "bottom_drag": 1.0e-7,
-                "wind_amplitude": 1.3e-10,
             },
         ),
         timestepping=TimesteppingSpec(
@@ -77,11 +77,18 @@ class TestValidation:
         with pytest.raises(ValueError, match="cannot exceed"):
             spec.validate()
 
-    def test_empty_testcase_name_raises(self) -> None:
+    def test_empty_scenario_name_raises(self) -> None:
         spec = _make_spec(
-            testcase=TestCaseSpec(name="", grid={"nx": 1, "ny": 1}),
+            scenario=ScenarioSpec(name="", grid={"nx": 1, "ny": 1}),
         )
-        with pytest.raises(ValueError, match="non-empty string"):
+        with pytest.raises(ValueError, match=r"scenario\.name.*non-empty string"):
+            spec.validate()
+
+    def test_empty_model_name_raises(self) -> None:
+        spec = _make_spec(
+            model=ModelSpec(name=""),
+        )
+        with pytest.raises(ValueError, match=r"model\.name.*non-empty string"):
             spec.validate()
 
 
@@ -95,16 +102,23 @@ class TestDebugMerge:
         spec = _make_spec()
         assert spec.with_debug_applied() is spec
 
-    def test_grid_override_merges_into_block(self) -> None:
-        spec = _make_spec(debug=DebugSpec(testcase={"grid": {"nx": 32, "ny": 32}}))
+    def test_scenario_grid_override_merges_into_block(self) -> None:
+        spec = _make_spec(debug=DebugSpec(scenario={"grid": {"nx": 32, "ny": 32}}))
         merged = spec.with_debug_applied()
         # nx, ny overridden; Lx, Ly preserved.
-        assert merged.testcase.grid["nx"] == 32
-        assert merged.testcase.grid["ny"] == 32
-        assert merged.testcase.grid["Lx"] == 4.0e6
-        assert merged.testcase.grid["Ly"] == 4.0e6
+        assert merged.scenario.grid["nx"] == 32
+        assert merged.scenario.grid["ny"] == 32
+        assert merged.scenario.grid["Lx"] == 4.0e6
+        assert merged.scenario.grid["Ly"] == 4.0e6
         # Original unchanged.
-        assert spec.testcase.grid["nx"] == 128
+        assert spec.scenario.grid["nx"] == 128
+
+    def test_model_params_override_merges_into_block(self) -> None:
+        spec = _make_spec(debug=DebugSpec(model={"params": {"lateral_viscosity": 1.0}}))
+        merged = spec.with_debug_applied()
+        assert merged.model.params["lateral_viscosity"] == 1.0
+        # Other params preserved.
+        assert merged.model.params["bottom_drag"] == 1.0e-7
 
     def test_timestepping_override_partial(self) -> None:
         spec = _make_spec(
@@ -118,18 +132,24 @@ class TestDebugMerge:
         assert merged.timestepping.dt == 600.0
 
     def test_debug_merge_clears_debug_block(self) -> None:
-        spec = _make_spec(debug=DebugSpec(testcase={"grid": {"nx": 32}}))
+        spec = _make_spec(debug=DebugSpec(scenario={"grid": {"nx": 32}}))
         merged = spec.with_debug_applied()
-        assert merged.debug.testcase == {}
+        assert merged.debug.scenario == {}
+        assert merged.debug.model == {}
         assert merged.debug.timestepping == {}
 
-    def test_unknown_block_raises(self) -> None:
-        spec = _make_spec(debug=DebugSpec(testcase={"nonexistent_block": {"foo": 1}}))
-        with pytest.raises(ValueError, match="does not match any TestCaseSpec field"):
+    def test_unknown_scenario_block_raises(self) -> None:
+        spec = _make_spec(debug=DebugSpec(scenario={"nonexistent_block": {"foo": 1}}))
+        with pytest.raises(ValueError, match="does not match any ScenarioSpec field"):
+            spec.with_debug_applied()
+
+    def test_unknown_model_block_raises(self) -> None:
+        spec = _make_spec(debug=DebugSpec(model={"nonexistent_block": {"foo": 1}}))
+        with pytest.raises(ValueError, match="does not match any ModelSpec field"):
             spec.with_debug_applied()
 
     def test_non_dict_block_raises(self) -> None:
-        spec = _make_spec(debug=DebugSpec(testcase={"grid": "not a dict"}))
+        spec = _make_spec(debug=DebugSpec(scenario={"grid": "not a dict"}))
         with pytest.raises(ValueError, match="merge requires both sides to be dicts"):
             spec.with_debug_applied()
 
@@ -152,21 +172,51 @@ class TestSerialization:
         loaded = load_yaml(str(path))
         assert loaded.to_dict() == spec.to_dict()
 
-    def test_from_dict_missing_required_block_raises(self) -> None:
+    def test_from_dict_missing_scenario_raises(self) -> None:
+        with pytest.raises(ValueError, match="missing required block: scenario"):
+            RunSpec.from_dict(
+                {
+                    "model": {"name": "x"},
+                    "timestepping": {
+                        "t0": 0.0,
+                        "t1": 1.0,
+                        "dt": 0.1,
+                        "save_interval": 0.5,
+                    },
+                }
+            )
+
+    def test_from_dict_missing_model_raises(self) -> None:
+        with pytest.raises(ValueError, match="missing required block: model"):
+            RunSpec.from_dict(
+                {
+                    "scenario": {"name": "x"},
+                    "timestepping": {
+                        "t0": 0.0,
+                        "t1": 1.0,
+                        "dt": 0.1,
+                        "save_interval": 0.5,
+                    },
+                }
+            )
+
+    def test_from_dict_missing_timestepping_raises(self) -> None:
         with pytest.raises(ValueError, match="missing required block: timestepping"):
-            RunSpec.from_dict({"testcase": {"name": "x"}})
+            RunSpec.from_dict({"scenario": {"name": "x"}, "model": {"name": "y"}})
 
     def test_from_dict_optional_blocks_default(self) -> None:
         # No 'output' or 'debug' blocks → defaults applied.
         spec = RunSpec.from_dict(
             {
-                "testcase": {"name": "x", "grid": {"nx": 1, "ny": 1}},
+                "scenario": {"name": "x", "grid": {"nx": 1, "ny": 1}},
+                "model": {"name": "y"},
                 "timestepping": {"t0": 0.0, "t1": 1.0, "dt": 0.1, "save_interval": 0.5},
             }
         )
         assert spec.output.write_snapshots is True
         assert spec.output.write_metrics is True
-        assert spec.debug.testcase == {}
+        assert spec.debug.scenario == {}
+        assert spec.debug.model == {}
         assert spec.debug.timestepping == {}
 
     def test_load_yaml_rejects_non_mapping_root(self, tmp_path: Path) -> None:
@@ -179,9 +229,11 @@ class TestSerialization:
         """Loading should both parse AND validate."""
         path = tmp_path / "invalid.yaml"
         path.write_text(
-            "testcase:\n"
+            "scenario:\n"
             "  name: foo\n"
             "  grid: {nx: 1, ny: 1}\n"
+            "model:\n"
+            "  name: bar\n"
             "timestepping: {t0: 10.0, t1: 5.0, dt: 1.0, save_interval: 1.0}\n"
         )
         with pytest.raises(ValueError, match=r"t1.*must be > timestepping\.t0"):

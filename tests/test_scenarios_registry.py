@@ -73,9 +73,21 @@ class TestGeometryKindAssignments:
         assert SCENARIOS[name].geometry_kind == "spherical_cap"
 
 
+# Phase-3 (#77) promoted ``double_gyre`` out of stub status; Phase-4/5
+# will do the same for the remaining five. Keep the stub list explicit
+# so accidentally unstubbing a scenario fails loudly here.
+_STUB_SCENARIOS = {
+    "north_atlantic",
+    "med_sea",
+    "gulf_stream",
+    "southern_ocean",
+    "global_ocean",
+}
+
+
 class TestStubsRaiseWithMeaningfulMessage:
-    @pytest.mark.parametrize("name", sorted(EXPECTED_SCENARIOS))
-    def test_build_raises_not_implemented(self, name):
+    @pytest.mark.parametrize("name", sorted(_STUB_SCENARIOS))
+    def test_stub_build_raises_not_implemented(self, name):
         entry = SCENARIOS[name]
         with pytest.raises(NotImplementedError) as exc_info:
             entry.build({})
@@ -86,6 +98,19 @@ class TestStubsRaiseWithMeaningfulMessage:
         assert "phase" in msg.lower() or "blocked" in msg.lower(), (
             f"stub message for {name!r} doesn't mention phase/blocker"
         )
+
+    def test_double_gyre_is_not_a_stub(self):
+        """Phase 3 populated ``double_gyre``; build must succeed for it."""
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+                "forcing": {"wind_amplitude": 1.0e-12},
+                "initial_condition": {"type": "at_rest"},
+            }
+        )
+        assert bundle.name == "double_gyre"
+        assert bundle.geometry.kind == "rectangular"
 
 
 class TestGetScenarioLookup:

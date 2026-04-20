@@ -25,7 +25,7 @@ from loguru import logger
 
 from somax import io
 from somax._src.cli import _assertions
-from somax._src.cli._factories import get_adapter
+from somax._src.cli._factories import build
 from somax._src.cli._progress import RunLogContext, start_run_log, stop_run_log
 from somax._src.cli._units import (
     format_field_stats,
@@ -168,6 +168,29 @@ def _flatten_diagnostics(diag: Any) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
+# Scenario / model param packing for build() dispatch
+# ----------------------------------------------------------------------
+
+
+def _scenario_params(spec: RunSpec) -> dict[str, Any]:
+    """Pack the scenario block into the kwargs dict ``build()`` expects."""
+    return {
+        "grid": dict(spec.scenario.grid),
+        "consts": dict(spec.scenario.consts),
+        "forcing": dict(spec.scenario.forcing),
+        "initial_condition": dict(spec.scenario.initial_condition),
+    }
+
+
+def _model_params(spec: RunSpec) -> dict[str, Any]:
+    """Pack the model block into the kwargs dict ``build()`` expects."""
+    return {
+        "stratification": dict(spec.model.stratification),
+        "params": dict(spec.model.params),
+    }
+
+
+# ----------------------------------------------------------------------
 # Persistence helpers
 # ----------------------------------------------------------------------
 
@@ -186,7 +209,8 @@ def _attrs_for(spec: RunSpec, *, mode: str) -> dict[str, Any]:
     """
     return {
         "somax_sim_mode": mode,
-        "testcase_name": spec.testcase.name,
+        "scenario_name": spec.scenario.name,
+        "model_name": spec.model.name,
         "t0": float(spec.timestepping.t0),
         "t1": float(spec.timestepping.t1),
         "dt": float(spec.timestepping.dt),
@@ -260,16 +284,20 @@ def _integrate_and_write(
         shutil.rmtree(stale_ckpt)
         logger.info("removed stale checkpoint.zarr from output_dir before {} run", mode)
 
-    logger.info("somax-sim mode={} testcase={}", mode, spec.testcase.name)
+    logger.info(
+        "somax-sim mode={} scenario={} model={}",
+        mode,
+        spec.scenario.name,
+        spec.model.name,
+    )
     logger.info("output_dir={}", output_dir)
 
-    # 1. Build model and initial state via the adapter registry.
-    adapter = get_adapter(spec.testcase.name)
-    model, factory_state0 = adapter(
-        grid=spec.testcase.grid,
-        consts=spec.testcase.consts,
-        stratification=spec.testcase.stratification,
-        params=spec.testcase.params,
+    # 1. Build model and initial state via the scenario x model dispatcher.
+    model, factory_state0 = build(
+        spec.scenario.name,
+        spec.model.name,
+        scenario_params=_scenario_params(spec),
+        model_params=_model_params(spec),
     )
     state0 = initial_state if initial_state is not None else factory_state0
 
@@ -304,7 +332,8 @@ def _integrate_and_write(
 
     run_log = start_run_log(output_dir, label=f"somax-sim/{mode}")
     run_log.log.debug(
-        f"integration starting: testcase={spec.testcase.name} "
+        f"integration starting: scenario={spec.scenario.name} "
+        f"model={spec.model.name} "
         f"t0={format_time_seconds(spec.timestepping.t0)} "
         f"t1={format_time_seconds(spec.timestepping.t1)} "
         f"dt={spec.timestepping.dt} s "
@@ -329,7 +358,7 @@ def _integrate_and_write(
             mode=mode,
             checkpoint_every_n_chunks=checkpoint_every_n_chunks,
             checkpoint_dir=output_dir if checkpoint_every_n_chunks > 0 else None,
-            checkpoint_label=spec.testcase.name,
+            checkpoint_label=f"{spec.scenario.name}/{spec.model.name}",
         )
     except Exception as exc:
         stop_run_log(
@@ -624,8 +653,8 @@ def _chunked_integrate_with_diagnostics(
             checkpoint stay aligned). ``0`` disables checkpointing.
         checkpoint_dir: Directory for the rolling ``checkpoint.zarr``
             store. Ignored when ``checkpoint_every_n_chunks == 0``.
-        checkpoint_label: Optional label (e.g. testcase name) stored in
-            the checkpoint's attrs for debugging.
+        checkpoint_label: Optional label (e.g. ``"<scenario>/<model>"``)
+            stored in the checkpoint's attrs for debugging.
 
     Raises:
         IntegrationDivergedError: If any chunk produces non-finite state.
@@ -1002,27 +1031,26 @@ def restart(
     logger.info("restart loading state from {}", restart_path)
     ds = io.load_dataset(restart_path)
 
-    # Build the adapter first to learn the *expected* state class for
-    # this testcase, then load the zarr with that class as the target.
-    # Catches the common footgun: --from runs/swm/final_state.zarr +
-    # --config configs/doublegyre_qg.yaml would otherwise crash deep
-    # inside JAX with an inscrutable trace.
-    adapter = get_adapter(spec.testcase.name)
-    _model, factory_state0 = adapter(
-        grid=spec.testcase.grid,
-        consts=spec.testcase.consts,
-        stratification=spec.testcase.stratification,
-        params=spec.testcase.params,
+    # Build the model first to learn the *expected* state class for this
+    # scenario x model pair, then load the zarr with that class as the
+    # target. Catches the common footgun: --from runs/swm/final_state.zarr
+    # + --config configs/doublegyre_bt_qg.yaml would otherwise crash
+    # deep inside JAX with an inscrutable trace.
+    _model, factory_state0 = build(
+        spec.scenario.name,
+        spec.model.name,
+        scenario_params=_scenario_params(spec),
+        model_params=_model_params(spec),
     )
     expected_state_class = type(factory_state0)
     state0 = io.dataset_to_state(ds, state_class=expected_state_class)
     if not isinstance(state0, expected_state_class):
         raise TypeError(
             f"restart artifact at {restart_path} contains a "
-            f"{type(state0).__name__}, but the testcase "
-            f"{spec.testcase.name!r} expects {expected_state_class.__name__}. "
-            f"Check that --from points at a final_state.zarr written by a "
-            f"compatible run."
+            f"{type(state0).__name__}, but the pair "
+            f"{spec.scenario.name!r} x {spec.model.name!r} expects "
+            f"{expected_state_class.__name__}. Check that --from points at "
+            f"a final_state.zarr written by a compatible run."
         )
 
     spec = _maybe_override_t0_from_checkpoint(spec, ds)

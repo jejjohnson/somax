@@ -32,7 +32,7 @@ The simulation runner stack:
 DVC pipeline       → caches artifacts, tracks deps, drives `dvc exp show`
 Authored configs   → Python in configs/_authoring/*.py → YAML in configs/simulation/*.yaml
 Cyclopts CLI       → somax-sim run / spinup / restart / list-* / show-config
-RunSpec dataclass  → canonical schema (testcase + timestepping + output + debug)
+RunSpec dataclass  → canonical schema (scenario + model + timestepping + output + debug)
 somax library      → models, factories, IO layer
 ```
 
@@ -95,15 +95,16 @@ pip install git+https://github.com/jejjohnson/somax.git
 ### Run a simulation via the cyclopts CLI
 
 ```bash
-# Discover available test cases and models
-somax-sim list-testcases
+# Discover available scenarios, models, and their compatibility matrix.
+somax-sim list-scenarios
 somax-sim list-models
+somax-sim list-pairs
 
-# Run a single simulation from a config (and inspect the resolved spec)
+# Run a single simulation from a config (and inspect the resolved spec).
 somax-sim show-config configs/simulation/swm_jet.yaml
 somax-sim run --config configs/simulation/swm_jet.yaml --output-dir data/simulations/swm_jet
 
-# Smoke-test mode: smaller grid, shorter run, frequent snapshots
+# Smoke-test mode: smaller grid, shorter run, frequent snapshots.
 somax-sim run --config configs/simulation/doublegyre_bc_qg.yaml \
               --output-dir /tmp/smoke --debug
 ```

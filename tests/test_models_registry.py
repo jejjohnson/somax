@@ -106,9 +106,17 @@ class TestMaskSupport:
         )
 
 
+# Phase-3 (#77) populated the six cartesian models; the two spherical
+# models stay stubs until Phase 5 (#73). Keep the stub list explicit so
+# accidentally unstubbing a model fails loudly here.
+_STUB_MODELS = {"spherical_swm", "spherical_qg"}
+
+_PHASE3_MODELS = EXPECTED_MODELS - _STUB_MODELS
+
+
 class TestStubsRaiseWithMeaningfulMessage:
-    @pytest.mark.parametrize("name", sorted(EXPECTED_MODELS))
-    def test_build_raises_not_implemented(self, name):
+    @pytest.mark.parametrize("name", sorted(_STUB_MODELS))
+    def test_stub_build_raises_not_implemented(self, name):
         entry = MODELS[name]
         # The stub build takes (bundle, params); we can pass ``None, {}``
         # because it raises before touching either.
@@ -119,6 +127,40 @@ class TestStubsRaiseWithMeaningfulMessage:
         assert "phase" in msg.lower() or "blocked" in msg.lower(), (
             f"stub message for {name!r} doesn't mention phase/blocker"
         )
+
+    @pytest.mark.parametrize("name", sorted(_PHASE3_MODELS))
+    def test_phase3_models_are_not_stubs(self, name):
+        """Phase 3 populated every cartesian model; calling build with a
+        *valid* bundle must succeed without NotImplementedError."""
+        from somax._src.cli.scenarios import SCENARIOS
+
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+                "forcing": {"wind_amplitude": 0.0},
+                "initial_condition": {"type": "at_rest"},
+            }
+        )
+        params = _phase3_model_params(name)
+        built = MODELS[name].build(bundle, params)
+        assert built.model is not None
+        assert built.state0 is not None
+
+
+def _phase3_model_params(name: str) -> dict:
+    """Minimal valid model-side params for the Phase-3 registry entries."""
+    if name in ("multilayer_nonlinear_swm", "multilayer_qg", "reparam_multilayer_qg"):
+        return {
+            "stratification": {
+                "H": [500.0, 4500.0],
+                "g_prime": [9.81, 0.025],
+            },
+            "params": {"lateral_viscosity": 100.0, "bottom_drag": 1.0e-7},
+        }
+    if name == "linear_swm":
+        return {"params": {"H0": 100.0}}
+    return {"params": {"lateral_viscosity": 100.0, "bottom_drag": 1.0e-7}}
 
 
 class TestGetModelLookup:

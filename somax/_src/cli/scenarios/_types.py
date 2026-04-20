@@ -129,8 +129,18 @@ class ScenarioBundle:
             authoritative source).
         geometry: Grid / basin shape.
         constants: Frozen basin constants.
-        forcing: Precomputed forcing fields.
+        forcing: Precomputed forcing fields (``tau_x`` / ``tau_y`` /
+            ``heat``). Optional — scenarios with only scalar forcing
+            knobs (e.g. ``double_gyre``'s ``wind_amplitude``) leave the
+            spatial fields as ``None`` and expose the scalars via
+            :data:`forcing_params` instead.
         initial_condition: Shape + parameters for the initial state.
+        forcing_params: Scenario-level scalar forcing knobs consumed by
+            model ``build`` callables. Keys are scenario-specific
+            (``wind_amplitude``, ``wind_profile``, …). Phase 3 uses this
+            for the Stommel-style wind amplitude on ``double_gyre``;
+            Phase 4/5 scenarios that pre-compute ``tau_x`` / ``tau_y``
+            fields can leave it empty.
     """
 
     name: str
@@ -138,6 +148,7 @@ class ScenarioBundle:
     constants: Constants
     forcing: ForcingFields
     initial_condition: InitialConditionSpec
+    forcing_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

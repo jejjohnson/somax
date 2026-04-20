@@ -50,14 +50,14 @@ def default_debug(
     short, frequent-snapshot smoke run that finishes in seconds.
 
     Args:
-        debug_nx: Override for ``testcase.grid.nx``.
-        debug_ny: Override for ``testcase.grid.ny``.
+        debug_nx: Override for ``scenario.grid.nx``.
+        debug_ny: Override for ``scenario.grid.ny``.
         debug_t1_seconds: Override for ``timestepping.t1`` (default: 1 day).
         debug_save_interval_seconds: Override for ``timestepping.save_interval``
             (default: every 10 minutes — frequent snapshots).
     """
     return {
-        "testcase": {"grid": {"nx": debug_nx, "ny": debug_ny}},
+        "scenario": {"grid": {"nx": debug_nx, "ny": debug_ny}},
         "timestepping": {
             "t1": float(debug_t1_seconds),
             "save_interval": float(debug_save_interval_seconds),

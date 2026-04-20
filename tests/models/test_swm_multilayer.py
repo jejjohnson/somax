@@ -14,8 +14,37 @@ from somax.models import (
     MultilayerSW2DParams,
     MultilayerSW2DPhysConsts,
     MultilayerSW2DState,
-    baroclinic_instability_swm,
 )
+
+
+def _baroclinic_instability_swm(nx: int, ny: int) -> tuple:
+    """Local replacement for the removed
+    :func:`somax.models.baroclinic_instability_swm` factory (see #77).
+
+    Builds the same ``(model, state0)`` pair the factory used to return,
+    via the Phase-3 ``double_gyre x multilayer_nonlinear_swm`` dispatch.
+    Kept in-file so these model-level tests remain independent of the
+    CLI layer's YAML schema.
+    """
+    from somax._src.cli._factories import build
+
+    return build(
+        "double_gyre",
+        "multilayer_nonlinear_swm",
+        scenario_params={
+            "grid": {"nx": nx, "ny": ny, "Lx": 1.0e6, "Ly": 1.0e6},
+            "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+            "forcing": {},
+            "initial_condition": {
+                "type": "jet",
+                "params": {"jet_speed": 0.5, "jet_width": 5.0e4, "perturbation": 0.01},
+            },
+        },
+        model_params={
+            "stratification": {"H": [500.0, 4500.0], "g_prime": [9.81, 0.025]},
+            "params": {"lateral_viscosity": 100.0, "bottom_drag": 1.0e-7},
+        },
+    )
 
 
 def _make_model(**kw):
@@ -254,12 +283,12 @@ class TestMultilayerSW2DGrad:
 
 class TestBaroclinicInstabilitySWM:
     def test_creates(self):
-        model, state0 = baroclinic_instability_swm(nx=16, ny=16)
+        model, state0 = _baroclinic_instability_swm(nx=16, ny=16)
         assert isinstance(model, MultilayerShallowWater2D)
         assert isinstance(state0, MultilayerSW2DState)
         assert state0.h.shape[0] == 2
 
     def test_integrates(self):
-        model, state0 = baroclinic_instability_swm(nx=16, ny=16)
+        model, state0 = _baroclinic_instability_swm(nx=16, ny=16)
         sol = model.integrate(state0, t0=0.0, t1=1000.0, dt=10.0)
         assert jnp.all(jnp.isfinite(sol.ys.h))

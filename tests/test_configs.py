@@ -1,9 +1,10 @@
 """Tests for the authored simulation configs.
 
 Validates that every config in ``configs/_authoring/*.py`` parses
-cleanly into a :class:`somax._src.cli.spec.RunSpec`, that the test-case
-name resolves against the adapter registry, and that the debug overrides
-also produce a valid spec.
+cleanly into a :class:`somax._src.cli.spec.RunSpec`, that its
+``(scenario, model)`` pair resolves against the Phase-3 registries and
+survives the compatibility checker, and that the debug overrides also
+produce a valid spec.
 """
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ from configs._authoring import (
     spinup_bc_qg,
     swm_jet,
 )
-from somax._src.cli._factories import TEST_CASES
+from somax._src.cli._compatibility import check_compatible
+from somax._src.cli.models_registry import MODELS
+from somax._src.cli.scenarios import SCENARIOS
 from somax._src.cli.spec import RunSpec
 
 
@@ -43,10 +46,21 @@ def test_authored_config_parses_to_runspec(name: str, raw: dict) -> None:
     """Every authored config must parse and validate as a RunSpec."""
     spec = RunSpec.from_dict(raw)
     spec.validate()
-    assert spec.testcase.name in TEST_CASES, (
-        f"config {name!r} references unknown testcase {spec.testcase.name!r}; "
-        f"available: {sorted(TEST_CASES)}"
+    assert spec.scenario.name in SCENARIOS, (
+        f"config {name!r} references unknown scenario {spec.scenario.name!r}; "
+        f"available: {sorted(SCENARIOS)}"
     )
+    assert spec.model.name in MODELS, (
+        f"config {name!r} references unknown model {spec.model.name!r}; "
+        f"available: {sorted(MODELS)}"
+    )
+
+
+@pytest.mark.parametrize("name,raw", ALL_AUTHORED_CONFIGS)
+def test_authored_config_pair_is_compatible(name: str, raw: dict) -> None:
+    """Every authored config's ``(scenario, model)`` pair must pass the checker."""
+    spec = RunSpec.from_dict(raw)
+    check_compatible(spec.scenario.name, spec.model.name)  # no exception
 
 
 @pytest.mark.parametrize("name,raw", ALL_AUTHORED_CONFIGS)

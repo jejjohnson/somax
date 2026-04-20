@@ -31,16 +31,13 @@ from somax._src.cli._run import (
 )
 from somax._src.cli.spec import (
     DebugSpec,
+    ModelSpec,
     OutputSpec,
     RunSpec,
-    TestCaseSpec,
+    ScenarioSpec,
     TimesteppingSpec,
 )
 from somax._src.models.swm.nonlinear_2d import NonlinearSW2DState
-
-
-# pytest tries to collect anything named Test* as a test class.
-TestCaseSpec.__test__ = False
 
 
 # ----------------------------------------------------------------------
@@ -119,14 +116,28 @@ def _swm_jet_spec(
 ) -> RunSpec:
     """Build a small, parameterized swm_jet RunSpec for tests.
 
-    The test cases below use this to construct both stable and CFL-violating
-    configurations on demand.
+    Uses the Phase-3 ``double_gyre`` x ``multilayer_nonlinear_swm`` pair
+    (the Phase-3 port of the legacy ``baroclinic_instability_swm`` test
+    case). The test cases below use this to construct both stable and
+    CFL-violating configurations on demand.
     """
     return RunSpec(
-        testcase=TestCaseSpec(
-            name="baroclinic_instability_swm",
+        scenario=ScenarioSpec(
+            name="double_gyre",
             grid={"nx": nx, "ny": ny, "Lx": 1.0e6, "Ly": 1.0e6},
             consts={"f0": 1.0e-4, "beta": 1.6e-11},
+            forcing={},
+            initial_condition={
+                "type": "jet",
+                "params": {
+                    "jet_speed": 0.5,
+                    "jet_width": 5.0e4,
+                    "perturbation": 0.01,
+                },
+            },
+        ),
+        model=ModelSpec(
+            name="multilayer_nonlinear_swm",
             stratification={
                 "H": [500.0, 4500.0],
                 "g_prime": [9.81, 0.025],
@@ -134,9 +145,6 @@ def _swm_jet_spec(
             params={
                 "lateral_viscosity": 100.0,
                 "bottom_drag": 1.0e-7,
-                "jet_speed": 0.5,
-                "jet_width": 5.0e4,
-                "perturbation": 0.01,
             },
         ),
         timestepping=TimesteppingSpec(
@@ -360,7 +368,7 @@ class TestCrashRecoveryCheckpointing:
         assert float(ds.attrs["somax_sim_t"]) == pytest.approx(600.0)
         assert "somax_snapshot_ordinal" in ds.attrs
         assert "somax_checkpoint_of" in ds.attrs
-        assert ds.attrs["somax_checkpoint_of"] == "baroclinic_instability_swm"
+        assert ds.attrs["somax_checkpoint_of"] == "double_gyre/multilayer_nonlinear_swm"
 
     def test_checkpoint_cadence_n_equals_2(self, tmp_path: Path) -> None:
         """With every_n=2, only even-ordinal snapshots overwrite the file.
@@ -560,18 +568,24 @@ class TestCrashRecoveryCheckpointing:
 class TestBuildSaveTimes:
     def _spec(self, *, t0=0.0, t1=10.0, dt=0.1, save_interval=1.0):
         return RunSpec(
-            testcase=TestCaseSpec(
-                name="baroclinic_instability_swm",
+            scenario=ScenarioSpec(
+                name="double_gyre",
                 grid={"nx": 16, "ny": 16, "Lx": 1.0e6, "Ly": 1.0e6},
                 consts={"f0": 1.0e-4, "beta": 1.6e-11},
-                stratification={"H": [500.0, 4500.0], "g_prime": [9.81, 0.025]},
-                params={
-                    "lateral_viscosity": 100.0,
-                    "bottom_drag": 1.0e-7,
-                    "jet_speed": 0.5,
-                    "jet_width": 5.0e4,
-                    "perturbation": 0.01,
+                forcing={},
+                initial_condition={
+                    "type": "jet",
+                    "params": {
+                        "jet_speed": 0.5,
+                        "jet_width": 5.0e4,
+                        "perturbation": 0.01,
+                    },
                 },
+            ),
+            model=ModelSpec(
+                name="multilayer_nonlinear_swm",
+                stratification={"H": [500.0, 4500.0], "g_prime": [9.81, 0.025]},
+                params={"lateral_viscosity": 100.0, "bottom_drag": 1.0e-7},
             ),
             timestepping=TimesteppingSpec(
                 t0=t0, t1=t1, dt=dt, save_interval=save_interval
@@ -632,7 +646,8 @@ class TestBuildSaveTimes:
 class TestAttrsForNumericMetadata:
     def test_attrs_use_native_floats(self) -> None:
         spec = RunSpec(
-            testcase=TestCaseSpec(name="x"),
+            scenario=ScenarioSpec(name="double_gyre"),
+            model=ModelSpec(name="barotropic_qg"),
             timestepping=TimesteppingSpec(
                 t0=0.0, t1=600.0, dt=10.0, save_interval=600.0
             ),
@@ -646,13 +661,15 @@ class TestAttrsForNumericMetadata:
         )
         # Strings still belong to the string fields.
         assert isinstance(attrs["somax_sim_mode"], str)
-        assert isinstance(attrs["testcase_name"], str)
+        assert attrs["scenario_name"] == "double_gyre"
+        assert attrs["model_name"] == "barotropic_qg"
 
 
 # ----------------------------------------------------------------------
 # restart() — Copilot review on PR #71 asked us to fail fast when the
-# restart artifact's state class doesn't match what the testcase expects,
-# instead of crashing deep inside JAX with an inscrutable trace.
+# restart artifact's state class doesn't match what the scenario x model
+# pair expects, instead of crashing deep inside JAX with an inscrutable
+# trace.
 # ----------------------------------------------------------------------
 
 
@@ -665,20 +682,24 @@ class TestRestartStateValidation:
         final_state_path = spinup_dir / "final_state.zarr"
         assert final_state_path.is_dir()
 
-        # Step 2: try to restart a *different testcase* (doublegyre_qg's
+        # Step 2: try to restart a *different model* (BarotropicQG's
         # State class has different fields from the multilayer SWM
         # written above).
         prod_dir = tmp_path / "prod_qg"
         wrong_spec = RunSpec(
-            testcase=TestCaseSpec(
-                name="doublegyre_qg",
+            scenario=ScenarioSpec(
+                name="double_gyre",
                 grid={"nx": 16, "ny": 16, "Lx": 1.0e6, "Ly": 1.0e6},
                 consts={"f0": 1.0e-4, "beta": 1.6e-11},
+                forcing={"wind_amplitude": 1.0e-12, "wind_profile": "doublegyre"},
+                initial_condition={"type": "at_rest"},
+            ),
+            model=ModelSpec(
+                name="barotropic_qg",
                 stratification={},
                 params={
                     "lateral_viscosity": 100.0,
                     "bottom_drag": 1.0e-7,
-                    "wind_amplitude": 1.0e-12,
                 },
             ),
             timestepping=TimesteppingSpec(

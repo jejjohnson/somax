@@ -9,8 +9,9 @@ from __future__ import annotations
 
 
 # Field name -> SI unit string. Covers the State field names from the
-# models registered in ``gfd_testcases.py``. Unknown fields fall back to
-# no unit annotation.
+# models registered in ``somax._src.cli.models_registry`` (plus the 1D
+# helpers in ``gfd_testcases.py``). Unknown fields fall back to no unit
+# annotation.
 FIELD_UNITS: dict[str, str] = {
     "h": "m",
     "u": "m/s",

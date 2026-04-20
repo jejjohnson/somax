@@ -24,15 +24,12 @@ from somax._src.cli._assertions import (
 )
 from somax._src.cli.spec import (
     DebugSpec,
+    ModelSpec,
     OutputSpec,
     RunSpec,
-    TestCaseSpec,
+    ScenarioSpec,
     TimesteppingSpec,
 )
-
-
-# pytest collection hint: TestCaseSpec is a dataclass, not a test class.
-TestCaseSpec.__test__ = False
 
 
 # ----------------------------------------------------------------------
@@ -43,15 +40,19 @@ TestCaseSpec.__test__ = False
 def _spec_with_assertions(**assertions: dict[str, Any]) -> RunSpec:
     """Build a minimal valid RunSpec carrying the given assertions."""
     return RunSpec(
-        testcase=TestCaseSpec(
-            name="doublegyre_qg",
+        scenario=ScenarioSpec(
+            name="double_gyre",
             grid={"nx": 32, "ny": 32, "Lx": 1.0e6, "Ly": 1.0e6},
             consts={"f0": 1.0e-4, "beta": 1.6e-11},
+            forcing={"wind_amplitude": 1.0e-12, "wind_profile": "doublegyre"},
+            initial_condition={"type": "at_rest"},
+        ),
+        model=ModelSpec(
+            name="barotropic_qg",
             stratification={},
             params={
                 "lateral_viscosity": 100.0,
                 "bottom_drag": 1.0e-7,
-                "wind_amplitude": 1.0e-12,
             },
         ),
         timestepping=TimesteppingSpec(t0=0.0, t1=600.0, dt=10.0, save_interval=600.0),
@@ -231,17 +232,26 @@ class TestDispatch:
 
 def _swm_jet_with_cfl_assertion(*, dt: float, t1_seconds: float) -> RunSpec:
     return RunSpec(
-        testcase=TestCaseSpec(
-            name="baroclinic_instability_swm",
+        scenario=ScenarioSpec(
+            name="double_gyre",
             grid={"nx": 64, "ny": 64, "Lx": 1.0e6, "Ly": 1.0e6},
             consts={"f0": 1.0e-4, "beta": 1.6e-11},
+            forcing={},
+            initial_condition={
+                "type": "jet",
+                "params": {
+                    "jet_speed": 0.5,
+                    "jet_width": 5.0e4,
+                    "perturbation": 0.01,
+                },
+            },
+        ),
+        model=ModelSpec(
+            name="multilayer_nonlinear_swm",
             stratification={"H": [500.0, 4500.0], "g_prime": [9.81, 0.025]},
             params={
                 "lateral_viscosity": 100.0,
                 "bottom_drag": 1.0e-7,
-                "jet_speed": 0.5,
-                "jet_width": 5.0e4,
-                "perturbation": 0.01,
             },
         ),
         timestepping=TimesteppingSpec(

@@ -14,8 +14,34 @@ from somax.models import (
     BaroclinicQGParams,
     BaroclinicQGPhysConsts,
     BaroclinicQGState,
-    doublegyre_baroclinic_qg,
 )
+
+
+def _doublegyre_baroclinic_qg(nx: int, ny: int) -> tuple:
+    """Local replacement for the removed
+    :func:`somax.models.doublegyre_baroclinic_qg` factory (see #77).
+
+    Uses the Phase-3 ``double_gyre x multilayer_qg`` dispatch.
+    """
+    from somax._src.cli._factories import build
+
+    return build(
+        "double_gyre",
+        "multilayer_qg",
+        scenario_params={
+            "grid": {"nx": nx, "ny": ny, "Lx": 4.0e6, "Ly": 4.0e6},
+            "consts": {"f0": 9.375e-5, "beta": 1.754e-11},
+            "forcing": {"wind_amplitude": 1.3e-10, "wind_profile": "doublegyre"},
+            "initial_condition": {"type": "at_rest"},
+        },
+        model_params={
+            "stratification": {
+                "H": [400.0, 1100.0, 2600.0],
+                "g_prime": [9.81, 0.025, 0.0125],
+            },
+            "params": {"lateral_viscosity": 15.0, "bottom_drag": 1.0e-7},
+        },
+    )
 
 
 class TestBaroclinicQG:
@@ -314,12 +340,12 @@ class TestBaroclinicQG:
 
 class TestDoublegyreBaroclinicQG:
     def test_creates(self):
-        model, state0 = doublegyre_baroclinic_qg(nx=16, ny=16)
+        model, state0 = _doublegyre_baroclinic_qg(nx=16, ny=16)
         assert isinstance(model, BaroclinicQG)
         assert isinstance(state0, BaroclinicQGState)
         assert state0.q.shape[0] == 3
 
     def test_integrates(self):
-        model, state0 = doublegyre_baroclinic_qg(nx=16, ny=16)
+        model, state0 = _doublegyre_baroclinic_qg(nx=16, ny=16)
         sol = model.integrate(state0, t0=0.0, t1=3600.0, dt=100.0)
         assert jnp.all(jnp.isfinite(sol.ys.q))
