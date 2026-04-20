@@ -237,25 +237,64 @@ def restart(
 
 @app.command(name="list-testcases")
 def list_testcases() -> None:
-    """List all registered test cases."""
+    """List all registered test cases (legacy ``testcase:`` schema)."""
     print("Registered test cases:")
     for name in _factories.list_test_cases():
         print(f"  - {name}")
 
 
+@app.command(name="list-scenarios")
+def list_scenarios() -> None:
+    """List scenarios in the Phase-2 registry (``scenario:`` schema)."""
+    from somax._src.cli.scenarios import SCENARIOS, list_scenarios as _list
+
+    print("Registered scenarios:")
+    for name in _list():
+        entry = SCENARIOS[name]
+        print(f"  - {name}  (geometry: {entry.geometry_kind})")
+
+
 @app.command(name="list-models")
 def list_models() -> None:
-    """List the model classes available in somax."""
-    from somax import models
+    """List models in the Phase-2 registry (``model:`` schema)."""
+    from somax._src.cli.models_registry import MODELS, list_models as _list
 
-    names = sorted(
-        n
-        for n in dir(models)
-        if not n.startswith("_") and isinstance(getattr(models, n), type)
+    print("Registered models:")
+    for name in _list():
+        entry = MODELS[name]
+        layers = entry.layers if entry.layers == "multi" else f"{entry.layers}-layer"
+        masks = "masks=yes" if entry.supports.masks else "masks=no"
+        print(f"  - {name}  ({entry.family}, {layers}, {entry.coordinates}, {masks})")
+
+
+@app.command(name="list-pairs")
+def list_pairs() -> None:
+    """Print the scenario x model compatibility matrix."""
+    from somax._src.cli._compatibility import compatibility_matrix
+    from somax._src.cli.models_registry import list_models as _list_models
+    from somax._src.cli.scenarios import list_scenarios as _list_scenarios
+
+    matrix = compatibility_matrix()
+    models = _list_models()
+    scenarios = _list_scenarios()
+
+    name_col = max(len("scenario"), *(len(s) for s in scenarios))
+    widths = [max(len(m), 3) for m in models]
+    header = "  ".join(
+        [
+            f"{'scenario':<{name_col}}",
+            *(f"{m:<{w}}" for m, w in zip(models, widths, strict=True)),
+        ]
     )
-    print("Available model classes:")
-    for n in names:
-        print(f"  - {n}")
+    print(header)
+    print("-" * len(header))
+    for s in scenarios:
+        row = [f"{s:<{name_col}}"]
+        for m, w in zip(models, widths, strict=True):
+            mark = "x" if matrix[s][m] else "."
+            row.append(f"{mark:<{w}}")
+        print("  ".join(row))
+    print("\nLegend: x = compatible, . = incompatible")
 
 
 @app.command(name="show-config")
