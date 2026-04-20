@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.7](https://github.com/jejjohnson/somax/compare/somax-v0.0.6...somax-v0.0.7) (2026-04-20)
+
+
+### Bug Fixes
+
+* **models:** thread Mask1D/Mask2D through every model ([#95](https://github.com/jejjohnson/somax/issues/95)) ([e40e228](https://github.com/jejjohnson/somax/commit/e40e2281ccfef5fe3c49c4217455c5156800dd21))
+
 ## [0.0.6](https://github.com/jejjohnson/somax/compare/somax-v0.0.5...somax-v0.0.6) (2026-04-10)
 
 
