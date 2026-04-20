@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import Advection1D, ArakawaCGrid1D
+from finitevolx import Advection1D, CartesianGrid1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -39,12 +39,14 @@ class NonlinearConvection1D(SomaxModel):
     Args:
         grid: 1D Arakawa C-grid.
         advection: Advection operator.
+        mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
         periodic: Whether to use periodic boundary conditions.
         method: Reconstruction method for advection (default ``"upwind1"``).
     """
 
-    grid: ArakawaCGrid1D = eqx.field(static=True)
-    advection: Advection1D = eqx.field(static=True)
+    grid: CartesianGrid1D = eqx.field(static=True)
+    advection: Advection1D
+    mask: Mask1D | None
     periodic: bool = eqx.field(static=True, default=True)
     method: str = eqx.field(static=True, default="upwind1")
 
@@ -77,6 +79,7 @@ class NonlinearConvection1D(SomaxModel):
         Lx: float = 2.0,
         periodic: bool = True,
         method: str = "upwind1",
+        mask: Mask1D | None = None,
     ) -> NonlinearConvection1D:
         """Convenience factory.
 
@@ -85,15 +88,17 @@ class NonlinearConvection1D(SomaxModel):
             Lx: Domain length.
             periodic: Use periodic BCs if True, Dirichlet if False.
             method: Advection reconstruction method.
+            mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``NonlinearConvection1D`` model instance.
         """
-        grid = ArakawaCGrid1D.from_interior(nx, Lx)
-        advection = Advection1D(grid=grid)
+        grid = CartesianGrid1D.from_interior(nx, Lx)
+        advection = Advection1D(grid=grid, mask=mask)
         return NonlinearConvection1D(
             grid=grid,
             advection=advection,
+            mask=mask,
             periodic=periodic,
             method=method,
         )

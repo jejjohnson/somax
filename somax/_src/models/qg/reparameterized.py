@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import equinox as eqx
 from finitevolx import (
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Difference2D,
     Interpolation2D,
+    Mask2D,
     Vorticity2D,
     multilayer,
     pv_inversion,
@@ -99,8 +100,12 @@ class ReparameterizedQG(SomaxModel):
         return self.swm.consts
 
     @property
-    def grid(self) -> ArakawaCGrid2D:
+    def grid(self) -> CartesianGrid2D:
         return self.swm.grid
+
+    @property
+    def mask(self) -> Mask2D | None:
+        return self.swm.mask
 
     @property
     def diff(self) -> Difference2D:
@@ -241,6 +246,7 @@ class ReparameterizedQG(SomaxModel):
         bc: str = "wall",
         method: str = "upwind1",
         poisson_bc: str = "dst",
+        mask: Mask2D | None = None,
     ) -> ReparameterizedQG:
         """Convenience factory for the reparameterized QG model.
 
@@ -271,6 +277,7 @@ class ReparameterizedQG(SomaxModel):
             bc: Boundary condition type (must be ``"wall"``).
             method: Advection reconstruction method.
             poisson_bc: Spectral solver BC type for Helmholtz.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``ReparameterizedQG`` model instance.
@@ -304,6 +311,7 @@ class ReparameterizedQG(SomaxModel):
             wind_profile=wind_profile,
             bc=bc,
             method=method,
+            mask=mask,
         )
 
         helmholtz_lambdas = f0**2 * swm.modal.eigenvalues

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import Advection1D, ArakawaCGrid1D, Difference1D, Interpolation1D
+from finitevolx import (
+    Advection1D,
+    CartesianGrid1D,
+    Difference1D,
+    Interpolation1D,
+    Mask1D,
+)
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
@@ -79,15 +85,17 @@ class NonlinearShallowWater1D(SomaxModel):
         diff: Difference operators.
         interp: Interpolation operators.
         advection: Advection operator.
+        mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
         method: Advection reconstruction method.
     """
 
     params: NonlinearSW1DParams
     consts: NonlinearSW1DPhysConsts = eqx.field(static=True)
-    grid: ArakawaCGrid1D = eqx.field(static=True)
-    diff: Difference1D = eqx.field(static=True)
-    interp: Interpolation1D = eqx.field(static=True)
-    advection: Advection1D = eqx.field(static=True)
+    grid: CartesianGrid1D = eqx.field(static=True)
+    diff: Difference1D
+    interp: Interpolation1D
+    advection: Advection1D
+    mask: Mask1D | None
     method: str = eqx.field(static=True, default="upwind1")
 
     def vector_field(
@@ -161,6 +169,7 @@ class NonlinearShallowWater1D(SomaxModel):
         lateral_viscosity: float = 0.0,
         bottom_drag: float = 0.0,
         method: str = "upwind1",
+        mask: Mask1D | None = None,
     ) -> NonlinearShallowWater1D:
         """Convenience factory.
 
@@ -173,19 +182,20 @@ class NonlinearShallowWater1D(SomaxModel):
             lateral_viscosity: Harmonic viscosity (m²/s).
             bottom_drag: Linear bottom drag (1/s).
             method: Advection reconstruction method.
+            mask: Optional 1-D Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``NonlinearShallowWater1D`` model instance.
         """
-        grid = ArakawaCGrid1D.from_interior(nx, Lx)
+        grid = CartesianGrid1D.from_interior(nx, Lx)
         params = NonlinearSW1DParams(
             lateral_viscosity=jnp.array(lateral_viscosity),
             bottom_drag=jnp.array(bottom_drag),
         )
         consts = NonlinearSW1DPhysConsts(gravity=g, f0=f0, H0=H0)
-        diff = Difference1D(grid=grid)
-        interp = Interpolation1D(grid=grid)
-        advection = Advection1D(grid=grid)
+        diff = Difference1D(grid=grid, mask=mask)
+        interp = Interpolation1D(grid=grid, mask=mask)
+        advection = Advection1D(grid=grid, mask=mask)
         return NonlinearShallowWater1D(
             params=params,
             consts=consts,
@@ -193,5 +203,6 @@ class NonlinearShallowWater1D(SomaxModel):
             diff=diff,
             interp=interp,
             advection=advection,
+            mask=mask,
             method=method,
         )

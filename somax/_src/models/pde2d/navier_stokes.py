@@ -6,9 +6,10 @@ import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
     Advection2D as FVXAdvection2D,
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Difference2D,
     Interpolation2D,
+    Mask2D,
     enforce_periodic,
     streamfunction_from_vorticity,
 )
@@ -172,6 +173,7 @@ class IncompressibleNS2D(SomaxModel):
         diff: Difference operators.
         interp: Interpolation operators.
         advection: Advection operator.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         problem: Problem type (``"cavity"`` or ``"channel"``).
         poisson_bc: Spectral solver BC type for Poisson inversion.
         u_lid: Lid velocity for cavity flow (default 1.0).
@@ -180,10 +182,11 @@ class IncompressibleNS2D(SomaxModel):
     """
 
     params: NSParams
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
-    advection: FVXAdvection2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    interp: Interpolation2D
+    advection: FVXAdvection2D
+    mask: Mask2D | None
     problem: str = eqx.field(static=True, default="cavity")
     poisson_bc: str = eqx.field(static=True, default="dst")
     u_lid: float = eqx.field(static=True, default=1.0)
@@ -288,6 +291,7 @@ class IncompressibleNS2D(SomaxModel):
         u_lid: float = 1.0,
         body_force: float = 0.0,
         method: str = "upwind1",
+        mask: Mask2D | None = None,
     ) -> IncompressibleNS2D:
         """Convenience factory.
 
@@ -301,15 +305,16 @@ class IncompressibleNS2D(SomaxModel):
             u_lid: Lid velocity for cavity flow.
             body_force: Constant vorticity source for channel flow.
             method: Advection reconstruction method.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             An ``IncompressibleNS2D`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = NSParams(nu=jnp.array(nu))
-        diff = Difference2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
-        advection = FVXAdvection2D(grid=grid)
+        diff = Difference2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
+        advection = FVXAdvection2D(grid=grid, mask=mask)
         # Both cavity and channel use DST (Dirichlet psi=0 at walls).
         # Channel periodicity in x is enforced via vorticity BCs.
         poisson_bc = "dst"
@@ -319,6 +324,7 @@ class IncompressibleNS2D(SomaxModel):
             diff=diff,
             interp=interp,
             advection=advection,
+            mask=mask,
             problem=problem,
             poisson_bc=poisson_bc,
             u_lid=u_lid,

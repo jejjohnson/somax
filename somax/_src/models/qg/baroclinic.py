@@ -5,9 +5,10 @@ from __future__ import annotations
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Difference2D,
     Interpolation2D,
+    Mask2D,
     arakawa_jacobian,
     multilayer,
     pv_inversion,
@@ -112,6 +113,7 @@ class BaroclinicQG(SomaxModel):
         grid: 2D Arakawa C-grid.
         diff: Difference operators.
         interp: Interpolation operators.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         modal: Precomputed modal transform.
         strat: Stratification profile.
         beta_y: Precomputed beta*(y - y0) field.
@@ -122,9 +124,10 @@ class BaroclinicQG(SomaxModel):
 
     params: BaroclinicQGParams
     consts: BaroclinicQGPhysConsts = eqx.field(static=True)
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    interp: Interpolation2D
+    mask: Mask2D | None
     modal: ModalTransform
     strat: StratificationProfile
     beta_y: Float[Array, "Ny Nx"]
@@ -244,6 +247,7 @@ class BaroclinicQG(SomaxModel):
         wind_amplitude: float = 0.0,
         wind_profile: str = "doublegyre",
         poisson_bc: str = "dst",
+        mask: Mask2D | None = None,
     ) -> BaroclinicQG:
         """Convenience factory for the multilayer QG model.
 
@@ -267,6 +271,7 @@ class BaroclinicQG(SomaxModel):
             wind_profile: Wind stress curl profile. ``"doublegyre"`` gives
                 ``-sin(2*pi*y/Ly)``, ``"single"`` gives ``sin(pi*y/Ly)``.
             poisson_bc: Spectral solver BC type for PV inversion.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``BaroclinicQG`` model instance.
@@ -275,7 +280,7 @@ class BaroclinicQG(SomaxModel):
             ValueError: If ``n_layers``, ``H``, and ``g_prime`` have
                 inconsistent lengths (when ``stratification`` is None).
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
 
         # Stratification
         if stratification is not None:
@@ -301,8 +306,8 @@ class BaroclinicQG(SomaxModel):
             wind_amplitude=jnp.array(wind_amplitude),
         )
         consts = BaroclinicQGPhysConsts(f0=f0, beta=beta, n_layers=nl)
-        diff = Difference2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
+        diff = Difference2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
 
         # Precompute beta*y field
         y = jnp.arange(grid.Ny) * grid.dy
@@ -323,6 +328,7 @@ class BaroclinicQG(SomaxModel):
             grid=grid,
             diff=diff,
             interp=interp,
+            mask=mask,
             modal=modal,
             strat=strat,
             beta_y=beta_y,

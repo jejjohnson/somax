@@ -6,9 +6,10 @@ import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
     Advection2D as FVXAdvection2D,
-    ArakawaCGrid2D,
+    CartesianGrid2D,
     Difference2D,
     Interpolation2D,
+    Mask2D,
     enforce_periodic,
 )
 from jaxtyping import Array, PyTree
@@ -63,14 +64,16 @@ class Burgers2D(SomaxModel):
         diff: Difference operators.
         advection: Advection operator.
         interp: Interpolation operators.
+        mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
         method: Reconstruction method for advection (default ``"upwind1"``).
     """
 
     params: Burgers2DParams
-    grid: ArakawaCGrid2D = eqx.field(static=True)
-    diff: Difference2D = eqx.field(static=True)
-    advection: FVXAdvection2D = eqx.field(static=True)
-    interp: Interpolation2D = eqx.field(static=True)
+    grid: CartesianGrid2D = eqx.field(static=True)
+    diff: Difference2D
+    advection: FVXAdvection2D
+    interp: Interpolation2D
+    mask: Mask2D | None
     method: str = eqx.field(static=True, default="upwind1")
 
     def vector_field(
@@ -109,6 +112,7 @@ class Burgers2D(SomaxModel):
         Ly: float = 2.0,
         nu: float = 0.01,
         method: str = "upwind1",
+        mask: Mask2D | None = None,
     ) -> Burgers2D:
         """Convenience factory.
 
@@ -119,20 +123,22 @@ class Burgers2D(SomaxModel):
             Ly: Domain length in y.
             nu: Kinematic viscosity.
             method: Advection reconstruction method.
+            mask: Optional Arakawa C-grid mask (``None`` = all-ocean).
 
         Returns:
             A ``Burgers2D`` model instance.
         """
-        grid = ArakawaCGrid2D.from_interior(nx, ny, Lx, Ly)
+        grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = Burgers2DParams(nu=jnp.array(nu))
-        diff = Difference2D(grid=grid)
-        advection = FVXAdvection2D(grid=grid)
-        interp = Interpolation2D(grid=grid)
+        diff = Difference2D(grid=grid, mask=mask)
+        advection = FVXAdvection2D(grid=grid, mask=mask)
+        interp = Interpolation2D(grid=grid, mask=mask)
         return Burgers2D(
             params=params,
             grid=grid,
             diff=diff,
             advection=advection,
             interp=interp,
+            mask=mask,
             method=method,
         )
