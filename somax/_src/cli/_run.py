@@ -231,9 +231,34 @@ def _integrate_and_write(
             (default) disables crash-recovery checkpoints; any positive
             ``N`` writes ``<output_dir>/checkpoint.zarr`` after every
             Nth snapshot-aligned chunk.
+
+    Raises:
+        ValueError: If ``checkpoint_every_n_chunks`` is negative.
     """
+    if checkpoint_every_n_chunks < 0:
+        raise ValueError(
+            f"checkpoint_every_n_chunks must be >= 0, got "
+            f"{checkpoint_every_n_chunks!r}. Use 0 to disable checkpointing "
+            f"or a positive integer to enable it."
+        )
+
     output_dir = Path(output_dir)
     _ensure_clean_dir(output_dir)
+
+    # Delete any stale checkpoint.zarr from a prior run. With
+    # checkpointing enabled, the chunked loop overwrites this atomically
+    # from chunk 1 onwards, but a crash before chunk 1 would leave the
+    # previous run's state visible to ``somax-sim restart``. With
+    # checkpointing disabled, we still want to prevent the
+    # "run-into-a-dirty-dir" footgun Codex flagged on PR #98: subsequent
+    # ``restart --from <output_dir>/checkpoint.zarr`` could otherwise
+    # silently resume from an unrelated prior run.
+    stale_ckpt = output_dir / "checkpoint.zarr"
+    if stale_ckpt.exists():
+        import shutil
+
+        shutil.rmtree(stale_ckpt)
+        logger.info("removed stale checkpoint.zarr from output_dir before {} run", mode)
 
     logger.info("somax-sim mode={} testcase={}", mode, spec.testcase.name)
     logger.info("output_dir={}", output_dir)
@@ -895,7 +920,15 @@ def _maybe_override_t0_from_checkpoint(spec: RunSpec, ds: Any) -> RunSpec:
     sim_t_raw = ds.attrs.get("somax_sim_t")
     if sim_t_raw is None:
         return spec
-    sim_t = float(sim_t_raw)
+    try:
+        sim_t = float(sim_t_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"restart artifact has non-numeric somax_sim_t={sim_t_raw!r} "
+            f"(type {type(sim_t_raw).__name__}); this attribute must be a "
+            f"number of seconds. If this is a hand-edited zarr store, fix "
+            f"or remove the attribute."
+        ) from exc
     if sim_t <= spec.timestepping.t0:
         logger.info(
             "restart artifact has somax_sim_t={} <= spec.t0={}; "

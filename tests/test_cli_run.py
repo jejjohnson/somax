@@ -413,16 +413,26 @@ class TestCrashRecoveryCheckpointing:
         result = _run.restart(stage2_spec, stage2_dir, restart_from=stage1_ckpt)
 
         log_text = (stage2_dir / "run.log").read_text()
-        # The loguru line from _maybe_override_t0_from_checkpoint lands
-        # through the root logger (not run_log), but the run_log opener
-        # emits the rebased t0 in its own 'integration starting' line.
-        assert "t0=" in log_text
-        # Most robust: the integration wallclock window should equal
-        # t1 - sim_t = 400, not t1 - 0 = 600. That difference is hard
-        # to measure exactly; instead assert the artifacts exist and
-        # the run.log reports the post-rebase t0.
+        # The ``integration starting:`` line records the effective t0
+        # for this run; after rebase it must read ``t0=200 s (...)``.
+        # Using a regex anchored on that exact line avoids false
+        # positives from unrelated "200" occurrences (e.g.
+        # ``save_interval=200``).
+        import re
+
+        m = re.search(r"integration starting:[^\n]*\bt0=(\d+(?:\.\d+)?) s\b", log_text)
+        assert m is not None, (
+            f"'integration starting:' line with a t0=<seconds> field not "
+            f"found in run.log:\n{log_text}"
+        )
+        t0_logged = float(m.group(1))
+        assert t0_logged == pytest.approx(200.0), (
+            f"expected rebased t0=200 s in run.log, got t0={t0_logged}"
+        )
+        # Belt-and-braces: the original spec.t0 (0 s) should NOT appear
+        # as the starting t0 on that same line.
+        assert re.search(r"integration starting:[^\n]*\bt0=0 s\b", log_text) is None
         assert result.final_state_path.is_dir()
-        assert "200" in log_text  # rebased t0 appears somewhere in the log
 
     def test_restart_from_legacy_final_state_is_unchanged(self, tmp_path: Path) -> None:
         """A ``final_state.zarr`` with no ``somax_sim_t`` attr must behave
@@ -452,6 +462,70 @@ class TestCrashRecoveryCheckpointing:
         )
         result = _run.restart(stage2_spec, stage2_dir, restart_from=final_state)
         assert result.final_state_path.is_dir()
+
+    def test_rerun_removes_stale_checkpoint_from_prior_run(
+        self, tmp_path: Path
+    ) -> None:
+        """Re-running into an output dir that holds an old checkpoint must
+        wipe that checkpoint (otherwise a later ``restart --from
+        <dir>/checkpoint.zarr`` would silently resume from the prior,
+        unrelated run — the Codex review concern on PR #98).
+        """
+        # Stage 1: emit a checkpoint at sim_t=200.
+        stage1_spec = _swm_jet_spec_with_saves(
+            t1_seconds=200.0, dt=10.0, save_interval=200.0
+        )
+        _run.simulate(stage1_spec, tmp_path, checkpoint_every_n_chunks=1)
+        assert (tmp_path / "checkpoint.zarr").is_dir()
+
+        # Stage 2: re-run into the SAME directory with checkpointing OFF.
+        # The stale checkpoint.zarr must be gone afterwards — otherwise a
+        # user resuming from <tmp_path>/checkpoint.zarr would pick up the
+        # prior run's state.
+        stage2_spec = _swm_jet_spec_with_saves(
+            t1_seconds=200.0, dt=10.0, save_interval=200.0
+        )
+        _run.simulate(stage2_spec, tmp_path)
+        assert not (tmp_path / "checkpoint.zarr").exists(), (
+            "stale checkpoint.zarr survived a subsequent checkpointing-off run"
+        )
+
+    def test_negative_checkpoint_cadence_raises(self, tmp_path: Path) -> None:
+        """Negative N must fail loudly up front (not silently disable)."""
+        spec = _swm_jet_spec_with_saves(t1_seconds=200.0, dt=10.0, save_interval=200.0)
+        with pytest.raises(ValueError, match=r">= 0"):
+            _run.simulate(spec, tmp_path, checkpoint_every_n_chunks=-1)
+
+    def test_restart_with_non_numeric_sim_t_attr_raises(self, tmp_path: Path) -> None:
+        """A hand-edited / corrupted ``somax_sim_t`` attr must raise a
+        clear ``ValueError`` rather than a cryptic ``TypeError``.
+        """
+        # Stage 1: produce a valid checkpoint, then corrupt its attr.
+        stage1_dir = tmp_path / "stage1"
+        stage1_spec = _swm_jet_spec_with_saves(
+            t1_seconds=200.0, dt=10.0, save_interval=200.0
+        )
+        _run.simulate(stage1_spec, stage1_dir, checkpoint_every_n_chunks=1)
+        ckpt = stage1_dir / "checkpoint.zarr"
+
+        # Overwrite somax_sim_t with a non-numeric value by rewriting the
+        # zarr store via xarray (the attr lives on the root group).
+        import xarray as xr
+
+        ds = xr.open_zarr(ckpt, consolidated=False).load()
+        ds.attrs["somax_sim_t"] = "not-a-number"
+        # Rewrite in-place.
+        import shutil
+
+        shutil.rmtree(ckpt)
+        ds.to_zarr(ckpt, mode="w", zarr_format=3, consolidated=False)
+
+        stage2_dir = tmp_path / "stage2"
+        stage2_spec = _swm_jet_spec_with_saves(
+            t1_seconds=600.0, dt=10.0, save_interval=200.0
+        )
+        with pytest.raises(ValueError, match=r"non-numeric somax_sim_t"):
+            _run.restart(stage2_spec, stage2_dir, restart_from=ckpt)
 
     def test_restart_from_checkpoint_at_t1_raises(self, tmp_path: Path) -> None:
         """A checkpoint whose sim_t >= spec.t1 leaves nothing to integrate."""
