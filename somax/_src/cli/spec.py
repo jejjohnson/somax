@@ -4,11 +4,15 @@ This module defines the :class:`RunSpec` dataclass and its components.
 ``RunSpec`` is the internal canonical representation of a single
 simulation run; everything else in the CLI funnels into it.
 
-The structured shape (``grid`` / ``consts`` / ``stratification`` /
-``params`` blocks under ``testcase``) is the v0.1 decision per Q-E in
-the design doc — it mirrors how somax separates ``Params`` (differentiable)
-from ``PhysConsts`` (frozen) internally and gives researchers a clean
-mental model of which parameters they would vary in a sweep.
+Phase 3 (#77) completed the hard cutover from the legacy single-block
+``testcase:`` YAML schema to the two-block ``scenario:`` + ``model:``
+schema. The structured shape mirrors how somax separates ``Params``
+(differentiable) from ``PhysConsts`` (frozen) internally and gives
+researchers a clean mental model of which parameters they vary in a
+sweep. Decomposing ``testcase`` into ``scenario`` (what we simulate)
+and ``model`` (how we simulate) further disentangles geometry /
+forcing / ICs from equations-of-motion / integration, enabling the
+``scenario x model`` dispatch in :mod:`somax._src.cli._factories`.
 """
 
 from __future__ import annotations
@@ -16,39 +20,6 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field
 from typing import Any
-
-
-@dataclass
-class TestCaseSpec:
-    """Identification + structured kwargs for a test case factory.
-
-    Args:
-        name: Registry key in :data:`somax._src.cli._factories.TEST_CASES`.
-        grid: Grid block — typically ``nx``, ``ny``, ``Lx``, ``Ly``.
-        consts: Frozen physical constants — ``f0``, ``beta``, layer count.
-        stratification: Vertical structure — layer thicknesses ``H`` and
-            reduced gravities ``g_prime``. May be empty for single-layer
-            models.
-        params: Differentiable parameters — viscosity, drag, forcing
-            amplitudes.
-    """
-
-    name: str
-    grid: dict[str, Any] = field(default_factory=dict)
-    consts: dict[str, Any] = field(default_factory=dict)
-    stratification: dict[str, Any] = field(default_factory=dict)
-    params: dict[str, Any] = field(default_factory=dict)
-
-
-# -----------------------------------------------------------------------
-# Phase-2 additions (#76): scenario x model YAML block shapes.
-#
-# These coexist with ``TestCaseSpec`` for the whole refactor — Phase 3
-# (#72) does the cutover where runs start authoring ``scenario:`` +
-# ``model:`` blocks instead of ``testcase:``. Nothing in the runner
-# consumes these types yet; they only need to exist so the YAML loader
-# can be extended incrementally.
-# -----------------------------------------------------------------------
 
 
 @dataclass
@@ -141,20 +112,24 @@ class DebugSpec:
     here override the corresponding keys in the main spec, leaving
     everything else untouched.
 
-    Use case: each test case picks its own "small but interesting"
-    debug parameters in the config, and ``somax-sim run --debug``
-    activates them.
+    Use case: each scenario/model pair picks its own "small but
+    interesting" debug parameters in the config, and ``somax-sim run
+    --debug`` activates them.
 
     Args:
-        testcase: Subset of :class:`TestCaseSpec` fields to override.
-            Each top-level key (``grid``, ``consts``, ``params``, etc.)
-            is itself a dict that gets shallow-merged into the
-            corresponding block.
+        scenario: Subset of :class:`ScenarioSpec` fields to override
+            (keys: ``grid``, ``consts``, ``forcing``,
+            ``initial_condition``). Each top-level key is itself a dict
+            that gets shallow-merged into the corresponding block.
+        model: Subset of :class:`ModelSpec` fields to override (keys:
+            ``stratification``, ``params``). Same shallow-per-block
+            semantics as ``scenario``.
         timestepping: Subset of :class:`TimesteppingSpec` fields to
             override.
     """
 
-    testcase: dict[str, Any] = field(default_factory=dict)
+    scenario: dict[str, Any] = field(default_factory=dict)
+    model: dict[str, Any] = field(default_factory=dict)
     timestepping: dict[str, Any] = field(default_factory=dict)
 
 
@@ -168,7 +143,8 @@ class RunSpec:
     :func:`somax._src.cli._run.simulate`.
 
     Args:
-        testcase: Which test case to run and its parameters.
+        scenario: Which scenario to run and its parameters.
+        model: Which model to run on that scenario and its parameters.
         timestepping: Integration window and snapshot cadence.
         output: Output-side toggles.
         debug: Debug-mode overrides (only applied if ``--debug`` is set).
@@ -180,7 +156,8 @@ class RunSpec:
             non-finite-state safety check from the runner.
     """
 
-    testcase: TestCaseSpec
+    scenario: ScenarioSpec
+    model: ModelSpec
     timestepping: TimesteppingSpec
     output: OutputSpec = field(default_factory=OutputSpec)
     debug: DebugSpec = field(default_factory=DebugSpec)
@@ -193,8 +170,9 @@ class RunSpec:
     def validate(self) -> None:
         """Run sanity checks. Raises :class:`ValueError` on failure.
 
-        Validates the time integration window and the testcase name.
-        Defers parameter validation to the underlying factory.
+        Validates the time integration window and the scenario / model
+        names. Defers parameter validation to the underlying ``build``
+        callables.
         """
         ts = self.timestepping
         if ts.t1 <= ts.t0:
@@ -213,10 +191,12 @@ class RunSpec:
                 f"the integration window ({ts.t1 - ts.t0})"
             )
 
-        # Test-case existence is checked at dispatch time (importing the
-        # registry here would create a circular import).
-        if not isinstance(self.testcase.name, str) or not self.testcase.name:
-            raise ValueError("testcase.name must be a non-empty string")
+        # Existence in the registries is checked at dispatch time
+        # (importing either registry here would create a circular import).
+        if not isinstance(self.scenario.name, str) or not self.scenario.name:
+            raise ValueError("scenario.name must be a non-empty string")
+        if not isinstance(self.model.name, str) or not self.model.name:
+            raise ValueError("model.name must be a non-empty string")
 
     # ------------------------------------------------------------------
     # Debug merge
@@ -226,8 +206,8 @@ class RunSpec:
         """Return a new ``RunSpec`` with ``debug`` overrides merged in.
 
         The original instance is left untouched. The merge is a *deep*
-        dict merge for the ``testcase`` blocks (so e.g.
-        ``debug.testcase.grid = {"nx": 32}`` overrides only ``nx`` and
+        dict merge for the ``scenario`` and ``model`` blocks (so e.g.
+        ``debug.scenario.grid = {"nx": 32}`` overrides only ``nx`` and
         leaves the other grid keys alone) and a shallow merge for
         ``timestepping``.
 
@@ -235,31 +215,24 @@ class RunSpec:
             A new :class:`RunSpec` with debug applied. Identity-equal
             to ``self`` if there are no debug entries.
         """
-        if not self.debug.testcase and not self.debug.timestepping:
+        if not (self.debug.scenario or self.debug.model or self.debug.timestepping):
             return self
 
-        # Deep-copy mutable nested dicts before mutating.
-        new_testcase = TestCaseSpec(
-            name=self.testcase.name,
-            grid=copy.deepcopy(self.testcase.grid),
-            consts=copy.deepcopy(self.testcase.consts),
-            stratification=copy.deepcopy(self.testcase.stratification),
-            params=copy.deepcopy(self.testcase.params),
+        new_scenario = ScenarioSpec(
+            name=self.scenario.name,
+            grid=copy.deepcopy(self.scenario.grid),
+            consts=copy.deepcopy(self.scenario.consts),
+            forcing=copy.deepcopy(self.scenario.forcing),
+            initial_condition=copy.deepcopy(self.scenario.initial_condition),
         )
-        for block_name, override in self.debug.testcase.items():
-            if not hasattr(new_testcase, block_name):
-                raise ValueError(
-                    f"debug.testcase.{block_name!r} does not match any "
-                    f"TestCaseSpec field"
-                )
-            target = getattr(new_testcase, block_name)
-            if not isinstance(target, dict) or not isinstance(override, dict):
-                raise ValueError(
-                    f"debug.testcase.{block_name!r} merge requires both sides "
-                    f"to be dicts; got {type(target).__name__} and "
-                    f"{type(override).__name__}"
-                )
-            target.update(override)
+        _merge_block_dict(new_scenario, self.debug.scenario, owner="scenario")
+
+        new_model = ModelSpec(
+            name=self.model.name,
+            stratification=copy.deepcopy(self.model.stratification),
+            params=copy.deepcopy(self.model.params),
+        )
+        _merge_block_dict(new_model, self.debug.model, owner="model")
 
         new_timestepping = TimesteppingSpec(
             t0=self.debug.timestepping.get("t0", self.timestepping.t0),
@@ -271,10 +244,12 @@ class RunSpec:
         )
 
         return RunSpec(
-            testcase=new_testcase,
+            scenario=new_scenario,
+            model=new_model,
             timestepping=new_timestepping,
             output=self.output,
             debug=DebugSpec(),  # debug is consumed
+            assertions=copy.deepcopy(self.assertions),
         )
 
     # ------------------------------------------------------------------
@@ -284,12 +259,17 @@ class RunSpec:
     def to_dict(self) -> dict[str, Any]:
         """Render as a plain nested dict (suitable for ``yaml.safe_dump``)."""
         return {
-            "testcase": {
-                "name": self.testcase.name,
-                "grid": copy.deepcopy(self.testcase.grid),
-                "consts": copy.deepcopy(self.testcase.consts),
-                "stratification": copy.deepcopy(self.testcase.stratification),
-                "params": copy.deepcopy(self.testcase.params),
+            "scenario": {
+                "name": self.scenario.name,
+                "grid": copy.deepcopy(self.scenario.grid),
+                "consts": copy.deepcopy(self.scenario.consts),
+                "forcing": copy.deepcopy(self.scenario.forcing),
+                "initial_condition": copy.deepcopy(self.scenario.initial_condition),
+            },
+            "model": {
+                "name": self.model.name,
+                "stratification": copy.deepcopy(self.model.stratification),
+                "params": copy.deepcopy(self.model.params),
             },
             "timestepping": {
                 "t0": self.timestepping.t0,
@@ -302,7 +282,8 @@ class RunSpec:
                 "write_metrics": self.output.write_metrics,
             },
             "debug": {
-                "testcase": copy.deepcopy(self.debug.testcase),
+                "scenario": copy.deepcopy(self.debug.scenario),
+                "model": copy.deepcopy(self.debug.model),
                 "timestepping": copy.deepcopy(self.debug.timestepping),
             },
             "assertions": copy.deepcopy(self.assertions),
@@ -317,19 +298,25 @@ class RunSpec:
         validator catches problems with required fields.
         """
         try:
-            tc_data = data["testcase"]
+            scenario_data = data["scenario"]
+            model_data = data["model"]
             ts_data = data["timestepping"]
         except KeyError as exc:
             raise ValueError(
                 f"RunSpec config missing required block: {exc.args[0]}"
             ) from exc
 
-        testcase = TestCaseSpec(
-            name=tc_data["name"],
-            grid=dict(tc_data.get("grid", {})),
-            consts=dict(tc_data.get("consts", {})),
-            stratification=dict(tc_data.get("stratification", {})),
-            params=dict(tc_data.get("params", {})),
+        scenario = ScenarioSpec(
+            name=scenario_data["name"],
+            grid=dict(scenario_data.get("grid", {})),
+            consts=dict(scenario_data.get("consts", {})),
+            forcing=dict(scenario_data.get("forcing", {})),
+            initial_condition=dict(scenario_data.get("initial_condition", {})),
+        )
+        model = ModelSpec(
+            name=model_data["name"],
+            stratification=dict(model_data.get("stratification", {})),
+            params=dict(model_data.get("params", {})),
         )
         timestepping = TimesteppingSpec(
             t0=float(ts_data["t0"]),
@@ -344,7 +331,8 @@ class RunSpec:
         )
         dbg_data = data.get("debug", {})
         debug = DebugSpec(
-            testcase=dict(dbg_data.get("testcase", {})),
+            scenario=dict(dbg_data.get("scenario", {})),
+            model=dict(dbg_data.get("model", {})),
             timestepping=dict(dbg_data.get("timestepping", {})),
         )
         assertions_data = data.get("assertions", {}) or {}
@@ -353,12 +341,62 @@ class RunSpec:
             str(name): dict(params or {}) for name, params in assertions_data.items()
         }
         return cls(
-            testcase=testcase,
+            scenario=scenario,
+            model=model,
             timestepping=timestepping,
             output=output,
             debug=debug,
             assertions=assertions,
         )
+
+
+def _merge_block_dict(
+    target: ScenarioSpec | ModelSpec,
+    override: dict[str, Any],
+    *,
+    owner: str,
+) -> None:
+    """Apply a ``debug.<owner>`` block-shaped override dict onto ``target``.
+
+    Each top-level key in ``override`` must name a dict-valued field on
+    ``target``; its value must itself be a dict. The merge recurses one
+    level deeper so a debug override like
+    ``debug.scenario.initial_condition = {"params": {"perturbation": 0.5}}``
+    only touches ``perturbation`` and leaves the sibling ``type`` and
+    other ``params`` keys intact. Without the recursion, the default
+    ``dict.update`` would replace whole sub-dicts, which in practice
+    silently drops base-config parameters like ``jet_speed`` and
+    changes the physics of a debug run.
+    """
+    spec_cls = type(target).__name__
+    for block_name, block_override in override.items():
+        if not hasattr(target, block_name):
+            raise ValueError(
+                f"debug.{owner}.{block_name!r} does not match any {spec_cls} field"
+            )
+        existing = getattr(target, block_name)
+        if not isinstance(existing, dict) or not isinstance(block_override, dict):
+            raise ValueError(
+                f"debug.{owner}.{block_name!r} merge requires both sides "
+                f"to be dicts; got {type(existing).__name__} and "
+                f"{type(block_override).__name__}"
+            )
+        _deep_update_dict(existing, block_override)
+
+
+def _deep_update_dict(base: dict[str, Any], override: dict[str, Any]) -> None:
+    """Recursively merge ``override`` into ``base`` in place.
+
+    Dict-valued keys in both sides are merged recursively; any other
+    key is replaced outright. This preserves sibling entries when the
+    caller only wants to override a single leaf value.
+    """
+    for key, value in override.items():
+        existing = base.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            _deep_update_dict(existing, value)
+        else:
+            base[key] = value
 
 
 def load_yaml(path: str) -> RunSpec:

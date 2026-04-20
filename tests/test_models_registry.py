@@ -106,9 +106,17 @@ class TestMaskSupport:
         )
 
 
+# Phase-3 (#77) populated the six cartesian models; the two spherical
+# models stay stubs until Phase 5 (#73). Keep the stub list explicit so
+# accidentally unstubbing a model fails loudly here.
+_STUB_MODELS = {"spherical_swm", "spherical_qg"}
+
+_PHASE3_MODELS = EXPECTED_MODELS - _STUB_MODELS
+
+
 class TestStubsRaiseWithMeaningfulMessage:
-    @pytest.mark.parametrize("name", sorted(EXPECTED_MODELS))
-    def test_build_raises_not_implemented(self, name):
+    @pytest.mark.parametrize("name", sorted(_STUB_MODELS))
+    def test_stub_build_raises_not_implemented(self, name):
         entry = MODELS[name]
         # The stub build takes (bundle, params); we can pass ``None, {}``
         # because it raises before touching either.
@@ -119,6 +127,138 @@ class TestStubsRaiseWithMeaningfulMessage:
         assert "phase" in msg.lower() or "blocked" in msg.lower(), (
             f"stub message for {name!r} doesn't mention phase/blocker"
         )
+
+    @pytest.mark.parametrize("name", sorted(_PHASE3_MODELS))
+    def test_phase3_models_are_not_stubs(self, name):
+        """Phase 3 populated every cartesian model; calling build with a
+        *valid* bundle must succeed without NotImplementedError."""
+        from somax._src.cli.scenarios import SCENARIOS
+
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+                "forcing": {"wind_amplitude": 0.0},
+                "initial_condition": {"type": "at_rest"},
+            }
+        )
+        params = _phase3_model_params(name)
+        built = MODELS[name].build(bundle, params)
+        assert built.model is not None
+        assert built.state0 is not None
+
+
+def _phase3_model_params(name: str) -> dict:
+    """Minimal valid model-side params for the Phase-3 registry entries."""
+    if name in ("multilayer_nonlinear_swm", "multilayer_qg", "reparam_multilayer_qg"):
+        return {
+            "stratification": {
+                "H": [500.0, 4500.0],
+                "g_prime": [9.81, 0.025],
+            },
+            "params": {"lateral_viscosity": 100.0, "bottom_drag": 1.0e-7},
+        }
+    if name == "linear_swm":
+        return {"params": {"H0": 100.0}}
+    return {"params": {"lateral_viscosity": 100.0, "bottom_drag": 1.0e-7}}
+
+
+class TestMultilayerStratificationValidation:
+    """Copilot review on PR #100: missing stratification keys raised
+    a bare ``KeyError``; the adapter now raises a ``ValueError`` that
+    names the missing key + the model so CLI users can trace the
+    config error back to the right YAML block."""
+
+    _MULTILAYER_MODELS = (
+        "multilayer_nonlinear_swm",
+        "multilayer_qg",
+        "reparam_multilayer_qg",
+    )
+
+    def _bundle(self):
+        from somax._src.cli.scenarios import SCENARIOS
+
+        return SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 9.375e-5, "beta": 1.754e-11},
+                "forcing": {"wind_amplitude": 1.0e-10},
+                "initial_condition": {"type": "at_rest"},
+            }
+        )
+
+    @pytest.mark.parametrize("name", _MULTILAYER_MODELS)
+    def test_missing_stratification_block_raises_value_error(self, name):
+        with pytest.raises(ValueError) as exc_info:
+            MODELS[name].build(
+                self._bundle(),
+                {"params": {"lateral_viscosity": 10.0, "bottom_drag": 1.0e-7}},
+            )
+        msg = str(exc_info.value)
+        assert name in msg
+        assert "'H'" in msg
+        assert "'g_prime'" in msg
+
+    @pytest.mark.parametrize("name", _MULTILAYER_MODELS)
+    def test_missing_only_g_prime_raises_value_error(self, name):
+        with pytest.raises(ValueError, match=r"'g_prime'"):
+            MODELS[name].build(
+                self._bundle(),
+                {
+                    "stratification": {"H": [500.0, 4500.0]},
+                    "params": {"lateral_viscosity": 10.0, "bottom_drag": 1.0e-7},
+                },
+            )
+
+    @pytest.mark.parametrize("name", _MULTILAYER_MODELS)
+    def test_length_mismatch_raises_value_error(self, name):
+        with pytest.raises(ValueError, match="match the number of layers"):
+            MODELS[name].build(
+                self._bundle(),
+                {
+                    "stratification": {
+                        "H": [500.0, 4500.0],
+                        "g_prime": [9.81, 0.025, 0.01],
+                    },
+                    "params": {"lateral_viscosity": 10.0, "bottom_drag": 1.0e-7},
+                },
+            )
+
+
+class TestNonlinearSWMGaussianEddyIC:
+    """Copilot review on PR #100: ``gaussian_eddy`` was advertised by
+    ``double_gyre`` but no model adapter implemented it. The
+    ``nonlinear_swm`` adapter now handles it with a Gaussian bump on
+    the thickness field."""
+
+    def test_gaussian_eddy_produces_centered_bump(self):
+        from somax._src.cli.scenarios import SCENARIOS
+
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 16, "ny": 16, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 1.0e-4, "beta": 0.0},
+                "forcing": {},
+                "initial_condition": {
+                    "type": "gaussian_eddy",
+                    "params": {"amplitude": 0.5, "sigma": 1.0e5},
+                },
+            }
+        )
+        built = MODELS["nonlinear_swm"].build(
+            bundle,
+            {"params": {"H0": 100.0, "lateral_viscosity": 10.0}},
+        )
+        import jax.numpy as jnp
+        import numpy as np
+
+        h = np.asarray(built.state0.h)
+        # Bump sits on top of the H0=100 rest thickness.
+        assert h.max() > 100.0
+        assert h.min() == pytest.approx(100.0, abs=1e-3)
+        # u/v stay at rest.
+        assert float(jnp.max(jnp.abs(built.state0.u))) == 0.0
+        assert float(jnp.max(jnp.abs(built.state0.v))) == 0.0
 
 
 class TestGetModelLookup:

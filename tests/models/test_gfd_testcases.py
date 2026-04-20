@@ -1,4 +1,11 @@
-"""Tests for GFD test case factories."""
+"""Tests for GFD test case factories.
+
+These cover the pedagogical 1D/2D linear cases that live in
+``somax._src.models.gfd_testcases``. The Phase-3 removal of the
+double-gyre per-pair factories (see #77) shifted their coverage to the
+``scenario x model`` registries; see ``tests/test_scenarios_registry.py``,
+``tests/test_models_registry.py``, and ``tests/test_cli_run.py``.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +13,8 @@ import jax.numpy as jnp
 
 from somax import SomaxModel
 from somax.models import (
-    BarotropicQG,
     LinearShallowWater1D,
     LinearShallowWater2D,
-    NonlinearShallowWater2D,
-    barotropic_jet_instability,
-    doublegyre_qg,
     geostrophic_adjustment_2d,
     gravity_wave_1d,
     inertial_oscillation_1d,
@@ -54,27 +57,3 @@ class TestGeostrophicAdjustment2D:
         model, state0 = geostrophic_adjustment_2d(nx=32, ny=32)
         sol = model.integrate(state0, t0=0.0, t1=100.0, dt=1.0)
         assert jnp.all(jnp.isfinite(sol.ys.h))
-
-
-class TestBarotropicJetInstability:
-    def test_creates_valid_model_and_state(self):
-        model, state0 = barotropic_jet_instability(nx=32, ny=32)
-        assert isinstance(model, NonlinearShallowWater2D)
-        assert state0.h.shape == (model.grid.Ny, model.grid.Nx)
-
-    def test_integrates_finite(self):
-        model, state0 = barotropic_jet_instability(nx=32, ny=32)
-        sol = model.integrate(state0, t0=0.0, t1=100.0, dt=1.0)
-        assert jnp.all(jnp.isfinite(sol.ys.h))
-
-
-class TestDoublegyreQG:
-    def test_creates_valid_model_and_state(self):
-        model, state0 = doublegyre_qg(nx=16, ny=16)
-        assert isinstance(model, BarotropicQG)
-        assert state0.q.shape == (model.grid.Ny, model.grid.Nx)
-
-    def test_integrates_finite(self):
-        model, state0 = doublegyre_qg(nx=16, ny=16)
-        sol = model.integrate(state0, t0=0.0, t1=100.0, dt=1.0)
-        assert jnp.all(jnp.isfinite(sol.ys.q))

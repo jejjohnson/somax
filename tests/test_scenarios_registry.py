@@ -73,9 +73,21 @@ class TestGeometryKindAssignments:
         assert SCENARIOS[name].geometry_kind == "spherical_cap"
 
 
+# Phase-3 (#77) promoted ``double_gyre`` out of stub status; Phase-4/5
+# will do the same for the remaining five. Keep the stub list explicit
+# so accidentally unstubbing a scenario fails loudly here.
+_STUB_SCENARIOS = {
+    "north_atlantic",
+    "med_sea",
+    "gulf_stream",
+    "southern_ocean",
+    "global_ocean",
+}
+
+
 class TestStubsRaiseWithMeaningfulMessage:
-    @pytest.mark.parametrize("name", sorted(EXPECTED_SCENARIOS))
-    def test_build_raises_not_implemented(self, name):
+    @pytest.mark.parametrize("name", sorted(_STUB_SCENARIOS))
+    def test_stub_build_raises_not_implemented(self, name):
         entry = SCENARIOS[name]
         with pytest.raises(NotImplementedError) as exc_info:
             entry.build({})
@@ -86,6 +98,83 @@ class TestStubsRaiseWithMeaningfulMessage:
         assert "phase" in msg.lower() or "blocked" in msg.lower(), (
             f"stub message for {name!r} doesn't mention phase/blocker"
         )
+
+    def test_double_gyre_is_not_a_stub(self):
+        """Phase 3 populated ``double_gyre``; build must succeed for it."""
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+                "forcing": {"wind_amplitude": 1.0e-12},
+                "initial_condition": {"type": "at_rest"},
+            }
+        )
+        assert bundle.name == "double_gyre"
+        assert bundle.geometry.kind == "rectangular"
+
+
+class TestDoubleGyreForcingKeyValidation:
+    """Codex review on PR #100: typos like ``wing_amplitude`` must not
+    silently disable forcing. The scenario validates against an
+    allowlist at build time."""
+
+    def _base_params(self):
+        return {
+            "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+            "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+            "initial_condition": {"type": "at_rest"},
+        }
+
+    def test_typo_in_forcing_key_raises(self):
+        params = self._base_params() | {"forcing": {"wing_amplitude": 1.0e-12}}
+        with pytest.raises(ValueError, match="wing_amplitude"):
+            SCENARIOS["double_gyre"].build(params)
+
+    def test_empty_forcing_block_is_accepted(self):
+        """No wind (e.g. jet-instability scenarios) is a valid regime."""
+        params = self._base_params() | {"forcing": {}}
+        bundle = SCENARIOS["double_gyre"].build(params)
+        assert dict(bundle.forcing_params) == {}
+
+    def test_known_keys_are_accepted(self):
+        params = self._base_params() | {
+            "forcing": {"wind_amplitude": 1.0e-12, "wind_profile": "doublegyre"}
+        }
+        bundle = SCENARIOS["double_gyre"].build(params)
+        assert bundle.forcing_params["wind_amplitude"] == 1.0e-12
+
+
+class TestScenarioBundleForcingParamsFrozen:
+    """Copilot review on PR #100: ``ScenarioBundle`` is
+    ``@dataclass(frozen=True)`` but ``forcing_params`` is a dict;
+    downstream mutation would defeat the frozen guarantee."""
+
+    def test_forcing_params_is_immutable_mapping(self):
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+                "forcing": {"wind_amplitude": 1.0e-12},
+                "initial_condition": {"type": "at_rest"},
+            }
+        )
+        with pytest.raises(TypeError):
+            bundle.forcing_params["wind_amplitude"] = 2.0e-12  # type: ignore[index]
+
+    def test_mutating_source_dict_does_not_leak_into_bundle(self):
+        """The bundle takes a defensive copy, so mutating the caller's
+        dict after construction doesn't reach the bundle."""
+        source = {"wind_amplitude": 1.0e-12}
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+                "forcing": source,
+                "initial_condition": {"type": "at_rest"},
+            }
+        )
+        source["wind_amplitude"] = 999.0
+        assert bundle.forcing_params["wind_amplitude"] == 1.0e-12
 
 
 class TestGetScenarioLookup:

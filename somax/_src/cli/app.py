@@ -7,8 +7,9 @@ The CLI is intentionally a thin shell over :mod:`somax._src.cli._run`:
 each subcommand parses its arguments, builds a :class:`RunSpec` (either
 from a YAML file or from CLI overrides), and delegates to a single
 ``simulate`` / ``spinup`` / ``restart`` function. There are also
-discovery commands (``list-testcases`` / ``list-models`` /
-``show-config``) for ergonomic introspection.
+discovery commands (``list-scenarios`` / ``list-models`` /
+``list-pairs`` / ``list-model-classes`` / ``show-config``) for
+ergonomic introspection.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from typing import Annotated
 from cyclopts import App, Parameter
 from loguru import logger
 
-from somax._src.cli import _factories, _run
+from somax._src.cli import _run
 from somax._src.cli.spec import RunSpec, load_yaml
 
 
@@ -284,50 +285,47 @@ def restart(
 # ----------------------------------------------------------------------
 
 
-@app.command(name="list-testcases")
-def list_testcases() -> None:
-    """List all registered test cases (legacy ``testcase:`` schema)."""
-    print("Registered test cases:")
-    for name in _factories.list_test_cases():
-        print(f"  - {name}")
-
-
-_PHASE2_NOTE = (
-    "Note: Phase-2 scaffold (#76). Every entry below is a stub — none are "
-    "runnable via `somax-sim run` yet (the runner still dispatches on "
-    "`testcase.name`; Phase 3 cuts over). For currently-runnable entries, "
-    "see `somax-sim list-testcases`."
+_STUB_SCENARIOS = frozenset(
+    {"north_atlantic", "med_sea", "gulf_stream", "southern_ocean", "global_ocean"}
 )
+_STUB_MODELS = frozenset({"spherical_swm", "spherical_qg"})
 
 
 @app.command(name="list-scenarios")
 def list_scenarios() -> None:
-    """List scenarios in the Phase-2 registry (``scenario:`` schema)."""
+    """List scenarios in the registry (``scenario:`` schema).
+
+    Stubbed (Phase 4/5) entries are tagged ``[stub]``; the rest are
+    runnable via ``somax-sim run`` after pairing with a compatible
+    model.
+    """
     from somax._src.cli.scenarios import SCENARIOS, list_scenarios as _list
 
-    print(_PHASE2_NOTE)
-    print()
     print("Registered scenarios:")
     for name in _list():
         entry = SCENARIOS[name]
-        print(f"  - {name}  (geometry: {entry.geometry_kind})  [stub]")
+        tag = "  [stub]" if name in _STUB_SCENARIOS else ""
+        print(f"  - {name}  (geometry: {entry.geometry_kind}){tag}")
 
 
 @app.command(name="list-models")
 def list_models() -> None:
-    """List models in the Phase-2 registry (``model:`` schema)."""
+    """List models in the registry (``model:`` schema).
+
+    Stubbed (Phase 5) entries are tagged ``[stub]``; the rest are
+    runnable via ``somax-sim run`` after pairing with a compatible
+    scenario.
+    """
     from somax._src.cli.models_registry import MODELS, list_models as _list
 
-    print(_PHASE2_NOTE)
-    print()
     print("Registered models:")
     for name in _list():
         entry = MODELS[name]
         layers = entry.layers if entry.layers == "multi" else f"{entry.layers}-layer"
         masks = "masks=yes" if entry.supports.masks else "masks=no"
+        tag = "  [stub]" if name in _STUB_MODELS else ""
         print(
-            f"  - {name}  ({entry.family}, {layers}, {entry.coordinates}, {masks})"
-            "  [stub]"
+            f"  - {name}  ({entry.family}, {layers}, {entry.coordinates}, {masks}){tag}"
         )
 
 

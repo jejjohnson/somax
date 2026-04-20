@@ -12,8 +12,34 @@ from somax.models import (
     MultilayerSW2DState,
     ReparameterizedQG,
     ReparamQGDiagnostics,
-    doublegyre_reparameterized_qg,
 )
+
+
+def _doublegyre_reparameterized_qg(nx: int, ny: int) -> tuple:
+    """Local replacement for the removed
+    :func:`somax.models.doublegyre_reparameterized_qg` factory (see #77).
+
+    Uses the Phase-3 ``double_gyre x reparam_multilayer_qg`` dispatch.
+    """
+    from somax._src.cli._factories import build
+
+    return build(
+        "double_gyre",
+        "reparam_multilayer_qg",
+        scenario_params={
+            "grid": {"nx": nx, "ny": ny, "Lx": 4.0e6, "Ly": 4.0e6},
+            "consts": {"f0": 9.375e-5, "beta": 1.754e-11},
+            "forcing": {"wind_amplitude": 8.0e-5, "wind_profile": "doublegyre"},
+            "initial_condition": {"type": "at_rest"},
+        },
+        model_params={
+            "stratification": {
+                "H": [400.0, 1100.0, 2600.0],
+                "g_prime": [9.81, 0.025, 0.0125],
+            },
+            "params": {"lateral_viscosity": 15.0, "bottom_drag": 3.6e-8},
+        },
+    )
 
 
 def _make_model(**kw):
@@ -208,12 +234,12 @@ class TestReparamQGGrad:
 
 class TestDoublegyreReparamQG:
     def test_creates(self):
-        model, state0 = doublegyre_reparameterized_qg(nx=16, ny=16)
+        model, state0 = _doublegyre_reparameterized_qg(nx=16, ny=16)
         assert isinstance(model, ReparameterizedQG)
         assert isinstance(state0, MultilayerSW2DState)
         assert state0.h.shape[0] == 3
 
     def test_integrates(self):
-        model, state0 = doublegyre_reparameterized_qg(nx=16, ny=16)
+        model, state0 = _doublegyre_reparameterized_qg(nx=16, ny=16)
         sol = model.integrate(state0, t0=0.0, t1=1000.0, dt=10.0)
         assert jnp.all(jnp.isfinite(sol.ys.h))

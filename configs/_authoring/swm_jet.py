@@ -1,7 +1,9 @@
 """Authored config: 2-layer baroclinic instability in MultilayerSW2D.
 
-Test case: ``baroclinic_instability_swm`` (see
-:func:`somax._src.models.gfd_testcases.baroclinic_instability_swm`).
+Scenario: ``double_gyre`` (rectangular, jet IC; no wind forcing for
+this instability test — the energy source is the jet's vertical shear).
+Model: ``multilayer_nonlinear_swm``
+(:class:`somax.models.MultilayerShallowWater2D`).
 
 A small-basin (1000 km), 64-cell test that exercises the multilayer
 nonlinear SWM with a baroclinically unstable jet. Cheap enough to run
@@ -16,10 +18,22 @@ from configs._authoring._common import (
 
 
 SwmJetConfig: dict = {
-    "testcase": {
-        "name": "baroclinic_instability_swm",
+    "scenario": {
+        "name": "double_gyre",
         "grid": {"nx": 64, "ny": 64, "Lx": 1.0e6, "Ly": 1.0e6},
         "consts": {"f0": 1.0e-4, "beta": 1.6e-11},
+        "forcing": {},  # no wind — the jet carries the energy.
+        "initial_condition": {
+            "type": "jet",
+            "params": {
+                "jet_speed": 0.5,
+                "jet_width": 5.0e4,
+                "perturbation": 0.01,
+            },
+        },
+    },
+    "model": {
+        "name": "multilayer_nonlinear_swm",
         "stratification": {
             "H": [500.0, 4500.0],
             "g_prime": [9.81, 0.025],
@@ -35,9 +49,6 @@ SwmJetConfig: dict = {
             # progress diagnostics.
             "lateral_viscosity": 1000.0,
             "bottom_drag": 1.0e-7,
-            "jet_speed": 0.5,
-            "jet_width": 5.0e4,
-            "perturbation": 0.01,
         },
     },
     # 30 days at 64² is enough to see the jet meander develop.

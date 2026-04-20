@@ -13,11 +13,15 @@ Phases 3-5 populate the registries.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Literal
 
 from jaxtyping import Array, Float
+
+
+_EMPTY_FORCING_PARAMS: Mapping[str, Any] = MappingProxyType({})
 
 
 GeometryKind = Literal["rectangular", "spherical_cap", "real_basin"]
@@ -129,8 +133,22 @@ class ScenarioBundle:
             authoritative source).
         geometry: Grid / basin shape.
         constants: Frozen basin constants.
-        forcing: Precomputed forcing fields.
+        forcing: Precomputed forcing fields (``tau_x`` / ``tau_y`` /
+            ``heat``). Optional — scenarios with only scalar forcing
+            knobs (e.g. ``double_gyre``'s ``wind_amplitude``) leave the
+            spatial fields as ``None`` and expose the scalars via
+            :data:`forcing_params` instead.
         initial_condition: Shape + parameters for the initial state.
+        forcing_params: Scenario-level scalar forcing knobs consumed by
+            model ``build`` callables. Keys are scenario-specific
+            (``wind_amplitude``, ``wind_profile``, …). Phase 3 uses this
+            for the Stommel-style wind amplitude on ``double_gyre``;
+            Phase 4/5 scenarios that pre-compute ``tau_x`` / ``tau_y``
+            fields can leave it empty. The stored mapping is wrapped in
+            a :class:`types.MappingProxyType` in ``__post_init__`` so the
+            ``frozen=True`` immutability guarantee holds against
+            downstream mutation (``bundle.forcing_params['x'] = ...``
+            raises).
     """
 
     name: str
@@ -138,6 +156,18 @@ class ScenarioBundle:
     constants: Constants
     forcing: ForcingFields
     initial_condition: InitialConditionSpec
+    forcing_params: Mapping[str, Any] = field(
+        default_factory=lambda: _EMPTY_FORCING_PARAMS
+    )
+
+    def __post_init__(self) -> None:
+        # Snapshot + freeze so downstream can't mutate the mapping.
+        if not isinstance(self.forcing_params, MappingProxyType):
+            object.__setattr__(
+                self,
+                "forcing_params",
+                MappingProxyType(dict(self.forcing_params)),
+            )
 
 
 @dataclass(frozen=True)
