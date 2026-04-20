@@ -36,11 +36,12 @@ class SimulationCheckpointer(eqx.Module):
         import orbax.checkpoint as ocp
 
         path = Path(self.checkpoint_dir) / f"step_{step:08d}"
-        checkpointer = ocp.StandardCheckpointer()
-        checkpointer.save(
-            path,
-            {"state": state, "params": model.params, "step": step},
-        )
+        with ocp.StandardCheckpointer() as checkpointer:
+            checkpointer.save(
+                path,
+                {"state": state, "params": model.params, "step": step},
+            )
+            checkpointer.wait_until_finished()
         return path
 
     def restore(
@@ -64,15 +65,15 @@ class SimulationCheckpointer(eqx.Module):
         import orbax.checkpoint as ocp
 
         path = Path(self.checkpoint_dir) / f"step_{step:08d}"
-        checkpointer = ocp.StandardCheckpointer()
-        ckpt = checkpointer.restore(
-            path,
-            target={
-                "state": target_state,
-                "params": target_model.params,
-                "step": 0,
-            },
-        )
+        with ocp.StandardCheckpointer() as checkpointer:
+            ckpt = checkpointer.restore(
+                path,
+                target={
+                    "state": target_state,
+                    "params": target_model.params,
+                    "step": 0,
+                },
+            )
         return ckpt["state"], ckpt["params"], ckpt["step"]
 
     def should_save(self, step: int) -> bool:
