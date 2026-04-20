@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.8](https://github.com/jejjohnson/somax/compare/somax-v0.0.7...somax-v0.0.8) (2026-04-20)
+
+
+### Features
+
+* **cli:** crash-recovery checkpointing for long simulations ([#98](https://github.com/jejjohnson/somax/issues/98)) ([5ecb447](https://github.com/jejjohnson/somax/commit/5ecb447cc05c7142a91bc043e62e73b94def3670))
+
+
+### Documentation
+
+* **cli:** basin data pipeline scaffold + decisions ([#74](https://github.com/jejjohnson/somax/issues/74), [#75](https://github.com/jejjohnson/somax/issues/75)) ([#101](https://github.com/jejjohnson/somax/issues/101)) ([09dd292](https://github.com/jejjohnson/somax/commit/09dd292b7df47778e8c11f1f634394dfbbb652fc))
+
 ## [0.0.7](https://github.com/jejjohnson/somax/compare/somax-v0.0.6...somax-v0.0.7) (2026-04-20)
 
 
