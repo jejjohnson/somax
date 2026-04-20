@@ -170,3 +170,54 @@ def get_adapter(name: str) -> Adapter:
     except KeyError as exc:
         available = ", ".join(list_test_cases())
         raise KeyError(f"unknown test case {name!r}; available: {available}") from exc
+
+
+# ----------------------------------------------------------------------
+# Phase-2 addition (#76): scenario x model build dispatcher
+#
+# Thin wrapper over the scenarios / models_registry; runs the
+# compatibility check first, then dispatches to the registered ``build``
+# callables. The runner doesn't call this yet (Phase 3 does the
+# cutover); the dispatcher lands here so tests and future phases have a
+# single entry point.
+# ----------------------------------------------------------------------
+
+
+def build(
+    scenario_name: str,
+    model_name: str,
+    *,
+    scenario_params: dict[str, Any] | None = None,
+    model_params: dict[str, Any] | None = None,
+) -> tuple[Any, Any]:
+    """Build ``(model, state0)`` from a scenario x model pair.
+
+    Args:
+        scenario_name: Key in the scenarios registry.
+        model_name: Key in the models registry.
+        scenario_params: YAML ``scenario:`` side knobs (grid, consts,
+            forcing, initial_condition).
+        model_params: YAML ``model:`` side knobs (stratification,
+            differentiable params).
+
+    Returns:
+        ``(model, state0)`` — the same shape as the legacy
+        ``TEST_CASES[name](...)`` adapters. During Phase 2 all registered
+        entries raise :class:`NotImplementedError`; this function still
+        resolves the pair and runs the compatibility check first.
+
+    Raises:
+        KeyError: Unknown scenario or model name.
+        IncompatiblePairError: Pair rejected by the compatibility rules.
+        NotImplementedError: Registered but stubbed entry.
+    """
+    from somax._src.cli._compatibility import check_compatible
+    from somax._src.cli.models_registry import get_model
+    from somax._src.cli.scenarios import get_scenario
+
+    check_compatible(scenario_name, model_name)
+    scenario_entry = get_scenario(scenario_name)
+    model_entry = get_model(model_name)
+    bundle = scenario_entry.build(scenario_params or {})
+    built = model_entry.build(bundle, model_params or {})
+    return built.model, built.state0

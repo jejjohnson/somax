@@ -237,15 +237,60 @@ def restart(
 
 @app.command(name="list-testcases")
 def list_testcases() -> None:
-    """List all registered test cases."""
+    """List all registered test cases (legacy ``testcase:`` schema)."""
     print("Registered test cases:")
     for name in _factories.list_test_cases():
         print(f"  - {name}")
 
 
+_PHASE2_NOTE = (
+    "Note: Phase-2 scaffold (#76). Every entry below is a stub — none are "
+    "runnable via `somax-sim run` yet (the runner still dispatches on "
+    "`testcase.name`; Phase 3 cuts over). For currently-runnable entries, "
+    "see `somax-sim list-testcases`."
+)
+
+
+@app.command(name="list-scenarios")
+def list_scenarios() -> None:
+    """List scenarios in the Phase-2 registry (``scenario:`` schema)."""
+    from somax._src.cli.scenarios import SCENARIOS, list_scenarios as _list
+
+    print(_PHASE2_NOTE)
+    print()
+    print("Registered scenarios:")
+    for name in _list():
+        entry = SCENARIOS[name]
+        print(f"  - {name}  (geometry: {entry.geometry_kind})  [stub]")
+
+
 @app.command(name="list-models")
 def list_models() -> None:
-    """List the model classes available in somax."""
+    """List models in the Phase-2 registry (``model:`` schema)."""
+    from somax._src.cli.models_registry import MODELS, list_models as _list
+
+    print(_PHASE2_NOTE)
+    print()
+    print("Registered models:")
+    for name in _list():
+        entry = MODELS[name]
+        layers = entry.layers if entry.layers == "multi" else f"{entry.layers}-layer"
+        masks = "masks=yes" if entry.supports.masks else "masks=no"
+        print(
+            f"  - {name}  ({entry.family}, {layers}, {entry.coordinates}, {masks})"
+            "  [stub]"
+        )
+
+
+@app.command(name="list-model-classes")
+def list_model_classes() -> None:
+    """List the importable model classes in ``somax.models`` (library discovery).
+
+    Complements ``list-models`` (which lists Phase-2 registry entries by name
+    for the upcoming ``scenario:`` + ``model:`` YAML schema). Use this when
+    you want to see which ``somax.models.*`` classes are actually importable
+    today from Python.
+    """
     from somax import models
 
     names = sorted(
@@ -253,9 +298,39 @@ def list_models() -> None:
         for n in dir(models)
         if not n.startswith("_") and isinstance(getattr(models, n), type)
     )
-    print("Available model classes:")
+    print("Model classes in `somax.models`:")
     for n in names:
         print(f"  - {n}")
+
+
+@app.command(name="list-pairs")
+def list_pairs() -> None:
+    """Print the scenario x model compatibility matrix."""
+    from somax._src.cli._compatibility import compatibility_matrix
+    from somax._src.cli.models_registry import list_models as _list_models
+    from somax._src.cli.scenarios import list_scenarios as _list_scenarios
+
+    matrix = compatibility_matrix()
+    models = _list_models()
+    scenarios = _list_scenarios()
+
+    name_col = max(len("scenario"), *(len(s) for s in scenarios))
+    widths = [max(len(m), 3) for m in models]
+    header = "  ".join(
+        [
+            f"{'scenario':<{name_col}}",
+            *(f"{m:<{w}}" for m, w in zip(models, widths, strict=True)),
+        ]
+    )
+    print(header)
+    print("-" * len(header))
+    for s in scenarios:
+        row = [f"{s:<{name_col}}"]
+        for m, w in zip(models, widths, strict=True):
+            mark = "x" if matrix[s][m] else "."
+            row.append(f"{mark:<{w}}")
+        print("  ".join(row))
+    print("\nLegend: x = compatible, . = incompatible")
 
 
 @app.command(name="show-config")

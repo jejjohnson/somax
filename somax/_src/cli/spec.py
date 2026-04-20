@@ -40,6 +40,60 @@ class TestCaseSpec:
     params: dict[str, Any] = field(default_factory=dict)
 
 
+# -----------------------------------------------------------------------
+# Phase-2 additions (#76): scenario x model YAML block shapes.
+#
+# These coexist with ``TestCaseSpec`` for the whole refactor — Phase 3
+# (#72) does the cutover where runs start authoring ``scenario:`` +
+# ``model:`` blocks instead of ``testcase:``. Nothing in the runner
+# consumes these types yet; they only need to exist so the YAML loader
+# can be extended incrementally.
+# -----------------------------------------------------------------------
+
+
+@dataclass
+class ScenarioSpec:
+    """YAML ``scenario:`` block — what we simulate.
+
+    Args:
+        name: Registry key in
+            :data:`somax._src.cli.scenarios.SCENARIOS`.
+        grid: Grid block — typically ``nx``, ``ny`` (plus ``Lx``,
+            ``Ly`` for Cartesian scenarios or ``lon_bounds`` /
+            ``lat_bounds`` for spherical ones).
+        consts: Frozen basin constants — ``f0``, ``beta``, ``rho0``,
+            ``g``.
+        forcing: Scenario-level forcing knobs (e.g. ``wind_amplitude``
+            that the scenario uses to build ``ForcingFields``).
+        initial_condition: ``{"type": "...", "params": {...}}`` — IC
+            shape and its parameters.
+    """
+
+    name: str
+    grid: dict[str, Any] = field(default_factory=dict)
+    consts: dict[str, Any] = field(default_factory=dict)
+    forcing: dict[str, Any] = field(default_factory=dict)
+    initial_condition: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ModelSpec:
+    """YAML ``model:`` block — how we simulate.
+
+    Args:
+        name: Registry key in
+            :data:`somax._src.cli.models_registry.MODELS`.
+        stratification: Vertical structure — layer thicknesses ``H``
+            and reduced gravities ``g_prime``. Empty for single-layer
+            models.
+        params: Differentiable parameters — viscosity, drag, etc.
+    """
+
+    name: str
+    stratification: dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class TimesteppingSpec:
     """Time integration window and snapshot cadence.
