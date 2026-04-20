@@ -102,6 +102,18 @@ def run(
             ),
         ),
     ] = False,
+    checkpoint_every_n_chunks: Annotated[
+        int,
+        Parameter(
+            help=(
+                "Crash-recovery cadence (#70). When > 0, writes the current "
+                "state to <output_dir>/checkpoint.zarr after every Nth "
+                "snapshot-aligned chunk. The new run can be resumed via "
+                "`somax-sim restart --from <output_dir>/checkpoint.zarr` — "
+                "integration picks up at the checkpoint's sim-time. 0 = off."
+            ),
+        ),
+    ] = 0,
 ) -> None:
     """Run a fresh simulation from factory-built initial conditions.
 
@@ -111,7 +123,12 @@ def run(
     """
     _configure_logging(verbose)
     spec = _load_and_prepare(config, debug=debug)
-    _run.simulate(spec, output_dir, diagnostics_per_save=diagnostics_per_save)
+    _run.simulate(
+        spec,
+        output_dir,
+        diagnostics_per_save=diagnostics_per_save,
+        checkpoint_every_n_chunks=checkpoint_every_n_chunks,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -151,6 +168,15 @@ def spinup(
             ),
         ),
     ] = False,
+    checkpoint_every_n_chunks: Annotated[
+        int,
+        Parameter(
+            help=(
+                "Crash-recovery cadence (#70). ``> 0`` writes rolling "
+                "<output_dir>/checkpoint.zarr during the spinup. 0 = off."
+            ),
+        ),
+    ] = 0,
 ) -> None:
     """Run a spinup integration. Saves only the endpoint state.
 
@@ -164,7 +190,12 @@ def spinup(
     """
     _configure_logging(verbose)
     spec = _load_and_prepare(config, debug=debug)
-    _run.spinup(spec, output_dir, diagnostics_per_save=diagnostics_per_save)
+    _run.spinup(
+        spec,
+        output_dir,
+        diagnostics_per_save=diagnostics_per_save,
+        checkpoint_every_n_chunks=checkpoint_every_n_chunks,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -213,12 +244,29 @@ def restart(
             ),
         ),
     ] = False,
+    checkpoint_every_n_chunks: Annotated[
+        int,
+        Parameter(
+            help=(
+                "Crash-recovery cadence (#70) for the *resumed* run. When "
+                "> 0, writes the current state to "
+                "<output_dir>/checkpoint.zarr after every Nth "
+                "snapshot-aligned chunk. 0 = off."
+            ),
+        ),
+    ] = 0,
 ) -> None:
     """Resume a simulation from a previously saved state.
 
     The model is built from ``config`` (so you can change viscosity,
     forcing, etc. between runs); only the *state* is loaded from the
     ``--from`` zarr store.
+
+    If ``--from`` points at a crash-recovery checkpoint (a zarr store
+    with a ``somax_sim_t`` attr), the integration window is
+    automatically rebased so the run picks up where the checkpoint
+    left off. Legacy ``final_state.zarr`` stores (no attr) are
+    honoured as-is.
     """
     _configure_logging(verbose)
     spec = _load_and_prepare(config, debug=debug)
@@ -227,6 +275,7 @@ def restart(
         output_dir,
         restart_from=from_,
         diagnostics_per_save=diagnostics_per_save,
+        checkpoint_every_n_chunks=checkpoint_every_n_chunks,
     )
 
 
