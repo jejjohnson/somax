@@ -22,6 +22,7 @@ from cyclopts import App, Parameter
 from loguru import logger
 
 from somax._src.cli import _run
+from somax._src.cli._data import data_app
 from somax._src.cli.spec import RunSpec, load_yaml
 
 
@@ -62,6 +63,12 @@ app = App(
     help="somax simulation runner — fresh runs, spinups, restarts.",
     version_flags=["--version", "-V"],
 )
+
+
+# Real-basin data-bundle helpers (#74 + #75). Mounted as
+# `somax-sim data {init,fetch,build,status}` — thin wrappers around
+# DVC so users don't need to memorize DVC's command surface.
+app.command(data_app)
 
 
 # ----------------------------------------------------------------------

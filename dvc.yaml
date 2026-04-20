@@ -94,3 +94,47 @@ stages:
     metrics:
       - data/simulations/doublegyre_bc_qg/metrics.json:
           cache: false
+
+  # --------------------------------------------------------------------
+  # Phase 4 / Phase 5 real-basin data bundles (#74 + #75)
+  #
+  # Each basin has its own stage so `dvc repro build-basin-<name>`
+  # rebuilds exactly one bundle. Outputs land at data/basin/<name>.zarr
+  # and are DVC-tracked (not committed to git). See
+  # content/notes/basin_data_sources.md for the design.
+  #
+  # `--source synthetic` is the Phase 3 placeholder; real GEBCO + ERA5
+  # integration comes in #78 and flips these to `--source real`.
+  # --------------------------------------------------------------------
+
+  build-basin-med-sea:
+    desc: Build the med_sea basin bundle (placeholder; #78 flips to real data).
+    cmd: python scripts/data/build_basin.py med_sea --source synthetic
+    deps:
+      - scripts/data/build_basin.py
+    outs:
+      - data/basin/med_sea.zarr
+
+  build-basin-gulf-stream:
+    desc: Build the gulf_stream basin bundle (placeholder).
+    cmd: python scripts/data/build_basin.py gulf_stream --source synthetic
+    deps:
+      - scripts/data/build_basin.py
+    outs:
+      - data/basin/gulf_stream.zarr
+
+  build-basin-north-atlantic:
+    desc: Build the north_atlantic basin bundle (placeholder).
+    cmd: python scripts/data/build_basin.py north_atlantic --source synthetic
+    deps:
+      - scripts/data/build_basin.py
+    outs:
+      - data/basin/north_atlantic.zarr
+
+  build-basin-southern-ocean:
+    desc: Build the southern_ocean basin bundle (placeholder).
+    cmd: python scripts/data/build_basin.py southern_ocean --source synthetic
+    deps:
+      - scripts/data/build_basin.py
+    outs:
+      - data/basin/southern_ocean.zarr

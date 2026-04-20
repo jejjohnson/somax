@@ -15,6 +15,7 @@ project:
         - file: content/notes/shallow_water
         - file: content/notes/quasigeostrophic
         - file: content/notes/qg_spinup_durations
+        - file: content/notes/basin_data_sources
     - title: Tutorials
       children:
         - file: content/tutorials/getting_started
