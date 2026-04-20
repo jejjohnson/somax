@@ -1,6 +1,6 @@
 """Scenario registry — what we simulate (geometry + forcing + IC).
 
-Phase 2 (#76) ships this module with all five scenarios registered as
+Phase 2 (#76) ships this module with all scenarios registered as
 :class:`ScenarioEntry` instances whose ``build`` raises
 :class:`NotImplementedError`. Phases 3-5 populate the stubs without
 touching the registry plumbing.

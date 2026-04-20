@@ -243,15 +243,25 @@ def list_testcases() -> None:
         print(f"  - {name}")
 
 
+_PHASE2_NOTE = (
+    "Note: Phase-2 scaffold (#76). Every entry below is a stub — none are "
+    "runnable via `somax-sim run` yet (the runner still dispatches on "
+    "`testcase.name`; Phase 3 cuts over). For currently-runnable entries, "
+    "see `somax-sim list-testcases`."
+)
+
+
 @app.command(name="list-scenarios")
 def list_scenarios() -> None:
     """List scenarios in the Phase-2 registry (``scenario:`` schema)."""
     from somax._src.cli.scenarios import SCENARIOS, list_scenarios as _list
 
+    print(_PHASE2_NOTE)
+    print()
     print("Registered scenarios:")
     for name in _list():
         entry = SCENARIOS[name]
-        print(f"  - {name}  (geometry: {entry.geometry_kind})")
+        print(f"  - {name}  (geometry: {entry.geometry_kind})  [stub]")
 
 
 @app.command(name="list-models")
@@ -259,12 +269,38 @@ def list_models() -> None:
     """List models in the Phase-2 registry (``model:`` schema)."""
     from somax._src.cli.models_registry import MODELS, list_models as _list
 
+    print(_PHASE2_NOTE)
+    print()
     print("Registered models:")
     for name in _list():
         entry = MODELS[name]
         layers = entry.layers if entry.layers == "multi" else f"{entry.layers}-layer"
         masks = "masks=yes" if entry.supports.masks else "masks=no"
-        print(f"  - {name}  ({entry.family}, {layers}, {entry.coordinates}, {masks})")
+        print(
+            f"  - {name}  ({entry.family}, {layers}, {entry.coordinates}, {masks})"
+            "  [stub]"
+        )
+
+
+@app.command(name="list-model-classes")
+def list_model_classes() -> None:
+    """List the importable model classes in ``somax.models`` (library discovery).
+
+    Complements ``list-models`` (which lists Phase-2 registry entries by name
+    for the upcoming ``scenario:`` + ``model:`` YAML schema). Use this when
+    you want to see which ``somax.models.*`` classes are actually importable
+    today from Python.
+    """
+    from somax import models
+
+    names = sorted(
+        n
+        for n in dir(models)
+        if not n.startswith("_") and isinstance(getattr(models, n), type)
+    )
+    print("Model classes in `somax.models`:")
+    for n in names:
+        print(f"  - {n}")
 
 
 @app.command(name="list-pairs")
