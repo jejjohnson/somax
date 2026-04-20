@@ -206,6 +206,7 @@ def _integrate_and_write(
     mode: str,
     initial_state: Any | None,
     diagnostics_per_save: int = 1,
+    checkpoint_every_n_chunks: int = 0,
 ) -> SimulationResult:
     """Build the model, integrate, write artifacts, return summary.
 
@@ -226,9 +227,38 @@ def _integrate_and_write(
             interval. ``1`` = one diagnostic per snapshot (default).
             ``4`` = four diagnostics per snapshot (finer monitoring).
             Snapshot cadence is unaffected.
+        checkpoint_every_n_chunks: Crash-recovery cadence (#70). ``0``
+            (default) disables crash-recovery checkpoints; any positive
+            ``N`` writes ``<output_dir>/checkpoint.zarr`` after every
+            Nth snapshot-aligned chunk.
+
+    Raises:
+        ValueError: If ``checkpoint_every_n_chunks`` is negative.
     """
+    if checkpoint_every_n_chunks < 0:
+        raise ValueError(
+            f"checkpoint_every_n_chunks must be >= 0, got "
+            f"{checkpoint_every_n_chunks!r}. Use 0 to disable checkpointing "
+            f"or a positive integer to enable it."
+        )
+
     output_dir = Path(output_dir)
     _ensure_clean_dir(output_dir)
+
+    # Delete any stale checkpoint.zarr from a prior run. With
+    # checkpointing enabled, the chunked loop overwrites this atomically
+    # from chunk 1 onwards, but a crash before chunk 1 would leave the
+    # previous run's state visible to ``somax-sim restart``. With
+    # checkpointing disabled, we still want to prevent the
+    # "run-into-a-dirty-dir" footgun Codex flagged on PR #98: subsequent
+    # ``restart --from <output_dir>/checkpoint.zarr`` could otherwise
+    # silently resume from an unrelated prior run.
+    stale_ckpt = output_dir / "checkpoint.zarr"
+    if stale_ckpt.exists():
+        import shutil
+
+        shutil.rmtree(stale_ckpt)
+        logger.info("removed stale checkpoint.zarr from output_dir before {} run", mode)
 
     logger.info("somax-sim mode={} testcase={}", mode, spec.testcase.name)
     logger.info("output_dir={}", output_dir)
@@ -297,6 +327,9 @@ def _integrate_and_write(
             max_steps_per_chunk=per_chunk_max,
             run_log=run_log,
             mode=mode,
+            checkpoint_every_n_chunks=checkpoint_every_n_chunks,
+            checkpoint_dir=output_dir if checkpoint_every_n_chunks > 0 else None,
+            checkpoint_label=spec.testcase.name,
         )
     except Exception as exc:
         stop_run_log(
@@ -547,6 +580,9 @@ def _chunked_integrate_with_diagnostics(
     max_steps_per_chunk: int,
     run_log: RunLogContext,
     mode: str,
+    checkpoint_every_n_chunks: int = 0,
+    checkpoint_dir: Path | None = None,
+    checkpoint_label: str | None = None,
 ) -> Any:
     """Run a multi-chunk integration that emits diagnostics between chunks.
 
@@ -580,6 +616,16 @@ def _chunked_integrate_with_diagnostics(
         max_steps_per_chunk: Per-chunk diffrax max_steps.
         run_log: RunLogContext supplying the bound logger.
         mode: ``"run"`` / ``"spinup"`` / ``"restart"`` for error messages.
+        checkpoint_every_n_chunks: Crash-recovery cadence (#70). If
+            ``> 0`` and ``checkpoint_dir`` is provided, the current
+            state is written to ``<checkpoint_dir>/checkpoint.zarr``
+            after every Nth *diagnostic* chunk endpoint that is also a
+            snapshot boundary (so ``save_states`` and the on-disk
+            checkpoint stay aligned). ``0`` disables checkpointing.
+        checkpoint_dir: Directory for the rolling ``checkpoint.zarr``
+            store. Ignored when ``checkpoint_every_n_chunks == 0``.
+        checkpoint_label: Optional label (e.g. testcase name) stored in
+            the checkpoint's attrs for debugging.
 
     Raises:
         IntegrationDivergedError: If any chunk produces non-finite state.
@@ -683,8 +729,43 @@ def _chunked_integrate_with_diagnostics(
             )
 
         # Only retain states at snapshot boundaries.
-        if (i + 1) in save_indices:
+        is_snapshot_boundary = (i + 1) in save_indices
+        if is_snapshot_boundary:
             save_states.append(new_state)
+
+        # Crash-recovery checkpoint (#70): write the current state to a
+        # rolling ``checkpoint.zarr`` every N snapshot-aligned chunk
+        # endpoints. Aligning to snapshot boundaries keeps the on-disk
+        # checkpoint consistent with the saved snapshots up to that
+        # point. We write AFTER the non-finite guard so a bad state
+        # never lands on disk.
+        if (
+            checkpoint_every_n_chunks > 0
+            and checkpoint_dir is not None
+            and is_snapshot_boundary
+        ):
+            snapshot_ordinal = len(save_states) - 1  # 1-based: first == index 1
+            due = (
+                snapshot_ordinal > 0
+                and snapshot_ordinal % checkpoint_every_n_chunks == 0
+            )
+            if due:
+                ckpt_path = Path(checkpoint_dir) / "checkpoint.zarr"
+                ckpt_attrs: dict[str, Any] = {
+                    "somax_sim_t": float(chunk_t1),
+                    "somax_snapshot_ordinal": int(snapshot_ordinal),
+                }
+                if checkpoint_label:
+                    ckpt_attrs["somax_checkpoint_of"] = str(checkpoint_label)
+                ckpt_ds = io.state_to_dataset(
+                    new_state, time=float(chunk_t1), attrs=ckpt_attrs
+                )
+                io.save_dataset(ckpt_ds, ckpt_path, mode="w")
+                log.debug(
+                    f"checkpoint written at snapshot {snapshot_ordinal} "
+                    f"(sim_t={format_time_seconds(chunk_t1)}) → {ckpt_path.name}"
+                )
+
         state = new_state
 
     total_chunks_wall = time.perf_counter() - t_chunks_start
@@ -777,6 +858,7 @@ def simulate(
     output_dir: str | Path,
     *,
     diagnostics_per_save: int = 1,
+    checkpoint_every_n_chunks: int = 0,
 ) -> SimulationResult:
     """Run a fresh simulation from factory-built initial conditions.
 
@@ -790,6 +872,8 @@ def simulate(
         output_dir: Directory for written artifacts.
         diagnostics_per_save: Diagnostic sub-chunks per save interval
             (default 1). Higher = more lines per snapshot in run.log.
+        checkpoint_every_n_chunks: Crash-recovery cadence (#70). ``0``
+            (default) disables crash checkpoints.
     """
     return _integrate_and_write(
         spec,
@@ -797,6 +881,7 @@ def simulate(
         mode="run",
         initial_state=None,
         diagnostics_per_save=diagnostics_per_save,
+        checkpoint_every_n_chunks=checkpoint_every_n_chunks,
     )
 
 
@@ -805,6 +890,7 @@ def spinup(
     output_dir: str | Path,
     *,
     diagnostics_per_save: int = 1,
+    checkpoint_every_n_chunks: int = 0,
 ) -> SimulationResult:
     """Run a spinup integration. Saves only the endpoint.
 
@@ -818,7 +904,66 @@ def spinup(
         mode="spinup",
         initial_state=None,
         diagnostics_per_save=diagnostics_per_save,
+        checkpoint_every_n_chunks=checkpoint_every_n_chunks,
     )
+
+
+def _maybe_override_t0_from_checkpoint(spec: RunSpec, ds: Any) -> RunSpec:
+    """Pick up ``somax_sim_t`` from a restart dataset and rebase ``t0``.
+
+    Crash-recovery checkpoints (#70) record the sim-time of the last
+    safe chunk endpoint in the ``somax_sim_t`` attr. When present, we
+    resume from there rather than restarting the spec's window from
+    scratch. Legacy ``final_state.zarr`` stores written before the
+    checkpointing work have no such attr and fall through unchanged.
+    """
+    sim_t_raw = ds.attrs.get("somax_sim_t")
+    if sim_t_raw is None:
+        return spec
+    try:
+        sim_t = float(sim_t_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"restart artifact has non-numeric somax_sim_t={sim_t_raw!r} "
+            f"(type {type(sim_t_raw).__name__}); this attribute must be a "
+            f"number of seconds. If this is a hand-edited zarr store, fix "
+            f"or remove the attribute."
+        ) from exc
+    if sim_t <= spec.timestepping.t0:
+        logger.info(
+            "restart artifact has somax_sim_t={} <= spec.t0={}; "
+            "integrating from spec.t0 unchanged.",
+            sim_t,
+            spec.timestepping.t0,
+        )
+        return spec
+    if sim_t >= spec.timestepping.t1:
+        raise ValueError(
+            f"restart artifact has somax_sim_t={sim_t} which is >= "
+            f"spec.timestepping.t1={spec.timestepping.t1}; the integration "
+            f"window has nothing left to run. Extend t1 in the config or "
+            f"restart from an earlier checkpoint."
+        )
+
+    # Rebase the window. Shallow-copy the spec so the caller's spec is
+    # not mutated.
+    from somax._src.cli.spec import TimesteppingSpec
+
+    logger.info(
+        "restart: resuming from checkpoint at sim_t={} (overriding spec.t0)",
+        sim_t,
+    )
+    new_ts = TimesteppingSpec(
+        t0=sim_t,
+        t1=spec.timestepping.t1,
+        dt=spec.timestepping.dt,
+        save_interval=min(
+            spec.timestepping.save_interval, spec.timestepping.t1 - sim_t
+        ),
+    )
+    new_spec = dataclasses.replace(spec, timestepping=new_ts)
+    new_spec.validate()
+    return new_spec
 
 
 def restart(
@@ -827,6 +972,7 @@ def restart(
     *,
     restart_from: str | Path,
     diagnostics_per_save: int = 1,
+    checkpoint_every_n_chunks: int = 0,
 ) -> SimulationResult:
     """Resume a simulation from a previously saved state.
 
@@ -834,13 +980,23 @@ def restart(
     forcing, etc. between runs); only the *state* is loaded from the
     restart file.
 
+    If the restart artifact is a crash-recovery checkpoint (#70) — i.e.
+    it carries a ``somax_sim_t`` attr — the integration window's
+    ``t0`` is automatically rebased to that sim-time so the run picks
+    up exactly where the checkpoint left off. Legacy
+    ``final_state.zarr`` stores without the attr are honoured as-is
+    (integration starts at ``spec.timestepping.t0`` as before).
+
     Args:
         spec: Run specification (model construction comes from here).
         output_dir: Directory for written artifacts.
         restart_from: Path to a zarr store containing a saved state
-            (typically a previous run's ``final_state.zarr``).
+            (typically a previous run's ``final_state.zarr`` or a
+            crash ``checkpoint.zarr``).
         diagnostics_per_save: Diagnostic sub-chunks per save interval
             (default 1).
+        checkpoint_every_n_chunks: Crash-recovery cadence for the
+            *new* run (the one we're about to start). ``0`` = off.
     """
     restart_path = Path(restart_from)
     logger.info("restart loading state from {}", restart_path)
@@ -869,10 +1025,13 @@ def restart(
             f"compatible run."
         )
 
+    spec = _maybe_override_t0_from_checkpoint(spec, ds)
+
     return _integrate_and_write(
         spec,
         Path(output_dir),
         mode="restart",
         initial_state=state0,
         diagnostics_per_save=diagnostics_per_save,
+        checkpoint_every_n_chunks=checkpoint_every_n_chunks,
     )

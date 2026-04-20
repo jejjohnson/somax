@@ -307,6 +307,248 @@ class TestSpinupRestartChain:
 
 
 # ----------------------------------------------------------------------
+# Crash-recovery checkpointing (#70)
+# ----------------------------------------------------------------------
+
+
+def _swm_jet_spec_with_saves(
+    *,
+    t1_seconds: float,
+    dt: float,
+    save_interval: float,
+    nx: int = 16,
+    ny: int = 16,
+) -> RunSpec:
+    """Variant of ``_swm_jet_spec`` with a controllable save_interval.
+
+    The default helper sets ``save_interval == t1`` (one saved interval →
+    one snapshot ordinal), which is enough for happy-path tests but too
+    coarse to exercise the crash-recovery cadence. The checkpoint is
+    written at snapshot-aligned chunk endpoints, so we need
+    ``save_interval < t1`` to see more than one ordinal tick.
+    """
+    spec = _swm_jet_spec(t1_seconds=t1_seconds, dt=dt, nx=nx, ny=ny)
+    spec.timestepping.save_interval = save_interval
+    spec.validate()
+    return spec
+
+
+class TestCrashRecoveryCheckpointing:
+    def test_checkpoint_zarr_not_written_when_disabled(self, tmp_path: Path) -> None:
+        """Default (checkpoint_every_n_chunks=0) must not create checkpoint.zarr."""
+        spec = _swm_jet_spec_with_saves(t1_seconds=600.0, dt=10.0, save_interval=200.0)
+        _run.simulate(spec, tmp_path)
+        assert not (tmp_path / "checkpoint.zarr").exists()
+
+    def test_checkpoint_zarr_written_when_enabled(self, tmp_path: Path) -> None:
+        """Opting in writes checkpoint.zarr with the sim_t attr."""
+        # Three saved intervals → snapshot ordinals 1, 2, 3.
+        spec = _swm_jet_spec_with_saves(t1_seconds=600.0, dt=10.0, save_interval=200.0)
+        _run.simulate(spec, tmp_path, checkpoint_every_n_chunks=1)
+
+        ckpt_path = tmp_path / "checkpoint.zarr"
+        assert ckpt_path.is_dir(), "checkpoint.zarr should have been written"
+
+        # The rolling checkpoint is overwritten each chunk; the final
+        # write corresponds to the last snapshot ordinal, i.e. sim_t=t1.
+        from somax import io as somax_io
+
+        ds = somax_io.load_dataset(ckpt_path)
+        assert "somax_sim_t" in ds.attrs, (
+            "checkpoint.zarr missing the somax_sim_t attribute"
+        )
+        assert float(ds.attrs["somax_sim_t"]) == pytest.approx(600.0)
+        assert "somax_snapshot_ordinal" in ds.attrs
+        assert "somax_checkpoint_of" in ds.attrs
+        assert ds.attrs["somax_checkpoint_of"] == "baroclinic_instability_swm"
+
+    def test_checkpoint_cadence_n_equals_2(self, tmp_path: Path) -> None:
+        """With every_n=2, only even-ordinal snapshots overwrite the file.
+
+        This is verifiable from the final checkpoint's sim_t: with four
+        snapshot ordinals (t=150, 300, 450, 600) and ``every_n=2``, only
+        ordinals 2 and 4 trigger a write, so the surviving file should
+        carry ``somax_sim_t=600`` (the last write) and ordinal ``4``.
+        """
+        spec = _swm_jet_spec_with_saves(t1_seconds=600.0, dt=10.0, save_interval=150.0)
+        _run.simulate(spec, tmp_path, checkpoint_every_n_chunks=2)
+
+        from somax import io as somax_io
+
+        ds = somax_io.load_dataset(tmp_path / "checkpoint.zarr")
+        assert int(ds.attrs["somax_snapshot_ordinal"]) == 4
+        assert float(ds.attrs["somax_sim_t"]) == pytest.approx(600.0)
+
+    def test_restart_rebases_t0_from_checkpoint(self, tmp_path: Path) -> None:
+        """``restart --from checkpoint.zarr`` resumes at the checkpoint's sim_t.
+
+        We pick an early snapshot (``every_n=1`` on a 2-interval run),
+        then feed the resulting ``checkpoint.zarr`` back into ``restart``
+        with a wider window. The rebased t0 should equal the checkpoint
+        sim_t — we observe this by asserting the effective integration
+        window in run.log.
+        """
+        # Stage 1: short run to emit a checkpoint at sim_t=200.
+        stage1_dir = tmp_path / "stage1"
+        stage1_spec = _swm_jet_spec_with_saves(
+            t1_seconds=200.0, dt=10.0, save_interval=200.0
+        )
+        _run.simulate(stage1_spec, stage1_dir, checkpoint_every_n_chunks=1)
+
+        stage1_ckpt = stage1_dir / "checkpoint.zarr"
+        assert stage1_ckpt.is_dir()
+
+        from somax import io as somax_io
+
+        ds = somax_io.load_dataset(stage1_ckpt)
+        assert float(ds.attrs["somax_sim_t"]) == pytest.approx(200.0)
+
+        # Stage 2: restart with a window that *starts* at 0 but whose t1
+        # is beyond the checkpoint's sim_t. The runner should rebase t0
+        # to 200 internally.
+        stage2_dir = tmp_path / "stage2"
+        stage2_spec = _swm_jet_spec_with_saves(
+            t1_seconds=600.0, dt=10.0, save_interval=200.0
+        )
+        result = _run.restart(stage2_spec, stage2_dir, restart_from=stage1_ckpt)
+
+        log_text = (stage2_dir / "run.log").read_text()
+        # The ``integration starting:`` line records the effective t0
+        # for this run; after rebase it must read ``t0=200 s (...)``.
+        # Using a regex anchored on that exact line avoids false
+        # positives from unrelated "200" occurrences (e.g.
+        # ``save_interval=200``).
+        import re
+
+        m = re.search(r"integration starting:[^\n]*\bt0=(\d+(?:\.\d+)?) s\b", log_text)
+        assert m is not None, (
+            f"'integration starting:' line with a t0=<seconds> field not "
+            f"found in run.log:\n{log_text}"
+        )
+        t0_logged = float(m.group(1))
+        assert t0_logged == pytest.approx(200.0), (
+            f"expected rebased t0=200 s in run.log, got t0={t0_logged}"
+        )
+        # Belt-and-braces: the original spec.t0 (0 s) should NOT appear
+        # as the starting t0 on that same line.
+        assert re.search(r"integration starting:[^\n]*\bt0=0 s\b", log_text) is None
+        assert result.final_state_path.is_dir()
+
+    def test_restart_from_legacy_final_state_is_unchanged(self, tmp_path: Path) -> None:
+        """A ``final_state.zarr`` with no ``somax_sim_t`` attr must behave
+        exactly like before: t0 comes from the spec, not the artifact.
+        """
+        # Stage 1: spinup writes final_state.zarr WITHOUT the sim_t attr
+        # (checkpointing disabled).
+        stage1_dir = tmp_path / "spinup"
+        stage1_spec = _swm_jet_spec_with_saves(
+            t1_seconds=600.0, dt=10.0, save_interval=600.0
+        )
+        _run.spinup(stage1_spec, stage1_dir)
+        final_state = stage1_dir / "final_state.zarr"
+        assert final_state.is_dir()
+        assert not (stage1_dir / "checkpoint.zarr").exists()
+
+        from somax import io as somax_io
+
+        ds = somax_io.load_dataset(final_state)
+        assert "somax_sim_t" not in ds.attrs
+
+        # Stage 2: restart from final_state.zarr — no rebase, integration
+        # runs the full spec window.
+        stage2_dir = tmp_path / "prod"
+        stage2_spec = _swm_jet_spec_with_saves(
+            t1_seconds=600.0, dt=10.0, save_interval=600.0
+        )
+        result = _run.restart(stage2_spec, stage2_dir, restart_from=final_state)
+        assert result.final_state_path.is_dir()
+
+    def test_rerun_removes_stale_checkpoint_from_prior_run(
+        self, tmp_path: Path
+    ) -> None:
+        """Re-running into an output dir that holds an old checkpoint must
+        wipe that checkpoint (otherwise a later ``restart --from
+        <dir>/checkpoint.zarr`` would silently resume from the prior,
+        unrelated run — the Codex review concern on PR #98).
+        """
+        # Stage 1: emit a checkpoint at sim_t=200.
+        stage1_spec = _swm_jet_spec_with_saves(
+            t1_seconds=200.0, dt=10.0, save_interval=200.0
+        )
+        _run.simulate(stage1_spec, tmp_path, checkpoint_every_n_chunks=1)
+        assert (tmp_path / "checkpoint.zarr").is_dir()
+
+        # Stage 2: re-run into the SAME directory with checkpointing OFF.
+        # The stale checkpoint.zarr must be gone afterwards — otherwise a
+        # user resuming from <tmp_path>/checkpoint.zarr would pick up the
+        # prior run's state.
+        stage2_spec = _swm_jet_spec_with_saves(
+            t1_seconds=200.0, dt=10.0, save_interval=200.0
+        )
+        _run.simulate(stage2_spec, tmp_path)
+        assert not (tmp_path / "checkpoint.zarr").exists(), (
+            "stale checkpoint.zarr survived a subsequent checkpointing-off run"
+        )
+
+    def test_negative_checkpoint_cadence_raises(self, tmp_path: Path) -> None:
+        """Negative N must fail loudly up front (not silently disable)."""
+        spec = _swm_jet_spec_with_saves(t1_seconds=200.0, dt=10.0, save_interval=200.0)
+        with pytest.raises(ValueError, match=r">= 0"):
+            _run.simulate(spec, tmp_path, checkpoint_every_n_chunks=-1)
+
+    def test_restart_with_non_numeric_sim_t_attr_raises(self, tmp_path: Path) -> None:
+        """A hand-edited / corrupted ``somax_sim_t`` attr must raise a
+        clear ``ValueError`` rather than a cryptic ``TypeError``.
+        """
+        # Stage 1: produce a valid checkpoint, then corrupt its attr.
+        stage1_dir = tmp_path / "stage1"
+        stage1_spec = _swm_jet_spec_with_saves(
+            t1_seconds=200.0, dt=10.0, save_interval=200.0
+        )
+        _run.simulate(stage1_spec, stage1_dir, checkpoint_every_n_chunks=1)
+        ckpt = stage1_dir / "checkpoint.zarr"
+
+        # Overwrite somax_sim_t with a non-numeric value by rewriting the
+        # zarr store via xarray (the attr lives on the root group).
+        import xarray as xr
+
+        ds = xr.open_zarr(ckpt, consolidated=False).load()
+        ds.attrs["somax_sim_t"] = "not-a-number"
+        # Rewrite in-place.
+        import shutil
+
+        shutil.rmtree(ckpt)
+        ds.to_zarr(ckpt, mode="w", zarr_format=3, consolidated=False)
+
+        stage2_dir = tmp_path / "stage2"
+        stage2_spec = _swm_jet_spec_with_saves(
+            t1_seconds=600.0, dt=10.0, save_interval=200.0
+        )
+        with pytest.raises(ValueError, match=r"non-numeric somax_sim_t"):
+            _run.restart(stage2_spec, stage2_dir, restart_from=ckpt)
+
+    def test_restart_from_checkpoint_at_t1_raises(self, tmp_path: Path) -> None:
+        """A checkpoint whose sim_t >= spec.t1 leaves nothing to integrate."""
+        # Stage 1: checkpoint at t=600.
+        stage1_dir = tmp_path / "stage1"
+        stage1_spec = _swm_jet_spec_with_saves(
+            t1_seconds=600.0, dt=10.0, save_interval=600.0
+        )
+        _run.simulate(stage1_spec, stage1_dir, checkpoint_every_n_chunks=1)
+
+        # Stage 2: restart spec also has t1=600 → rebase would make
+        # the window empty. Must raise.
+        stage2_dir = tmp_path / "stage2"
+        stage2_spec = _swm_jet_spec_with_saves(
+            t1_seconds=600.0, dt=10.0, save_interval=600.0
+        )
+        with pytest.raises(ValueError, match="nothing left"):
+            _run.restart(
+                stage2_spec, stage2_dir, restart_from=stage1_dir / "checkpoint.zarr"
+            )
+
+
+# ----------------------------------------------------------------------
 # _build_save_times — Copilot review on PR #71 flagged that the previous
 # linspace path silently rescaled the snapshot spacing when save_interval
 # did not divide (t1 - t0) evenly. The function now uses arange semantics:
