@@ -27,7 +27,7 @@ dependencies = [
     "jaxtyping>=0.3.9",
     "equinox>=0.13.6",
     "diffrax>=0.7.2",
-    "lineax>=0.0.6",
+    "lineax>=0.1.0",
     "einops>=0.8.2",
     "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.40",
     "spectraldiffx>=0.0.10",
