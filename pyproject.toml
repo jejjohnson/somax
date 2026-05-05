@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "jax>=0.4.30",
-    "jaxlib>=0.4.30",
+    "jaxlib>=0.10.0",
     "jaxtyping>=0.3.9",
     "equinox>=0.13.6",
     "diffrax>=0.7.2",
