@@ -13,6 +13,16 @@ ensemble analogue) but exposing the ``ForwardModel`` surface vardax expects.
 *flat-vector* stepper (they ``lax.scan`` over ``(N,)`` control vectors), so
 this adapter ravels/unravels around the model step via a state ``template``.
 
+Time dependence: the ``ForwardModel`` contract is ``step(state, dt)`` with no
+per-substep time, and vardax's rollout (``jax.lax.scan`` with a state-only
+carry) gives the adapter no way to know which substep it is on. Every substep
+is therefore integrated from the same absolute start time :attr:`t0`. This is
+exact for **autonomous** models (Lorenz-63/96 and the somax cores, which
+ignore ``t0``), but a model with explicitly time-dependent forcing would have
+its later substeps evaluated at the wrong absolute time. Use this adapter with
+autonomous models; ``t0`` sets the (single) window start, not a per-substep
+clock.
+
 Importing this module requires the ``da`` dependency group (``uv sync
 --group da``), which provides ``vardax``.
 """
@@ -36,14 +46,21 @@ class SomaxForwardModel(eqx.Module):
     ``model.step(state, dt, t0=...)``, then re-ravels.
 
     The ``template`` is any representative state pytree (typically the initial
-    condition); it fixes the flat <-> pytree layout. ``t0`` is the absolute
-    start time threaded into ``model.step`` (autonomous models ignore it).
+    condition); it fixes the flat <-> pytree layout.
+
+    Intended for **autonomous** models. The same fixed :attr:`t0` is passed on
+    every ``step`` call, so a multi-step vardax rollout integrates every
+    substep from the same absolute time (the ``ForwardModel`` contract carries
+    no per-substep clock — see the module docstring). Autonomous models ignore
+    ``t0`` so this is exact; a model with explicit time-dependent forcing would
+    see its later substeps evaluated at the wrong absolute time.
 
     Attributes:
         model: A somax model exposing ``step(state, dt, *, t0=...) -> state``.
         template: A representative state pytree defining the ravel layout.
         dt: Fixed integration window read by the variational solver's rollout.
-        t0: Absolute start time passed to ``model.step``. Defaults to ``0.0``.
+        t0: Absolute start time of the window, passed to ``model.step`` on
+            every substep (not advanced per substep). Defaults to ``0.0``.
     """
 
     model: Any
@@ -56,7 +73,11 @@ class SomaxForwardModel(eqx.Module):
         state: Float[Array, " N_x"],
         dt: float,
     ) -> Float[Array, " N_x"]:
-        """Advance a single flat state by ``dt`` (``ForwardModel`` contract)."""
+        """Advance a single flat state by ``dt`` (``ForwardModel`` contract).
+
+        ``t0`` is held at :attr:`t0` (the window start), not advanced per
+        substep — see the class docstring on autonomous-model use.
+        """
         _, unravel = ravel_pytree(self.template)
         x = unravel(state)
         x_next = self.model.step(x, dt, t0=self.t0)

@@ -13,7 +13,9 @@ Variational assimilation with `vardax` (Phase 4b):
 
 - :class:`SomaxForwardModel` adapts a somax model to vardax's flat-vector
   ``pipekit_cycle.ForwardModel`` (``dt`` + ``step``), consumed by
-  ``StrongFourDVar`` / ``IncrementalFourDVar`` / ``VarDACycle``. Structured
+  ``StrongFourDVar`` / ``IncrementalFourDVar`` / ``VarDACycle``. Intended for
+  autonomous models (the ``ForwardModel`` rollout carries no per-substep time;
+  see :class:`~somax._src.da.vardax_bridge.SomaxForwardModel`). Structured
   background / observation covariances come from `gaussx` operators (e.g.
   ``LowRankUpdate``), which are ``lineax``-compatible.
 
