@@ -63,6 +63,8 @@ sim = [
     "pyyaml>=6.0.3",
     "dvc>=3.67.1",
     "loguru>=0.7.3",
+    "pipekit",
+    "pipekit-cycle",
 ]
 docs = [
     "mkdocs>=1.6",
@@ -90,6 +92,10 @@ packages = ["somax"]
 # so this must agree with finitevolx (a 0.0.12 pin conflicts and fails to
 # resolve).
 spectraldiffx = { git = "https://github.com/jejjohnson/spectraldiffx.git", tag = "v0.0.10" }
+# pipekit is a uv workspace; consume its subpackages from git subdirectories.
+# Both come from the same repo, so a single ref keeps them in lockstep.
+pipekit = { git = "https://github.com/jejjohnson/pipekit.git", subdirectory = "packages/pipekit" }
+pipekit-cycle = { git = "https://github.com/jejjohnson/pipekit.git", subdirectory = "packages/pipekit-cycle" }
 
 [tool.ruff]
 target-version = "py312"
