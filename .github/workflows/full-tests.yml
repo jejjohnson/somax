@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --group dev --group sim
+        run: uv sync --group dev --group sim --group da
       - name: Run full test suite with coverage
         run: |
           if [ -n "${{ inputs.marker }}" ]; then

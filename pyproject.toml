@@ -54,6 +54,12 @@ lint = [
 typecheck = [
     "ty==0.0.29",
 ]
+da = [
+    # Data-assimilation integration (Phase 4). Pre-alpha and git-pinned (no
+    # releases yet); filterax pulls gaussx in transitively via its own pin.
+    # Required by ``somax.da``; install with ``uv sync --group da``.
+    "filterax @ git+https://github.com/jejjohnson/filterax@28c1070",
+]
 sim = [
     "hydra-core>=1.3.2",
     "hydra-zen>=0.13",
