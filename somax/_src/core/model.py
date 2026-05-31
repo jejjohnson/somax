@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import abc
+from typing import TYPE_CHECKING
 
 import diffrax as dfx
 import equinox as eqx
 import jax.tree_util as jtu
 from jaxtyping import PyTree
+
+
+if TYPE_CHECKING:
+    from somax._src.core.terms import Term
 
 
 class SomaxModel(eqx.Module):
@@ -141,3 +146,52 @@ class SomaxModel(eqx.Module):
         Override to return a ``Diagnostics`` instance.
         """
         return {}
+
+
+class TermModel(SomaxModel):
+    """A :class:`SomaxModel` whose RHS is an assembled :class:`Term` tree.
+
+    Instead of hand-writing ``vector_field``, a ``TermModel`` carries a
+    composed term (a :class:`~somax._src.core.terms.Sum` of physics
+    contributions). ``vector_field`` evaluates the tree, and
+    ``build_terms`` delegates to
+    :func:`~somax._src.core.terms.build_diffrax_terms`, which returns a
+    :class:`diffrax.MultiTerm` when the tree mixes explicit and implicit
+    summands — so an IMEX solver can route each physics term through the
+    appropriate stage.
+
+    Subclasses still own ``apply_boundary_conditions``. The base
+    implementation here is a pass-through; override it to enforce BCs.
+
+    Args:
+        terms: The assembled right-hand-side term tree.
+
+    Example:
+        >>> rhs = AdvectionTerm(grid) + diffusivity * DiffusionTerm(grid)
+        >>> model = MyTermModel(terms=rhs)
+        >>> sol = model.integrate(state0, t0=0.0, t1=1.0, dt=0.01)
+    """
+
+    terms: Term
+
+    def vector_field(
+        self, t: float, state: PyTree, args: PyTree | None = None
+    ) -> PyTree:
+        """Evaluate the assembled term tree at ``(t, state, args)``."""
+        return self.terms(t, state, args)
+
+    def apply_boundary_conditions(self, state: PyTree) -> PyTree:
+        """Pass-through by default; override to enforce boundary conditions."""
+        return state
+
+    def build_terms(self) -> dfx.AbstractTerm:
+        """Build IMEX-aware diffrax terms from the term tree.
+
+        Boundary conditions are applied before each term-tree evaluation,
+        mirroring :meth:`SomaxModel.build_terms`. The explicit / implicit
+        split (when present) is preserved so an IMEX solver integrates
+        each part with the appropriate stage.
+        """
+        from somax._src.core.terms import build_diffrax_terms
+
+        return build_diffrax_terms(self.terms, state_fn=self.apply_boundary_conditions)
