@@ -22,6 +22,8 @@ import diffrax as dfx
 import jax.numpy as jnp
 import numpy as np
 from loguru import logger
+from pipekit import StatefulOperator
+from pipekit_cycle import Cycle
 
 from somax import io
 from somax._src.cli import _assertions
@@ -599,6 +601,200 @@ def _build_diagnostic_grid(
     return diag_ts, save_indices
 
 
+@dataclasses.dataclass(frozen=True)
+class _ChunkCarry:
+    """Carry-state threaded through the chunked integration `Cycle`.
+
+    Args:
+        index: Next diagnostic-chunk index to integrate (0-based).
+        prev_energy: Total-energy-like scalar from the previous chunk,
+            used to flag >10x growth before a NaN appears. ``None`` until
+            the first chunk produces one.
+        snapshot_ordinal: Count of snapshots retained so far, excluding
+            the initial state (matches ``len(save_states) - 1`` in the
+            original loop — the cadence key for crash-recovery
+            checkpoints).
+        save_states: Snapshot states retained so far, starting with the
+            initial state. Stacked into the returned trajectory.
+    """
+
+    index: int
+    prev_energy: float | None
+    snapshot_ordinal: int
+    save_states: tuple[Any, ...]
+
+
+class _ChunkStep(StatefulOperator):
+    """One diagnostic chunk of the integration as a ``StatefulOperator``.
+
+    ``_apply(state, carry)`` integrates ``model`` from one diagnostic time
+    to the next, logs physical + state diagnostics, aborts on a non-finite
+    state, retains the state when the chunk endpoint is a snapshot
+    boundary, and writes a crash-recovery checkpoint when due — i.e. the
+    body of the original chunked loop, with the per-iteration accumulators
+    moved into :class:`_ChunkCarry`. Holds runtime-only references
+    (model, run log), so it is excluded from config serialization.
+    """
+
+    __config_mixin_auto__ = False
+    forbid_in_yaml = True
+
+    def __init__(
+        self,
+        *,
+        model: Any,
+        state_class: type,
+        dt: float,
+        diag_ts: np.ndarray,
+        save_indices: set[int],
+        n_diag_intervals: int,
+        max_steps_per_chunk: int,
+        run_log: RunLogContext,
+        mode: str,
+        checkpoint_every_n_chunks: int,
+        checkpoint_dir: Path | None,
+        checkpoint_label: str | None,
+    ) -> None:
+        self.model = model
+        self.state_class = state_class
+        self.dt = dt
+        self.diag_ts = diag_ts
+        self.save_indices = save_indices
+        self.n_diag_intervals = n_diag_intervals
+        self.max_steps_per_chunk = max_steps_per_chunk
+        self.run_log = run_log
+        self.mode = mode
+        self.checkpoint_every_n_chunks = checkpoint_every_n_chunks
+        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_label = checkpoint_label
+
+    def _apply(self, state: Any, carry: _ChunkCarry) -> tuple[Any, _ChunkCarry]:
+        log = self.run_log.log
+        i = carry.index
+        chunk_t0 = float(self.diag_ts[i])
+        chunk_t1 = float(self.diag_ts[i + 1])
+
+        t_chunk_start = time.perf_counter()
+        sol = self.model.integrate(
+            state,
+            chunk_t0,
+            chunk_t1,
+            self.dt,
+            saveat=dfx.SaveAt(t1=True),
+            max_steps=self.max_steps_per_chunk,
+        )
+        chunk_wall = time.perf_counter() - t_chunk_start
+
+        new_state = _extract_final_state(sol.ys, self.state_class)
+        state_diag = _state_diagnostics(new_state)
+        phys_line, phys_flat = _format_physical_scalars(self.model, new_state)
+
+        # Detect large energy jumps (10x growth between chunks is suspicious)
+        # to give the user an early warning before NaN appears.
+        energy_value: float | None = None
+        for k in (
+            "total_energy",
+            "energy",
+            "total_kinetic_energy",
+            "kinetic_energy",
+        ):
+            if k in phys_flat:
+                energy_value = float(phys_flat[k])
+                break
+        warning = ""
+        prev_energy = carry.prev_energy
+        if (
+            prev_energy is not None
+            and energy_value is not None
+            and abs(prev_energy) > 0
+            and not np.isnan(energy_value)
+            and abs(energy_value) > 10 * abs(prev_energy)
+        ):
+            # Both branches inside this block know prev_energy and
+            # energy_value are non-None floats; help ty narrow the types.
+            prev_e: float = prev_energy
+            cur_e: float = energy_value
+            growth = cur_e / prev_e if prev_e != 0 else float("inf")
+            warning = f" !! energy grew {growth:.1f}x from previous chunk"
+        new_prev_energy = prev_energy
+        if energy_value is not None and not np.isnan(energy_value):
+            new_prev_energy = energy_value
+
+        log.debug(
+            f"chunk {i + 1}/{self.n_diag_intervals} "
+            f"sim_t={format_time_seconds(chunk_t1)} | "
+            f"{_format_state_stats(state_diag)}"
+            + (f" | physics: {phys_line}" if phys_line else "")
+            + f" | wall={format_wallclock(chunk_wall)}"
+            + warning
+        )
+
+        if _has_non_finite(state_diag):
+            log.debug(
+                f"ABORT at chunk {i + 1}/{self.n_diag_intervals}: non-finite state"
+            )
+            raise IntegrationDivergedError(
+                f"somax-sim {self.mode} integration produced non-finite values "
+                f"during chunk {i + 1}/{self.n_diag_intervals} "
+                f"(sim_t={format_time_seconds(chunk_t1)}).\n"
+                f"  {_format_state_stats(state_diag)}\n"
+                f"  Refusing to write artifacts. The non-finite values "
+                f"appeared between sim_t={format_time_seconds(chunk_t0)} and "
+                f"sim_t={format_time_seconds(chunk_t1)} — earlier chunks were "
+                f"finite. This is consistent with a slow numerical instability, "
+                f"not an immediate CFL violation."
+            )
+
+        # Only retain states at snapshot boundaries.
+        is_snapshot_boundary = (i + 1) in self.save_indices
+        new_save_states = carry.save_states + (
+            (new_state,) if is_snapshot_boundary else ()
+        )
+        new_ordinal = carry.snapshot_ordinal + (1 if is_snapshot_boundary else 0)
+
+        # Crash-recovery checkpoint (#70): write the current state to a
+        # rolling ``checkpoint.zarr`` every N snapshot-aligned chunk
+        # endpoints. Aligning to snapshot boundaries keeps the on-disk
+        # checkpoint consistent with the saved snapshots up to that
+        # point. We write AFTER the non-finite guard so a bad state
+        # never lands on disk.
+        if (
+            self.checkpoint_every_n_chunks > 0
+            and self.checkpoint_dir is not None
+            and is_snapshot_boundary
+        ):
+            # ``new_ordinal`` == len(save_states) - 1 after the append.
+            snapshot_ordinal = new_ordinal
+            due = (
+                snapshot_ordinal > 0
+                and snapshot_ordinal % self.checkpoint_every_n_chunks == 0
+            )
+            if due:
+                ckpt_path = Path(self.checkpoint_dir) / "checkpoint.zarr"
+                ckpt_attrs: dict[str, Any] = {
+                    "somax_sim_t": float(chunk_t1),
+                    "somax_snapshot_ordinal": int(snapshot_ordinal),
+                }
+                if self.checkpoint_label:
+                    ckpt_attrs["somax_checkpoint_of"] = str(self.checkpoint_label)
+                ckpt_ds = io.state_to_dataset(
+                    new_state, time=float(chunk_t1), attrs=ckpt_attrs
+                )
+                io.save_dataset(ckpt_ds, ckpt_path, mode="w")
+                log.debug(
+                    f"checkpoint written at snapshot {snapshot_ordinal} "
+                    f"(sim_t={format_time_seconds(chunk_t1)}) → {ckpt_path.name}"
+                )
+
+        new_carry = _ChunkCarry(
+            index=i + 1,
+            prev_energy=new_prev_energy,
+            snapshot_ordinal=new_ordinal,
+            save_states=new_save_states,
+        )
+        return new_state, new_carry
+
+
 def _chunked_integrate_with_diagnostics(
     model: Any,
     state0: Any,
@@ -658,6 +854,14 @@ def _chunked_integrate_with_diagnostics(
 
     Raises:
         IntegrationDivergedError: If any chunk produces non-finite state.
+
+    The chunk-by-chunk loop is driven by :class:`pipekit_cycle.Cycle`: the
+    body lives in :class:`_ChunkStep` (a ``StatefulOperator``) and the
+    snapshot list / energy tracker / checkpoint bookkeeping are threaded
+    through an immutable :class:`_ChunkCarry`. Observability (diagnostic
+    logging, the non-finite abort, crash-recovery checkpoints) runs inside
+    the step operator — pipekit's per-step hook dispatch is a reserved
+    no-op today, so the step is the place those side effects live.
     """
     from types import SimpleNamespace
 
@@ -678,125 +882,30 @@ def _chunked_integrate_with_diagnostics(
         + " | initial state"
     )
 
-    state = state0
-    save_states: list[Any] = [state0]
+    step = _ChunkStep(
+        model=model,
+        state_class=type(state0),
+        dt=dt,
+        diag_ts=diag_ts,
+        save_indices=save_indices,
+        n_diag_intervals=n_diag_intervals,
+        max_steps_per_chunk=max_steps_per_chunk,
+        run_log=run_log,
+        mode=mode,
+        checkpoint_every_n_chunks=checkpoint_every_n_chunks,
+        checkpoint_dir=checkpoint_dir,
+        checkpoint_label=checkpoint_label,
+    )
+    carry0 = _ChunkCarry(
+        index=0,
+        prev_energy=None,
+        snapshot_ordinal=0,
+        save_states=(state0,),
+    )
+    cycle = Cycle(step_op=step, n_steps=n_diag_intervals)
+
     t_chunks_start = time.perf_counter()
-
-    # Track previous total-energy-like scalar across chunks so we can
-    # surface large jumps as a "growth" warning even before NaN appears.
-    prev_energy: float | None = None
-
-    for i in range(n_diag_intervals):
-        chunk_t0 = float(diag_ts[i])
-        chunk_t1 = float(diag_ts[i + 1])
-
-        t_chunk_start = time.perf_counter()
-        sol = model.integrate(
-            state,
-            chunk_t0,
-            chunk_t1,
-            dt,
-            saveat=dfx.SaveAt(t1=True),
-            max_steps=max_steps_per_chunk,
-        )
-        chunk_wall = time.perf_counter() - t_chunk_start
-
-        new_state = _extract_final_state(sol.ys, type(state0))
-        state_diag = _state_diagnostics(new_state)
-        phys_line, phys_flat = _format_physical_scalars(model, new_state)
-
-        # Detect large energy jumps (10x growth between chunks is suspicious)
-        # to give the user an early warning before NaN appears.
-        energy_value: float | None = None
-        for k in (
-            "total_energy",
-            "energy",
-            "total_kinetic_energy",
-            "kinetic_energy",
-        ):
-            if k in phys_flat:
-                energy_value = float(phys_flat[k])
-                break
-        warning = ""
-        if (
-            prev_energy is not None
-            and energy_value is not None
-            and abs(prev_energy) > 0
-            and not np.isnan(energy_value)
-            and abs(energy_value) > 10 * abs(prev_energy)
-        ):
-            # Both branches inside this block know prev_energy and
-            # energy_value are non-None floats; help ty narrow the types.
-            prev_e: float = prev_energy
-            cur_e: float = energy_value
-            growth = cur_e / prev_e if prev_e != 0 else float("inf")
-            warning = f" !! energy grew {growth:.1f}x from previous chunk"
-        if energy_value is not None and not np.isnan(energy_value):
-            prev_energy = energy_value
-
-        log.debug(
-            f"chunk {i + 1}/{n_diag_intervals} "
-            f"sim_t={format_time_seconds(chunk_t1)} | "
-            f"{_format_state_stats(state_diag)}"
-            + (f" | physics: {phys_line}" if phys_line else "")
-            + f" | wall={format_wallclock(chunk_wall)}"
-            + warning
-        )
-
-        if _has_non_finite(state_diag):
-            log.debug(f"ABORT at chunk {i + 1}/{n_diag_intervals}: non-finite state")
-            raise IntegrationDivergedError(
-                f"somax-sim {mode} integration produced non-finite values "
-                f"during chunk {i + 1}/{n_diag_intervals} "
-                f"(sim_t={format_time_seconds(chunk_t1)}).\n"
-                f"  {_format_state_stats(state_diag)}\n"
-                f"  Refusing to write artifacts. The non-finite values "
-                f"appeared between sim_t={format_time_seconds(chunk_t0)} and "
-                f"sim_t={format_time_seconds(chunk_t1)} — earlier chunks were "
-                f"finite. This is consistent with a slow numerical instability, "
-                f"not an immediate CFL violation."
-            )
-
-        # Only retain states at snapshot boundaries.
-        is_snapshot_boundary = (i + 1) in save_indices
-        if is_snapshot_boundary:
-            save_states.append(new_state)
-
-        # Crash-recovery checkpoint (#70): write the current state to a
-        # rolling ``checkpoint.zarr`` every N snapshot-aligned chunk
-        # endpoints. Aligning to snapshot boundaries keeps the on-disk
-        # checkpoint consistent with the saved snapshots up to that
-        # point. We write AFTER the non-finite guard so a bad state
-        # never lands on disk.
-        if (
-            checkpoint_every_n_chunks > 0
-            and checkpoint_dir is not None
-            and is_snapshot_boundary
-        ):
-            snapshot_ordinal = len(save_states) - 1  # 1-based: first == index 1
-            due = (
-                snapshot_ordinal > 0
-                and snapshot_ordinal % checkpoint_every_n_chunks == 0
-            )
-            if due:
-                ckpt_path = Path(checkpoint_dir) / "checkpoint.zarr"
-                ckpt_attrs: dict[str, Any] = {
-                    "somax_sim_t": float(chunk_t1),
-                    "somax_snapshot_ordinal": int(snapshot_ordinal),
-                }
-                if checkpoint_label:
-                    ckpt_attrs["somax_checkpoint_of"] = str(checkpoint_label)
-                ckpt_ds = io.state_to_dataset(
-                    new_state, time=float(chunk_t1), attrs=ckpt_attrs
-                )
-                io.save_dataset(ckpt_ds, ckpt_path, mode="w")
-                log.debug(
-                    f"checkpoint written at snapshot {snapshot_ordinal} "
-                    f"(sim_t={format_time_seconds(chunk_t1)}) → {ckpt_path.name}"
-                )
-
-        state = new_state
-
+    _final_state, final_carry = cycle(state0, carry0)
     total_chunks_wall = time.perf_counter() - t_chunks_start
     log.debug(
         f"all {n_diag_intervals} chunks completed in "
@@ -806,7 +915,9 @@ def _chunked_integrate_with_diagnostics(
     # Concatenate snapshot states into a single time-stacked pytree
     # matching the shape diffrax would have returned with
     # ``SaveAt(ts=save_ts)``.
-    stacked = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs, axis=0), *save_states)
+    stacked = jax.tree_util.tree_map(
+        lambda *xs: jnp.stack(xs, axis=0), *final_carry.save_states
+    )
     return SimpleNamespace(ys=stacked, stats={})
 
 
