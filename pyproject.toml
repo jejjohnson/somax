@@ -30,7 +30,7 @@ dependencies = [
     "lineax>=0.1.0",
     "einops>=0.8.2",
     "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.41",
-    "spectraldiffx>=0.0.12",
+    "spectraldiffx>=0.0.10",
 ]
 
 [project.urls]
@@ -85,7 +85,11 @@ allow-direct-references = true
 packages = ["somax"]
 
 [tool.uv.sources]
-spectraldiffx = { git = "https://github.com/jejjohnson/spectraldiffx.git", tag = "0.0.12" }
+# Pinned to v0.0.10 to match finitevolx v0.0.41's own spectraldiffx pin —
+# uv requires a single git ref per package across the dependency graph,
+# so this must agree with finitevolx (a 0.0.12 pin conflicts and fails to
+# resolve).
+spectraldiffx = { git = "https://github.com/jejjohnson/spectraldiffx.git", tag = "v0.0.10" }
 
 [tool.ruff]
 target-version = "py312"

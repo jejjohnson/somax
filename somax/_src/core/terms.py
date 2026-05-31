@@ -49,7 +49,7 @@ from collections.abc import Callable, Iterator
 import diffrax as dfx
 import equinox as eqx
 import jax.tree_util as jtu
-from jaxtyping import PyTree
+from jaxtyping import Array, PyTree
 
 
 Kind = str  # "explicit" | "implicit"
@@ -98,10 +98,10 @@ class Term(eqx.Module):
             return self
         return Sum.of(other, self)
 
-    def __mul__(self, coeff: float) -> Term:
+    def __mul__(self, coeff: float | Array) -> Term:
         return Scaled(self, coeff)
 
-    def __rmul__(self, coeff: float) -> Term:
+    def __rmul__(self, coeff: float | Array) -> Term:
         return Scaled(self, coeff)
 
     def __neg__(self) -> Term:
@@ -201,7 +201,7 @@ class Scaled(Term):
     """
 
     term: Term
-    coeff: float
+    coeff: float | Array
 
     def __call__(self, t: float, state: PyTree, args: PyTree | None = None) -> PyTree:
         inner = self.term(t, state, args)

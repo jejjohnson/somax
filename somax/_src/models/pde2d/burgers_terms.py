@@ -46,7 +46,7 @@ from finitevolx import (
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import TermModel
-from somax._src.core.terms import IMPLICIT, Kind, Term, implicit
+from somax._src.core.terms import IMPLICIT, Kind, Scaled, Term, implicit
 from somax._src.models.pde2d.burgers import Burgers2D, Burgers2DState
 
 
@@ -206,7 +206,7 @@ class Burgers2DTermModel(TermModel):
             _kind=IMPLICIT if imex else "explicit",
         )
 
-        scaled_diffusion = nu_arr * diffusion
+        scaled_diffusion = Scaled(diffusion, nu_arr)
         rhs: Term = advection + (
             implicit(scaled_diffusion) if imex else scaled_diffusion
         )
@@ -237,7 +237,7 @@ class Burgers2DTermModel(TermModel):
             diff=model.diff,
             _kind=IMPLICIT if imex else "explicit",
         )
-        scaled_diffusion = nu_arr * diffusion
+        scaled_diffusion = Scaled(diffusion, nu_arr)
         rhs: Term = advection + (
             implicit(scaled_diffusion) if imex else scaled_diffusion
         )
