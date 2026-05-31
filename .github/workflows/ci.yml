@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --group dev --group sim
+        run: uv sync --group dev --group sim --group da
       - name: Run fast tests with coverage
         # Slow + integration tests (grad-through, somax-sim end-to-end)
         # are excluded here and run in the manual `full-tests` workflow.

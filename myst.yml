@@ -26,6 +26,7 @@ project:
         - file: content/tutorials/swm_simulation
         - file: content/tutorials/qg_simulation
         - file: content/tutorials/composable_models_terms_operators_cycles
+        - file: content/tutorials/data_assimilation_etkf
     - title: "13 Steps to Navier-Stokes"
       children:
         - file: content/tutorials/step01_linear_convection_1d
