@@ -10,7 +10,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import pytest
 
-from somax._src.eval.metrics import (
+from somax.eval import (
     compute_eval_metrics,
     geostrophic_imbalance,
     kinetic_energy,

@@ -186,6 +186,65 @@ class TestSimulateHappyPath:
             if isinstance(value, (int, float)):
                 assert np.isfinite(value), f"metric {key!r} is non-finite: {value}"
 
+    def test_eval_metrics_persisted_for_2d_fluid_run(self, tmp_path: Path) -> None:
+        """A single-layer (2D) SWM run writes the ``somax.eval`` metrics into
+        ``metrics.json``, and a ``bounded_metric`` postflight assertion can
+        gate one of them.
+
+        The happy-path test above uses ``multilayer_nonlinear_swm`` (a 3D
+        state), for which ``compute_eval_metrics`` returns ``{}``; this covers
+        the 2D fluid case where the eval keys are actually produced. The
+        ``bounded_metric`` assertion on ``rms_divergence`` would raise if the
+        key were absent, so a clean run also proves the assertion read it.
+        """
+        spec = RunSpec(
+            scenario=ScenarioSpec(
+                name="double_gyre",
+                grid={"nx": 32, "ny": 32, "Lx": 1.0e6, "Ly": 1.0e6},
+                consts={"f0": 1.0e-4, "beta": 1.6e-11},
+                forcing={},
+                initial_condition={
+                    "type": "jet",
+                    "params": {
+                        "jet_speed": 0.5,
+                        "jet_width": 5.0e4,
+                        "perturbation": 0.01,
+                    },
+                },
+            ),
+            model=ModelSpec(
+                name="nonlinear_swm",
+                stratification={},
+                params={
+                    "H0": 1000.0,
+                    "lateral_viscosity": 100.0,
+                    "bottom_drag": 1.0e-7,
+                },
+            ),
+            timestepping=TimesteppingSpec(
+                t0=0.0, t1=3600.0, dt=10.0, save_interval=3600.0
+            ),
+            output=OutputSpec(write_snapshots=False, write_metrics=True),
+            debug=DebugSpec(),
+            assertions={"bounded_metric": {"name": "rms_divergence", "min": 0.0}},
+        )
+        result = _run.simulate(spec, tmp_path)
+
+        assert result.metrics_path is not None
+        with result.metrics_path.open() as f:
+            metrics = json.load(f)
+        for key in (
+            "rms_divergence",
+            "total_enstrophy",
+            "kinetic_energy",
+            "geostrophic_imbalance",
+        ):
+            assert key in metrics, f"missing eval metric {key!r}; have {sorted(metrics)}"
+            assert np.isfinite(metrics[key]), f"eval metric {key!r} non-finite"
+        # The jet carries real flow, so kinetic energy is strictly positive
+        # (guards against a degenerate all-zero metric path).
+        assert metrics["kinetic_energy"] > 0.0
+
 
 # ----------------------------------------------------------------------
 # End-to-end: CFL violation
