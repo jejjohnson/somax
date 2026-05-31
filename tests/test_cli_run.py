@@ -239,7 +239,9 @@ class TestSimulateHappyPath:
             "kinetic_energy",
             "geostrophic_imbalance",
         ):
-            assert key in metrics, f"missing eval metric {key!r}; have {sorted(metrics)}"
+            assert key in metrics, (
+                f"missing eval metric {key!r}; have {sorted(metrics)}"
+            )
             assert np.isfinite(metrics[key]), f"eval metric {key!r} non-finite"
         # The jet carries real flow, so kinetic energy is strictly positive
         # (guards against a degenerate all-zero metric path).

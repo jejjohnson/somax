@@ -10,6 +10,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import pytest
 
+from somax._src.models.swm.linear_2d import LinearShallowWater2D, LinearSW2DState
 from somax.eval import (
     compute_eval_metrics,
     geostrophic_imbalance,
@@ -17,7 +18,6 @@ from somax.eval import (
     rms_divergence,
     total_enstrophy,
 )
-from somax._src.models.swm.linear_2d import LinearShallowWater2D, LinearSW2DState
 
 
 @pytest.fixture
