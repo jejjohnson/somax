@@ -29,8 +29,8 @@ dependencies = [
     "diffrax>=0.7.2",
     "lineax>=0.1.0",
     "einops>=0.8.2",
-    "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.40",
-    "spectraldiffx>=0.0.10",
+    "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.41",
+    "spectraldiffx>=0.0.12",
 ]
 
 [project.urls]
@@ -85,7 +85,7 @@ allow-direct-references = true
 packages = ["somax"]
 
 [tool.uv.sources]
-spectraldiffx = { git = "https://github.com/jejjohnson/spectraldiffx.git", tag = "v0.0.10" }
+spectraldiffx = { git = "https://github.com/jejjohnson/spectraldiffx.git", tag = "0.0.12" }
 
 [tool.ruff]
 target-version = "py312"
