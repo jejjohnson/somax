@@ -4,6 +4,11 @@ from somax._src.models.pde2d.burgers import (
     Burgers2DParams,
     Burgers2DState,
 )
+from somax._src.models.pde2d.burgers_terms import (
+    Burgers2DAdvection,
+    Burgers2DDiffusion,
+    Burgers2DTermModel,
+)
 from somax._src.models.pde2d.diffusion import (
     Diffusion2D,
     Diffusion2DDiagnostics,
@@ -36,9 +41,12 @@ from somax._src.models.pde2d.poisson import (
 
 __all__ = [
     "Burgers2D",
+    "Burgers2DAdvection",
     "Burgers2DDiagnostics",
+    "Burgers2DDiffusion",
     "Burgers2DParams",
     "Burgers2DState",
+    "Burgers2DTermModel",
     "Diffusion2D",
     "Diffusion2DDiagnostics",
     "Diffusion2DParams",
