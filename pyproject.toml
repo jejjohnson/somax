@@ -31,6 +31,8 @@ dependencies = [
     "einops>=0.8.2",
     "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.41",
     "spectraldiffx>=0.0.10",
+    "pipekit",
+    "pipekit-cycle",
 ]
 
 [project.urls]
@@ -63,8 +65,6 @@ sim = [
     "pyyaml>=6.0.3",
     "dvc>=3.67.1",
     "loguru>=0.7.3",
-    "pipekit",
-    "pipekit-cycle",
 ]
 docs = [
     "mkdocs>=1.6",

@@ -4,8 +4,8 @@ Exercises the pipekit bridge (``somax.operators``): flat-primitive
 ``get_config``, faithful ``pipekit.serial`` round-trip, ForwardModel
 conformance, pipeline composition, and driving ``pipekit_cycle.Cycle``.
 
-These require pipekit (the ``sim`` dependency group); they're skipped if it
-isn't installed.
+These require pipekit (a base somax dependency); the ``importorskip``
+guard below is belt-and-suspenders.
 """
 
 from __future__ import annotations

@@ -1,10 +1,11 @@
 """Public surface for somax's pipekit ``Operator`` bridge.
 
-Import this module (after installing the ``sim`` dependency group,
-``uv sync --group sim``) to expose somax forward models as
-:class:`pipekit.Operator` s with serializable flat configs.
-Kept out of ``somax``'s top-level ``__init__`` so ``import somax`` does
-not require pipekit — only ``import somax.operators`` does.
+Import this module to expose somax forward models as
+:class:`pipekit.Operator` s with serializable flat configs. pipekit is a
+base dependency, so no extra install step is needed. Kept out of
+``somax``'s top-level ``__init__`` so plain ``import somax`` doesn't
+import pipekit (the core stays structural-only) — ``import
+somax.operators`` pulls it in.
 """
 
 from __future__ import annotations

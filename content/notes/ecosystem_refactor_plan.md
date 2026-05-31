@@ -95,10 +95,14 @@ the bulk cleanup; 4–5 are the future-facing payoff. Suggested order:
 ### Phase 1 — Adopt pipekit protocols on the model layer *(done)*
 
 - Add `step(self, state, dt) -> state` to `SomaxModel` (thin wrapper over
-  `integrate` for a single step). Every somax model now structurally satisfies
-  `pipekit_cycle.ForwardModel` — purely by duck typing, **no pipekit
-  dependency added**. It is also the building block for `filterax`'s dynamics
-  interface.
+  `integrate` for a single step). The model supplies the `step` +
+  `state_signature` members of `pipekit_cycle.ForwardModel` structurally, by
+  duck typing; the third member (a default `dt`) is added by the
+  `somax.operators` Operator adapter (a bare model has no inherent step size).
+  It is also the building block for `filterax`'s dynamics interface. Phase 1
+  itself adds **no** pipekit dependency; Phase 2 makes pipekit a base
+  dependency for the Operator / Cycle layer, but somax's *core* still never
+  imports it.
 - *(Optional follow-up)* mix in `pipekit.ConfigMixin` so `get_config()` /
   `state` round-trip comes for free.
 

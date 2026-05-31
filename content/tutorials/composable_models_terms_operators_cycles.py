@@ -27,8 +27,8 @@
 # 3. **Cycles** — driving the stepping loop with `pipekit_cycle.Cycle`,
 #    threading state and collecting a trajectory.
 #
-# Everything here needs the `sim` dependency group (`uv sync --group sim`),
-# which carries pipekit.
+# The Operator/Cycle parts use pipekit, which is a base somax dependency
+# (somax's *core* still never imports it — conformance is structural).
 # somax's *core* never imports pipekit — models satisfy the protocols
 # structurally.
 
