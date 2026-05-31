@@ -146,3 +146,57 @@ def test_drives_pipekit_cycle():
     assert jnp.allclose(carrier.u, manual.u, atol=1e-10)
     assert jnp.allclose(carrier.v, manual.v, atol=1e-10)
     assert len(cycle.history) == 3
+
+
+# ----------------------------------------------------------------------
+# General registry-driven wrapper (any scenario x model pair)
+# ----------------------------------------------------------------------
+
+
+def _small_linear_swm_op():
+    return SomaxModelOp.from_registry(
+        "double_gyre",
+        "linear_swm",
+        dt=30.0,
+        scenario_params={"grid": {"nx": 8, "ny": 8}},
+        model_params={"params": {"lateral_viscosity": 100.0, "bottom_drag": 1e-6}},
+    )
+
+
+def test_from_registry_wraps_any_model():
+    op, state0 = _small_linear_swm_op()
+    assert isinstance(op, SomaxModelOp)
+    assert type(op.model).__name__ == "LinearShallowWater2D"
+    # registry initial state has the SWM (h, u, v) structure
+    assert hasattr(state0, "h") and hasattr(state0, "u") and hasattr(state0, "v")
+
+
+def test_from_registry_op_is_forward_model_and_steps():
+    op, state0 = _small_linear_swm_op()
+    assert isinstance(op, ForwardModel)
+    stepped = op(state0)
+    assert jnp.all(jnp.isfinite(stepped.h))
+    # _apply == step(dt) == model.step(dt)
+    assert jnp.allclose(stepped.h, op.model.step(state0, op.dt).h, atol=1e-12)
+
+
+def test_from_registry_op_drives_cycle():
+    op, state0 = _small_linear_swm_op()
+    carrier, _ = Cycle(step_op=op, n_steps=2)(state0, None)
+    manual = op.step(op.step(state0, op.dt), op.dt)
+    assert jnp.allclose(carrier.h, manual.h, atol=1e-10)
+
+
+def test_general_wrapper_is_not_round_trippable():
+    # The general wrapper holds a non-primitive eqx.Module: no faithful
+    # serial round-trip (forbid_in_yaml), and an empty auto-config.
+    op, _ = _small_linear_swm_op()
+    assert op.forbid_in_yaml is True
+    assert op.get_config() == {}
+
+
+def test_flat_subclass_still_round_trips():
+    # Burgers2DOp re-enables the round-trip the general wrapper forgoes.
+    op = Burgers2DOp(nx=8, ny=8, nu=0.05, dt=0.001)
+    assert op.forbid_in_yaml is False
+    assert loads(dumps(op)).get_config() == op.get_config()
