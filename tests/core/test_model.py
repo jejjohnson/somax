@@ -13,14 +13,20 @@ from somax.core import SomaxModel
 
 
 @runtime_checkable
-class _ForwardModelLike(Protocol):
-    """Local mirror of ``pipekit_cycle.ForwardModel``.
+class _ModelStepLike(Protocol):
+    """The model-supplied half of ``pipekit_cycle.ForwardModel``.
 
     Defined here so the structural-conformance test does not pull in a
-    dependency on pipekit; the contract under test is the ``step`` method.
+    dependency on pipekit. A bare ``SomaxModel`` provides ``step`` and
+    ``state_signature``; the third ``ForwardModel`` member (a default
+    ``dt``) is supplied by the ``somax.operators`` adapter, which is
+    tested against the real protocol in ``tests/test_operators.py``.
     """
 
     def step(self, state: Any, dt: float) -> Any: ...
+
+    @property
+    def state_signature(self) -> Any: ...
 
 
 class ExponentialDecay(SomaxModel):
@@ -132,12 +138,14 @@ def test_step_composes_to_integration_window():
     assert jnp.allclose(out, expected, rtol=1e-3)
 
 
-def test_model_satisfies_forward_model_protocol():
-    """A somax model structurally satisfies the ForwardModel protocol.
+def test_model_provides_forward_model_step_and_signature():
+    """A somax model provides the ``step`` + ``state_signature`` members.
 
     This is the pipekit-cycle / DA integration seam: any ``SomaxModel``
-    is usable as a ``ForwardModel`` (and as filterax dynamics) purely by
-    duck typing, with no subclassing.
+    supplies the model half of the ``ForwardModel`` contract purely by
+    duck typing, with no subclassing. The ``dt`` member is added by the
+    ``somax.operators`` adapter (see ``tests/test_operators.py``).
     """
     model = ExponentialDecay(rate=1.0)
-    assert isinstance(model, _ForwardModelLike)
+    assert isinstance(model, _ModelStepLike)
+    assert model.state_signature is None

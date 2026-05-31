@@ -103,13 +103,16 @@ class SomaxModel(eqx.Module):
     ) -> PyTree:
         """Advance ``state`` by one increment ``dt`` and return the new state.
 
-        This single-step interface is what makes every somax model
-        structurally satisfy the :class:`pipekit_cycle.ForwardModel`
-        protocol (``step(state, dt) -> state``). Satisfaction is purely
-        structural — somax does not import pipekit — so a model can be
-        driven by the ``pipekit_cycle.Cycle`` runner and supplied as the
-        forward model to data-assimilation libraries (vardax, filterax)
-        without any subclassing.
+        This is the stepping primitive of the
+        :class:`pipekit_cycle.ForwardModel` contract. A model supplies
+        ``step`` and :attr:`state_signature` directly; the third protocol
+        member — a default ``dt`` — is an adapter concern (a bare model
+        has no inherent step size), so full ``ForwardModel`` conformance
+        is provided by the :mod:`somax.operators` Operator wrapper, which
+        carries ``dt`` alongside the model. None of this imports pipekit:
+        the model is usable by ``pipekit_cycle.Cycle`` and by
+        data-assimilation libraries (vardax, filterax) purely
+        structurally.
 
         Unlike :meth:`integrate`, which returns a diffrax ``Solution``
         carrying a leading time axis, ``step`` returns a bare state
@@ -146,6 +149,18 @@ class SomaxModel(eqx.Module):
         Override to return a ``Diagnostics`` instance.
         """
         return {}
+
+    @property
+    def state_signature(self) -> None:
+        """No named-dimension signature — somax states are bare pytrees.
+
+        Part of the :class:`pipekit_cycle.ForwardModel` contract (``step``,
+        ``dt``, ``state_signature``). ``None`` means the model does not
+        advertise a shape/dtype signature; structural, no pipekit import.
+        Override to return a ``pipekit.Signature`` if a model tracks named
+        dimensions.
+        """
+        return None
 
 
 class TermModel(SomaxModel):
