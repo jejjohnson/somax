@@ -16,6 +16,7 @@ project:
         - file: content/notes/quasigeostrophic
         - file: content/notes/qg_spinup_durations
         - file: content/notes/basin_data_sources
+        - file: content/notes/ecosystem_refactor_plan
     - title: Tutorials
       children:
         - file: content/tutorials/getting_started
@@ -24,6 +25,7 @@ project:
         - file: content/tutorials/lorenz96t_simulation
         - file: content/tutorials/swm_simulation
         - file: content/tutorials/qg_simulation
+        - file: content/tutorials/composable_models_terms_operators_cycles
     - title: "13 Steps to Navier-Stokes"
       children:
         - file: content/tutorials/step01_linear_convection_1d

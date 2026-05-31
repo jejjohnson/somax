@@ -1,0 +1,51 @@
+name: Full Tests (slow + integration)
+
+# The PR CI job (ci.yml) runs only the fast subset (`-m "not slow"`).
+# This workflow runs the COMPLETE suite — including the slow
+# grad-through correctness tests and the end-to-end somax-sim
+# integration tests — and is triggered manually on demand.
+on:
+  workflow_dispatch:
+    inputs:
+      marker:
+        description: >-
+          pytest -m expression to select tests (default: the full suite).
+          Examples: "slow", "integration", "slow and not integration".
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  full-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --group dev --group sim
+      - name: Run full test suite with coverage
+        run: |
+          if [ -n "${{ inputs.marker }}" ]; then
+            uv run pytest -v -m "${{ inputs.marker }}"
+          else
+            uv run pytest -v
+          fi
+      - name: Upload coverage report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report-full
+          path: coverage.xml
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v6
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

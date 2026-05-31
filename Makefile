@@ -51,7 +51,7 @@ RESET  := \033[0m
 # ---------------------------------------------------------------------------
 # Phony declarations
 # ---------------------------------------------------------------------------
-.PHONY: help install lint format typecheck test test-cov \
+.PHONY: help install lint format typecheck test test-all test-cov \
 	precommit build clean version docs docs-serve docs-deploy \
 	init gh-labels gh-sub gh-block gh-show
 
@@ -117,14 +117,19 @@ typecheck: ## Type-check with ty
 ##@ Testing
 # ===========================================================================
 
-test: ## Run tests with pytest (no coverage)
-	@printf "$(YELLOW)>>> Running tests (no coverage)...$(RESET)\n"
-	uv run pytest -v -o addopts=
-	@printf "$(GREEN)>>> Tests passed!$(RESET)\n"
+test: ## Run the fast test subset (excludes slow/integration; mirrors PR CI)
+	@printf "$(YELLOW)>>> Running fast tests (-m 'not slow')...$(RESET)\n"
+	uv run pytest -v -o addopts= -m "not slow"
+	@printf "$(GREEN)>>> Fast tests passed!$(RESET)\n"
 
-test-cov: ## Run tests with coverage report
-	@printf "$(YELLOW)>>> Running tests with coverage...$(RESET)\n"
-	uv run pytest -v
+test-all: ## Run the complete suite incl. slow + integration tests
+	@printf "$(YELLOW)>>> Running ALL tests (slow + integration)...$(RESET)\n"
+	uv run pytest -v -o addopts=
+	@printf "$(GREEN)>>> All tests passed!$(RESET)\n"
+
+test-cov: ## Run the fast subset with coverage report (mirrors PR CI gate)
+	@printf "$(YELLOW)>>> Running fast tests with coverage...$(RESET)\n"
+	uv run pytest -v -m "not slow"
 	@printf "$(GREEN)>>> Coverage report generated!$(RESET)\n"
 
 # ===========================================================================

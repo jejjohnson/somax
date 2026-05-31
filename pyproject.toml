@@ -29,8 +29,10 @@ dependencies = [
     "diffrax>=0.7.2",
     "lineax>=0.1.0",
     "einops>=0.8.2",
-    "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.40",
+    "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.41",
     "spectraldiffx>=0.0.10",
+    "pipekit",
+    "pipekit-cycle",
 ]
 
 [project.urls]
@@ -85,7 +87,15 @@ allow-direct-references = true
 packages = ["somax"]
 
 [tool.uv.sources]
+# Pinned to v0.0.10 to match finitevolx v0.0.41's own spectraldiffx pin —
+# uv requires a single git ref per package across the dependency graph,
+# so this must agree with finitevolx (a 0.0.12 pin conflicts and fails to
+# resolve).
 spectraldiffx = { git = "https://github.com/jejjohnson/spectraldiffx.git", tag = "v0.0.10" }
+# pipekit is a uv workspace; consume its subpackages from git subdirectories.
+# Both come from the same repo, so a single ref keeps them in lockstep.
+pipekit = { git = "https://github.com/jejjohnson/pipekit.git", subdirectory = "packages/pipekit" }
+pipekit-cycle = { git = "https://github.com/jejjohnson/pipekit.git", subdirectory = "packages/pipekit-cycle" }
 
 [tool.ruff]
 target-version = "py312"
@@ -123,6 +133,18 @@ testpaths = ["tests"]
 addopts = "--cov=somax --cov-report=term-missing --cov-report=xml:coverage.xml"
 filterwarnings = ["error", "ignore::DeprecationWarning"]
 xfail_strict = true
+markers = [
+    # Full-pipeline tests that exercise the somax-sim runner end to end
+    # (CLI orchestration, crash-recovery checkpointing, spinup/restart
+    # chains). Auto-applied to tests/test_cli_*.py by tests/conftest.py.
+    "integration: end-to-end pipeline tests (slower, not pure unit tests)",
+    # Heavy tests dominated by JIT-compiled differentiation or long
+    # integrations (e.g. ``test_grad_through_*``). Excluded from the PR
+    # CI job via ``-m 'not slow'``; run in the manual full-suite
+    # workflow. Auto-applied by tests/conftest.py; all ``integration``
+    # tests are also marked ``slow``.
+    "slow: heavy correctness/integration tests excluded from PR CI",
+]
 
 [tool.coverage.run]
 source = ["somax"]
