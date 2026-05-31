@@ -214,6 +214,16 @@ def compute_eval_metrics(model: Any, state: State) -> dict[str, float]:
     sense. Non-fluid models (Lorenz, diffusion, …) and multilayer (3D) states
     yield an empty dict rather than an error.
 
+    Scope: this targets **velocity-state Arakawa C-grid models** — those whose
+    state carries 2D ``u`` / ``v`` (SWM, Burgers). **Vorticity / streamfunction
+    models** (``barotropic_qg``, the vorticity Navier-Stokes) are intentionally
+    *not* covered: they evolve ``q`` / ``omega`` and never define a discrete
+    velocity divergence (non-divergence is only an analytic property, so a
+    divergence metric would be operator-dependent with no canonical zero —
+    misleading rather than diagnostic). Those models already report
+    ``kinetic_energy`` and ``enstrophy`` through their own ``diagnose`` output,
+    so they are not metric-less.
+
     Args:
         model: A constructed somax model.
         state: The state to evaluate (typically the final integrated state).

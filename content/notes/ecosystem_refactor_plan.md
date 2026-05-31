@@ -155,6 +155,12 @@ the bulk cleanup; 4–5 are the future-facing payoff. Suggested order:
   it into `metrics.json` under the existing `write_metrics` flag; the existing
   generic `bounded_metric` postflight assertion already enforces tolerances on
   any of these keys, so no new assertion code was needed.
+- **Scope:** the metrics target velocity-state C-grid models (SWM, Burgers).
+  Vorticity / streamfunction models (`barotropic_qg`, vorticity NS) are
+  intentionally excluded — they evolve `q` / `omega` and never define a discrete
+  velocity divergence (non-divergence is only analytic, so a divergence metric
+  would be an operator-dependent artifact with no canonical zero). They already
+  surface `kinetic_energy` + `enstrophy` through their own `diagnose()`.
 - **Deferred to Phase 4:** reference-based skill scores (RMSE, PSD score) need a
   truth trajectory / observations and land alongside the data-assimilation
   work. The xrtoolz `CMEMSSource` / `CDSSource` loaders remain the right tool
