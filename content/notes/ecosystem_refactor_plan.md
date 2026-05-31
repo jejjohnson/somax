@@ -79,9 +79,11 @@ the bulk cleanup; 4–5 are the future-facing payoff. Suggested order:
 
 ### Phase 0 — Foundation alignment & dependency hygiene *(done)*
 
-- Bump `finitevolx` `v0.0.40 → v0.0.41` and `spectraldiffx` `>=0.0.10 →
-  >=0.0.12` (the `[tool.uv.sources]` pin moves to the un-prefixed `0.0.12` tag,
-  since spectraldiffx disabled v-prefixed release tags).
+- Bump `finitevolx` `v0.0.40 → v0.0.41`. `spectraldiffx` stays pinned to the
+  git tag `v0.0.10` (`>=0.0.10`): finitevolx `v0.0.41` itself pins
+  `spectraldiffx` to `v0.0.10`, and `uv` requires a single git ref per
+  package across the dependency graph — so a `0.0.12` pin is unresolvable and
+  must agree with finitevolx.
 - No somax source changes were required: the full test suite passes on the
   bumped versions as-is (somax already uses the new finitevolx grid/mask
   naming, and the spectraldiffx solver API is unchanged for somax's usage).

@@ -615,13 +615,17 @@ class _ChunkCarry:
             original loop — the cadence key for crash-recovery
             checkpoints).
         save_states: Snapshot states retained so far, starting with the
-            initial state. Stacked into the returned trajectory.
+            initial state. Stacked into the returned trajectory. A
+            ``list`` appended **in place** at snapshot boundaries — the
+            frozen dataclass only forbids rebinding the field, not
+            mutating the list it points to, so accumulation stays
+            amortized O(1) per snapshot (a tuple would be O(N²)).
     """
 
     index: int
     prev_energy: float | None
     snapshot_ordinal: int
-    save_states: tuple[Any, ...]
+    save_states: list[Any]
 
 
 class _ChunkStep(StatefulOperator):
@@ -745,11 +749,13 @@ class _ChunkStep(StatefulOperator):
                 f"not an immediate CFL violation."
             )
 
-        # Only retain states at snapshot boundaries.
+        # Only retain states at snapshot boundaries. Append in place to the
+        # threaded list (amortized O(1)); the same list object flows through
+        # every carry, so the final carry holds the full trajectory.
         is_snapshot_boundary = (i + 1) in self.save_indices
-        new_save_states = carry.save_states + (
-            (new_state,) if is_snapshot_boundary else ()
-        )
+        new_save_states = carry.save_states
+        if is_snapshot_boundary:
+            new_save_states.append(new_state)
         new_ordinal = carry.snapshot_ordinal + (1 if is_snapshot_boundary else 0)
 
         # Crash-recovery checkpoint (#70): write the current state to a
@@ -900,7 +906,7 @@ def _chunked_integrate_with_diagnostics(
         index=0,
         prev_energy=None,
         snapshot_ordinal=0,
-        save_states=(state0,),
+        save_states=[state0],
     )
     cycle = Cycle(step_op=step, n_steps=n_diag_intervals)
 
