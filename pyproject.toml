@@ -123,6 +123,18 @@ testpaths = ["tests"]
 addopts = "--cov=somax --cov-report=term-missing --cov-report=xml:coverage.xml"
 filterwarnings = ["error", "ignore::DeprecationWarning"]
 xfail_strict = true
+markers = [
+    # Full-pipeline tests that exercise the somax-sim runner end to end
+    # (CLI orchestration, crash-recovery checkpointing, spinup/restart
+    # chains). Auto-applied to tests/test_cli_*.py by tests/conftest.py.
+    "integration: end-to-end pipeline tests (slower, not pure unit tests)",
+    # Heavy tests dominated by JIT-compiled differentiation or long
+    # integrations (e.g. ``test_grad_through_*``). Excluded from the PR
+    # CI job via ``-m 'not slow'``; run in the manual full-suite
+    # workflow. Auto-applied by tests/conftest.py; all ``integration``
+    # tests are also marked ``slow``.
+    "slow: heavy correctness/integration tests excluded from PR CI",
+]
 
 [tool.coverage.run]
 source = ["somax"]
