@@ -35,6 +35,7 @@ from somax._src.cli._units import (
     format_wallclock,
 )
 from somax._src.cli.spec import RunSpec, dump_yaml
+from somax._src.eval.metrics import compute_eval_metrics
 
 
 class IntegrationDivergedError(RuntimeError):
@@ -393,6 +394,10 @@ def _integrate_and_write(
                 logger.warning("model.diagnose failed: {}", exc)
                 diagnostics = None
             metrics = _flatten_diagnostics(diagnostics)
+            try:
+                metrics.update(compute_eval_metrics(model, final_state))
+            except Exception as exc:
+                logger.warning("compute_eval_metrics failed: {}", exc)
             metrics["wallclock_seconds"] = wallclock
             metrics["n_steps"] = _maybe_step_count(sol)
             metrics["t0"] = spec.timestepping.t0
