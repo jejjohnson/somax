@@ -6,6 +6,7 @@ import abc
 
 import diffrax as dfx
 import equinox as eqx
+import jax.tree_util as jtu
 from jaxtyping import PyTree
 
 
@@ -86,6 +87,53 @@ class SomaxModel(eqx.Module):
             stepsize_controller=stepsize_controller,
             **kw,
         )
+
+    def step(
+        self,
+        state: PyTree,
+        dt: float,
+        *,
+        t0: float = 0.0,
+        **kw,
+    ) -> PyTree:
+        """Advance ``state`` by one increment ``dt`` and return the new state.
+
+        This single-step interface is what makes every somax model
+        structurally satisfy the :class:`pipekit_cycle.ForwardModel`
+        protocol (``step(state, dt) -> state``). Satisfaction is purely
+        structural — somax does not import pipekit — so a model can be
+        driven by the ``pipekit_cycle.Cycle`` runner and supplied as the
+        forward model to data-assimilation libraries (vardax, filterax)
+        without any subclassing.
+
+        Unlike :meth:`integrate`, which returns a diffrax ``Solution``
+        carrying a leading time axis, ``step`` returns a bare state
+        pytree with the same structure as ``state``.
+
+        Args:
+            state: Current state pytree.
+            dt: Increment to advance by. Used as both the integration
+                window (``t0 -> t0 + dt``) and the initial solver step.
+            t0: Absolute start time of the step. Autonomous models can
+                ignore it; models with time-dependent forcing should
+                thread it through. Defaults to ``0.0``.
+            **kw: Forwarded to :meth:`integrate` (e.g. ``solver``,
+                ``stepsize_controller``).
+
+        Returns:
+            The state advanced to ``t0 + dt``.
+        """
+        sol = self.integrate(
+            state,
+            t0=t0,
+            t1=t0 + dt,
+            dt=dt,
+            saveat=dfx.SaveAt(t1=True),
+            **kw,
+        )
+        # ``SaveAt(t1=True)`` stacks a length-1 leading time axis onto
+        # every leaf; drop it to recover a bare state pytree.
+        return jtu.tree_map(lambda leaf: leaf[-1], sol.ys)
 
     def diagnose(self, state: PyTree) -> PyTree:
         """Compute on-demand diagnostics from state.
