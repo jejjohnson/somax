@@ -4,7 +4,7 @@ Exercises the pipekit bridge (``somax.operators``): flat-primitive
 ``get_config``, faithful ``pipekit.serial`` round-trip, ForwardModel
 conformance, pipeline composition, and driving ``pipekit_cycle.Cycle``.
 
-These require pipekit (the ``somax[sim]`` extra); they're skipped if it
+These require pipekit (the ``sim`` dependency group); they're skipped if it
 isn't installed.
 """
 

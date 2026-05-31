@@ -3,7 +3,8 @@
 somax's core stays pipekit-free — models satisfy ``pipekit_cycle``'s
 ``ForwardModel`` *structurally* (via ``SomaxModel.step``) without importing
 pipekit. This module is the opposite end: an opt-in integration layer
-(available under the ``somax[sim]`` extra, which carries pipekit) that
+(available with the ``sim`` dependency group, ``uv sync --group sim``,
+which carries pipekit) that
 exposes somax models as first-class :class:`pipekit.Operator` s.
 
 Why a companion Operator instead of making the model itself an Operator?
@@ -31,7 +32,8 @@ satisfy ``ForwardModel`` via :meth:`step` / ``dt`` / ``state_signature``.
 
 This module imports pipekit at module load, so it must not be imported
 from ``somax``'s core import path — keep it behind ``import
-somax.operators`` (or the ``somax[sim]`` extra).
+somax.operators`` (or installing the ``sim`` dependency group,
+``uv sync --group sim``).
 """
 
 from __future__ import annotations
