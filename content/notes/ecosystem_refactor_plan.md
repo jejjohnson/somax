@@ -6,8 +6,8 @@ stack and a phased plan for aligning **somax** with the framework
 (`finitevolx` / `spectraldiffx`), and the data-assimilation consumers
 (`vardax` / `filterax`).
 
-> **Status:** Phase 0 and Phase 1 are implemented (see
-> [What has been done](#what-has-been-done)). Phases 2–5 are proposed.
+> **Status:** Phases 0-2 are merged and Phase 3 is implemented (see
+> [What has been done](#what-has-been-done)). Phases 4-5 are proposed.
 
 ## The ecosystem at a glance
 
@@ -106,7 +106,14 @@ the bulk cleanup; 4–5 are the future-facing payoff. Suggested order:
 - *(Optional follow-up)* mix in `pipekit.ConfigMixin` so `get_config()` /
   `state` round-trip comes for free.
 
-### Phase 2 — Replace hand-rolled config / registry / runner with pipekit
+### Phase 2 — Replace hand-rolled config / registry / runner with pipekit *(done)*
+
+> **What actually shipped** (PR #124): the term algebra, the `somax.operators`
+> Operator bridge, and the `pipekit_cycle.Cycle`-driven runner all landed. The
+> config layer below was **investigated and kept**: `pipekit.serial` is
+> primitives-only and cannot round-trip somax's nested-dict YAML schema, so
+> `cli/spec.py` / `RunSpec` remain. The pipekit dependency is spent where it
+> fits — Operators + Cycle — not on (de)serialization.
 
 - Re-express `scenarios` and `models` as `pipekit.Operator`s (or registry
   entries) so construction params auto-serialize via `ConfigMixin`. Replace
@@ -120,19 +127,38 @@ the bulk cleanup; 4–5 are the future-facing payoff. Suggested order:
   stepping + history / `save_interval` for free) — the largest single LOC
   reduction. Keep `somax-sim` (cyclopts) as the thin CLI shell.
 
-### Phase 3 — Reuse xrtoolz for IO, evaluation, basin data
+### Phase 3 — somax-native evaluation surface *(done)*
 
-- Swap `_src/io/xarray.py` state↔Dataset plumbing onto
-  `xrtoolz.einx.pack_dataset` / `unpack_dataset` + xrtoolz io; keep a thin
-  somax-specific dim-naming adapter.
-- Replace `cli/_assertions.py` numeric checks with `xrtoolz.metrics` —
-  `geostrophic_balance_error`, `pv_conservation_error`, `divergence_error`,
-  plus `rmse` / `psd_score` for skill. This also gives somax a real evaluation
-  surface it currently lacks.
-- For the stubbed Phase 4/5 basin-data work (`scripts/data/build_basin.py`,
-  currently synthetic), use xrtoolz preprocessing — `regrid_like`,
-  `coarsen_conservative`, `fillnan_*`, CF validation, `CMEMSSource` /
-  `CDSSource` loaders — instead of building new ingestion.
+> **Revised after surveying xrtoolz's actual API.** The original plan was to
+> reuse `xrtoolz` for IO + metrics. On inspection that premise did not hold:
+> `xrtoolz.einx.pack_dataset`/`unpack_dataset` stack a Dataset's *variables*
+> into a channel axis (an ML-export op) — they are not a pytree-state↔Dataset
+> converter, and xrtoolz exposes no NetCDF/Zarr IO of its own (it defers to
+> xarray). So there is nothing for `_src/io/xarray.py` to swap onto; its
+> security-allowlisted class round-trip and zarr-v3 handling stay as-is.
+> xrtoolz's physical metrics (`geostrophic_balance_error`, `divergence_error`)
+> also assume lat/lon ocean observations with Coriolis derived from latitude,
+> whereas somax runs on idealised Cartesian f-/β-plane grids (metres, no
+> lat/lon coords); `pv_conservation_error` needs Lagrangian trajectories somax
+> does not produce. Finally xrtoolz is a heavy dependency (cartopy, pyproj,
+> rioxarray, xskillscore, …). Decision: give somax its own lightweight
+> evaluation surface on its native grid, with **no new dependency**.
+
+- New `somax.eval` (`_src/eval/metrics.py`): reference-free, Cartesian-grid
+  field diagnostics built on the finitevolx operators models already hold —
+  `rms_divergence`, `total_enstrophy`, `kinetic_energy` (generic to any C-grid
+  fluid model) and `geostrophic_imbalance` (model-aware; reuses the model's own
+  pressure-gradient + Coriolis operators, so it measures departure from exactly
+  the balance the model integrates around).
+- `compute_eval_metrics(model, state)` is a defensive dispatcher returning the
+  applicable metrics (empty for non-fluid models). The `somax-sim` runner folds
+  it into `metrics.json` under the existing `write_metrics` flag; the existing
+  generic `bounded_metric` postflight assertion already enforces tolerances on
+  any of these keys, so no new assertion code was needed.
+- **Deferred to Phase 4:** reference-based skill scores (RMSE, PSD score) need a
+  truth trajectory / observations and land alongside the data-assimilation
+  work. The xrtoolz `CMEMSSource` / `CDSSource` loaders remain the right tool
+  for real basin data if/when that work starts (kept out of somax's core).
 
 ### Phase 4 — Data-assimilation integration (vardax / filterax)
 
@@ -155,19 +181,25 @@ the bulk cleanup; 4–5 are the future-facing payoff. Suggested order:
 
 ## What has been done
 
-Phase 0 and Phase 1 are implemented on the
-`claude/somax-refactor-plan-SM3dT` branch:
+**Phases 0-2 are merged** (PR #124, squash-merged to `main`): the dependency
+alignment (`finitevolx` `v0.0.41`, `spectraldiffx` pinned to the git tag
+`v0.0.10`), `SomaxModel.step` for `ForwardModel` conformance, the composable
+term algebra (`Sum`/`Scaled`/`Compose`, IMEX lowering), the pipekit
+`Operator` bridge (`somax.operators`), and the `pipekit_cycle.Cycle`-driven
+runner. `pipekit` / `pipekit-cycle` are base dependencies; somax's core never
+imports them (conformance is structural).
 
-- **`pyproject.toml`** — `finitevolx` bumped to `v0.0.41`, `spectraldiffx` to
-  `>=0.0.12` (source pin moved to the un-prefixed `0.0.12` tag). No other
-  source changes were needed for the alignment.
-- **`somax/_src/core/model.py`** — new `SomaxModel.step(state, dt, *, t0=0.0)`
-  returning a bare state pytree, making every model a structural
-  `pipekit_cycle.ForwardModel`.
-- **`tests/core/test_model.py`** — tests covering `step`↔`integrate`
-  agreement, multi-step composition over a window, and structural
-  `ForwardModel` conformance (via a local Protocol mirror, so no new test
-  dependency).
+**Phase 3 (this branch)** adds the somax-native evaluation surface:
+
+- **`somax/_src/eval/metrics.py`** (public `somax.eval`) — reference-free
+  field diagnostics (`rms_divergence`, `total_enstrophy`, `kinetic_energy`,
+  `geostrophic_imbalance`) plus the `compute_eval_metrics` dispatcher.
+- **`somax/_src/cli/_run.py`** — folds `compute_eval_metrics` into
+  `metrics.json` (under `write_metrics`, try-wrapped so it never breaks a run).
+- **`tests/eval/test_diagnostics.py`** — analytic checks (divergence-free and
+  irrotational fields read ~0, closed-form kinetic energy, a uniform
+  geostrophic jet reads imbalance ~0, scale-invariance of the ratio, and the
+  dispatcher's fluid/non-fluid behaviour).
 
 The full test suite passes, and `ruff check`, `ruff format`, and `ty check`
 are clean on the changed files.
