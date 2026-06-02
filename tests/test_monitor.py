@@ -44,6 +44,16 @@ class _FakeModel(eqx.Module):
         return _FakeDiagnostics(invs=self.invs)
 
 
+class _PlainModel:
+    """Non-eqx fake so invariant values can be JAX arrays (vector tests)."""
+
+    def __init__(self, invs: dict) -> None:
+        self._invs = invs
+
+    def diagnose(self, state):
+        return _FakeDiagnostics(invs=self._invs)
+
+
 def _info(index=0, n_chunks=4, t0=0.0, t1=1.0, wall=0.1, snap=True, stats=None):
     return ChunkInfo(
         index=index,
@@ -125,6 +135,17 @@ class TestEnergyGrowthMonitor:
         v = mon.on_chunk_end(_ModelEnergyField(e=100.0), None, _info())
         assert v.messages and "grew" in v.messages[0]
 
+    def test_vector_energy_invariant_summed(self) -> None:
+        """A per-layer vector energy invariant is summed, not float()'d."""
+        mon = EnergyGrowthMonitor(factor=10.0)
+        mon.on_run_start(
+            _PlainModel(invs={"total_energy": jnp.array([0.5, 0.5])}), None, spec=None
+        )
+        v = mon.on_chunk_end(
+            _PlainModel(invs={"total_energy": jnp.array([60.0, 60.0])}), None, _info()
+        )
+        assert v.messages and "grew" in v.messages[0]
+
 
 class TestConservationDriftMonitor:
     def test_records_drift(self) -> None:
@@ -151,6 +172,19 @@ class TestConservationDriftMonitor:
         mon.on_run_start(_FakeModel(invs={"x": 0.0}), None, spec=None)
         v = mon.on_chunk_end(_FakeModel(invs={"x": 5.0}), None, _info())
         assert "drift_x" not in v.metrics
+
+    def test_vector_invariant_summed_not_crash(self) -> None:
+        """Per-layer vector invariants are summed, not float()'d (no crash)."""
+        mon = ConservationDriftMonitor(rtol_warn=1e-2)
+        mon.on_run_start(
+            _PlainModel(invs={"mass": jnp.array([60.0, 40.0])}), None, spec=None
+        )
+        # total 100 -> 101 = 1% drift
+        v = mon.on_chunk_end(
+            _PlainModel(invs={"mass": jnp.array([61.0, 40.0])}), None, _info()
+        )
+        assert v.metrics["drift_mass"] == 0.01
+        assert not v.terminate
 
 
 class TestSolverHealthMonitor:

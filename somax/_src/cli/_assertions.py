@@ -170,21 +170,40 @@ def check_deformation_radius(
             "deformation_radius: consts.f0 is zero; L_d is undefined on an "
             "f-plane with no rotation."
         )
-    # Per-interface deformation radius sqrt(g'_k H_k) / f0; use the smallest
-    # (the tightest-to-resolve internal mode). The barotropic interface
-    # (g_prime[0] = full gravity) is excluded when internal modes exist.
-    g_prime_arr = np.asarray(jnp.asarray(g_prime))
-    H_arr = np.asarray(jnp.asarray(H))
-    radii = np.sqrt(g_prime_arr * H_arr) / f0_abs
-    internal = radii[1:] if radii.shape[0] > 1 else radii
-    Ld = float(np.min(internal))
+    # Prefer the model's vertical-mode deformation radii when available: the
+    # first internal radius comes from the vertical-mode eigenproblem, not
+    # just one interface's sqrt(g'_k H_k)/f0 (which can substantially
+    # overestimate the baroclinic radius for a thin upper layer). Fall back to
+    # the per-interface estimate only when the modal transform is absent.
+    modal = getattr(model, "modal", None)
+    modal_radii = getattr(modal, "rossby_radii", None) if modal is not None else None
+    if modal_radii is not None:
+        radii = np.asarray(jnp.asarray(modal_radii))
+        # The barotropic mode is infinite; keep only the finite internal modes.
+        finite = radii[np.isfinite(radii)]
+        if finite.size == 0:
+            raise AssertionFailedError(
+                "deformation_radius: model exposes no finite internal "
+                "deformation radius (modal.rossby_radii are all non-finite)."
+            )
+        Ld = float(np.min(finite))
+        source = "modal.rossby_radii"
+    else:
+        # Per-interface estimate sqrt(g'_k H_k)/f0; smallest internal mode.
+        g_prime_arr = np.asarray(jnp.asarray(g_prime))
+        H_arr = np.asarray(jnp.asarray(H))
+        radii = np.sqrt(g_prime_arr * H_arr) / f0_abs
+        internal = radii[1:] if radii.shape[0] > 1 else radii
+        Ld = float(np.min(internal))
+        source = "sqrt(g'H)/f0 estimate"
     dx_min = float(min(grid.dx, grid.dy))
     ratio = Ld / dx_min
     if ratio < n_cells_min:
         raise AssertionFailedError(
             f"deformation_radius check FAILED: L_d/dx = {ratio:.2f} < "
             f"{n_cells_min}\n"
-            f"  L_d   = {Ld:.0f} m (smallest internal deformation radius)\n"
+            f"  L_d   = {Ld:.0f} m (smallest internal deformation radius, "
+            f"from {source})\n"
             f"  dx    = {dx_min:.0f} m\n"
             f"  → eddies will be suppressed; refine the grid or pick an "
             f"eddy-permitting configuration."

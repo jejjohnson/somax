@@ -47,6 +47,23 @@ def _state_field_arrays(state: Any) -> dict[str, np.ndarray]:
     return out
 
 
+def _scalarize(value: Any) -> float | None:
+    """Reduce an invariant value to a single float for drift tracking.
+
+    ``Diagnostics.invariants()`` may return a scalar or a per-layer vector
+    (the contract allows both). Extensive invariants (mass, energy,
+    enstrophy, Casimirs) sum across layers, so a vector is reduced with
+    ``sum`` to a total; a 0-d value passes through. Returns ``None`` if the
+    value can't be coerced to a finite float.
+    """
+    try:
+        arr = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    total = float(arr.sum()) if arr.ndim > 0 else float(arr)
+    return total if np.isfinite(total) else None
+
+
 class NonFiniteMonitor(BaseMonitor):
     """FAIL-HARD: terminate the run if any state field holds NaN/Inf.
 
@@ -113,16 +130,11 @@ class EnergyGrowthMonitor(BaseMonitor):
             invariants = {}
         for key in self._ENERGY_KEYS:
             if key in invariants:
-                value = float(np.asarray(invariants[key]))
-                return value if np.isfinite(value) else None
+                return _scalarize(invariants[key])
         for key in self._ENERGY_KEYS:
             field = getattr(diag, key, None)
-            if field is None:
-                continue
-            arr = np.asarray(field)
-            if arr.ndim == 0:
-                value = float(arr)
-                return value if np.isfinite(value) else None
+            if field is not None:
+                return _scalarize(field)
         return None
 
     def on_run_start(self, model: Any, state0: Any, *, spec: Any) -> None:
@@ -179,7 +191,15 @@ class ConservationDriftMonitor(BaseMonitor):
             raw = model.diagnose(state).invariants()
         except Exception:
             return {}
-        return {k: float(np.asarray(v)) for k, v in raw.items()}
+        # Reduce each invariant to a scalar total (per-layer vectors are
+        # summed) so drift tracking works for the full invariants() contract,
+        # not just scalar-valued invariants. Drop any that won't coerce.
+        out: dict[str, float] = {}
+        for key, value in raw.items():
+            scalar = _scalarize(value)
+            if scalar is not None:
+                out[key] = scalar
+        return out
 
     def on_run_start(self, model: Any, state0: Any, *, spec: Any) -> None:
         self._ref = self._invariants(model, state0)
