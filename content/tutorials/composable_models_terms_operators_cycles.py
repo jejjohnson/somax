@@ -43,6 +43,7 @@ from pipekit_cycle import Cycle, ForwardModel
 from somax._src.models.swm.linear_2d import LinearSW2DState
 from somax._src.models.swm.linear_swm_terms import LinearSWM2DTermModel
 from somax.operators import Burgers2DOp, SomaxModelOp
+from somax.solvers import imex_solver, imex_stepsize_controller
 
 
 # %% [markdown]
@@ -102,6 +103,47 @@ imex_model = LinearSWM2DTermModel.create(
 
 print("explicit build_terms():", type(explicit_model.build_terms()).__name__)
 print("imex     build_terms():", type(imex_model.build_terms()).__name__)
+
+
+# %% [markdown]
+# ### Integrating an IMEX model — use `somax.solvers.imex_solver`
+#
+# An IMEX model needs an IMEX solver (`KenCarp3`, …) *and* an adaptive
+# step-size controller — a fixed step with an implicit solver requires
+# explicit tolerances. Just as important: the implicit stage must be solved
+# **matrix-free**. `diffrax.KenCarp3()`'s default Newton root-finder
+# materialises a dense `N x N` Jacobian (`N = nx*ny`), which is ~17 GB at
+# `256 x 256` and OOMs ([#55](https://github.com/jejjohnson/somax/issues/55)).
+#
+# `somax.solvers.imex_solver()` returns a `KenCarp3` whose implicit stage uses
+# a Krylov (GMRES) Newton solve — O(N) memory, roughly flat runtime in
+# resolution — and `imex_stepsize_controller()` is the matching adaptive
+# controller. This is the recommended way to run any `imex=True` model.
+
+# %%
+imex_grid = imex_model.grid
+gx = jnp.arange(imex_grid.Nx) * imex_grid.dx
+gy = jnp.arange(imex_grid.Ny) * imex_grid.dy
+gX, gY = jnp.meshgrid(gx, gy)
+h_bump = jnp.exp(
+    -0.5
+    * (
+        ((gX - gx[imex_grid.Nx // 2]) / (5 * imex_grid.dx)) ** 2
+        + ((gY - gy[imex_grid.Ny // 2]) / (5 * imex_grid.dy)) ** 2
+    )
+)
+imex_state0 = LinearSW2DState(
+    h=h_bump, u=jnp.zeros_like(h_bump), v=jnp.zeros_like(h_bump)
+)
+imex_sol = imex_model.integrate(
+    imex_state0,
+    t0=0.0,
+    t1=300.0,
+    dt=30.0,
+    solver=imex_solver(),
+    stepsize_controller=imex_stepsize_controller(),
+)
+print("IMEX solve finite:", bool(jnp.all(jnp.isfinite(imex_sol.ys.h))))
 
 
 # %% [markdown]
