@@ -124,6 +124,15 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 [tool.ruff.lint.per-file-ignores]
 "content/tutorials/step*.py" = ["E501", "I001", "B018"]
 "content/tutorials/step*.ipynb" = ["E501", "I001", "B018"]
+# Phase 0 "Foundations" theory chapters: prose paragraphs are single long
+# lines (the jupytext authoring rule, so MyST-NB renders them without spurious
+# soft breaks), and imports are interleaved after the intro markdown cells.
+"content/tutorials/arakawa_cgrid.py" = ["E501", "I001", "RUF003"]
+"content/tutorials/arakawa_cgrid.ipynb" = ["E501", "I001", "RUF003"]
+"content/tutorials/operators.py" = ["E501", "I001", "RUF003"]
+"content/tutorials/operators.ipynb" = ["E501", "I001", "RUF003"]
+"content/tutorials/boundary_conditions.py" = ["E501", "I001", "RUF003"]
+"content/tutorials/boundary_conditions.ipynb" = ["E501", "I001", "RUF003"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
