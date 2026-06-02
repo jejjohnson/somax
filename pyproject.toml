@@ -52,7 +52,7 @@ lint = [
     "ruff>=0.9",
 ]
 typecheck = [
-    "ty==0.0.29",
+    "ty==0.0.40",
 ]
 da = [
     # Data-assimilation integration (Phase 4). Pre-alpha and git-pinned (no
