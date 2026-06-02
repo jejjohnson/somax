@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import diffrax as dfx
+import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
 from loguru import logger
@@ -36,6 +37,8 @@ from somax._src.cli._units import (
 )
 from somax._src.cli.spec import RunSpec, dump_yaml
 from somax._src.eval.metrics import compute_eval_metrics
+from somax._src.monitor import ChunkInfo, default_monitors
+from somax._src.monitor.protocol import Monitor
 
 
 class IntegrationDivergedError(RuntimeError):
@@ -234,6 +237,7 @@ def _integrate_and_write(
     initial_state: Any | None,
     diagnostics_per_save: int = 1,
     checkpoint_every_n_chunks: int = 0,
+    monitors: list[Monitor] | None = None,
 ) -> SimulationResult:
     """Build the model, integrate, write artifacts, return summary.
 
@@ -359,10 +363,29 @@ def _integrate_and_write(
             max_steps_per_chunk=per_chunk_max,
             run_log=run_log,
             mode=mode,
+            monitors=monitors,
+            spec=spec,
             checkpoint_every_n_chunks=checkpoint_every_n_chunks,
             checkpoint_dir=output_dir if checkpoint_every_n_chunks > 0 else None,
             checkpoint_label=f"{spec.scenario.name}/{spec.model.name}",
         )
+    except eqx.EquinoxRuntimeError as exc:
+        # An in-JIT guard (somax.guards, e.g. layer-thickness positivity or
+        # the RHS non-finite tripwire) fired *inside* model.integrate. This
+        # halts at the offending step — earlier than the chunk-boundary
+        # monitors — but the runner's contract is that a blow-up surfaces as
+        # IntegrationDivergedError and writes no artifacts, so translate it
+        # while preserving the guard's diagnostic.
+        stop_run_log(
+            run_log,
+            final_message=f"FAILED during integrate: {type(exc).__name__}: {exc}",
+        )
+        raise IntegrationDivergedError(
+            f"somax-sim {mode} integration produced a non-finite or "
+            f"non-physical state and an in-JIT guard halted it at the "
+            f"offending step (likely a CFL violation): {exc}\n"
+            f"  Refusing to write artifacts."
+        ) from exc
     except Exception as exc:
         stop_run_log(
             run_log,
@@ -446,6 +469,14 @@ def _integrate_and_write(
         resolved_path = output_dir / "resolved.yaml"
         dump_yaml(spec, str(resolved_path))
         logger.info("wrote {}", resolved_path)
+
+        # 12. Provenance manifest (git commit, library versions, platform,
+        #     solver/timestepping) for run reproducibility + determinism CI.
+        manifest_path = output_dir / "manifest.json"
+        manifest = _build_manifest(spec, mode=mode, wallclock=wallclock)
+        with manifest_path.open("w") as f:
+            json.dump(manifest, f, indent=2, sort_keys=True)
+        logger.info("wrote {}", manifest_path)
     except Exception as exc:
         stop_run_log(
             run_log,
@@ -565,11 +596,6 @@ def _format_physical_scalars(model: Any, state: Any) -> tuple[str, dict[str, flo
     return " ".join(parts), flat
 
 
-def _has_non_finite(diag: dict[str, dict[str, float]]) -> bool:
-    """True iff any field reported one or more non-finite values."""
-    return any(stats["nan"] > 0 for stats in diag.values())
-
-
 def _build_diagnostic_grid(
     save_ts: np.ndarray, diagnostics_per_save: int
 ) -> tuple[np.ndarray, set[int]]:
@@ -612,9 +638,6 @@ class _ChunkCarry:
 
     Args:
         index: Next diagnostic-chunk index to integrate (0-based).
-        prev_energy: Total-energy-like scalar from the previous chunk,
-            used to flag >10x growth before a NaN appears. ``None`` until
-            the first chunk produces one.
         snapshot_ordinal: Count of snapshots retained so far, excluding
             the initial state (matches ``len(save_states) - 1`` in the
             original loop — the cadence key for crash-recovery
@@ -625,10 +648,13 @@ class _ChunkCarry:
             frozen dataclass only forbids rebinding the field, not
             mutating the list it points to, so accumulation stays
             amortized O(1) per snapshot (a tuple would be O(N²)).
+
+    Energy-growth tracking, which used to live on this carry, now lives
+    inside :class:`somax.monitor.EnergyGrowthMonitor` (a host-side object),
+    so the carry is back to pure bookkeeping.
     """
 
     index: int
-    prev_energy: float | None
     snapshot_ordinal: int
     save_states: list[Any]
 
@@ -663,6 +689,7 @@ class _ChunkStep(StatefulOperator):
         checkpoint_every_n_chunks: int,
         checkpoint_dir: Path | None,
         checkpoint_label: str | None,
+        monitors: list[Monitor],
     ) -> None:
         self.model = model
         self.state_class = state_class
@@ -676,6 +703,7 @@ class _ChunkStep(StatefulOperator):
         self.checkpoint_every_n_chunks = checkpoint_every_n_chunks
         self.checkpoint_dir = checkpoint_dir
         self.checkpoint_label = checkpoint_label
+        self.monitors = monitors
 
     def _apply(self, state: Any, carry: _ChunkCarry) -> tuple[Any, _ChunkCarry]:
         log = self.run_log.log
@@ -696,68 +724,71 @@ class _ChunkStep(StatefulOperator):
 
         new_state = _extract_final_state(sol.ys, self.state_class)
         state_diag = _state_diagnostics(new_state)
-        phys_line, phys_flat = _format_physical_scalars(self.model, new_state)
+        phys_line, _phys_flat = _format_physical_scalars(self.model, new_state)
 
-        # Detect large energy jumps (10x growth between chunks is suspicious)
-        # to give the user an early warning before NaN appears.
-        energy_value: float | None = None
-        for k in (
-            "total_energy",
-            "energy",
-            "total_kinetic_energy",
-            "kinetic_energy",
-        ):
-            if k in phys_flat:
-                energy_value = float(phys_flat[k])
-                break
-        warning = ""
-        prev_energy = carry.prev_energy
-        if (
-            prev_energy is not None
-            and energy_value is not None
-            and abs(prev_energy) > 0
-            and not np.isnan(energy_value)
-            and abs(energy_value) > 10 * abs(prev_energy)
-        ):
-            # Both branches inside this block know prev_energy and
-            # energy_value are non-None floats; help ty narrow the types.
-            prev_e: float = prev_energy
-            cur_e: float = energy_value
-            growth = cur_e / prev_e if prev_e != 0 else float("inf")
-            warning = f" !! energy grew {growth:.1f}x from previous chunk"
-        new_prev_energy = prev_energy
-        if energy_value is not None and not np.isnan(energy_value):
-            new_prev_energy = energy_value
+        # Fan out to the registered monitors. The non-finite abort and the
+        # energy-growth warning that used to be inline here are now the
+        # NonFiniteMonitor / EnergyGrowthMonitor plugins (see
+        # somax.monitor.default_monitors); each monitor records metrics +
+        # messages and may request a clean termination.
+        is_snapshot_boundary = (i + 1) in self.save_indices
+        info = ChunkInfo(
+            index=i,
+            n_chunks=self.n_diag_intervals,
+            t0=chunk_t0,
+            t1=chunk_t1,
+            wall_seconds=chunk_wall,
+            is_snapshot=is_snapshot_boundary,
+            stats=_solver_stats(sol),
+        )
+        monitor_msgs: list[str] = []
+        monitor_metrics: dict[str, float] = {}
+        terminate_reason: str | None = None
+        for mon in self.monitors:
+            verdict = mon.on_chunk_end(self.model, new_state, info)
+            # Record-only diagnostics: prefix with the monitor name so keys
+            # from different monitors don't collide in the per-chunk log.
+            for key, value in verdict.metrics.items():
+                monitor_metrics[f"{mon.name}.{key}"] = value
+            for msg in verdict.messages:
+                monitor_msgs.append(f"[{mon.name}] {msg}")
+            if verdict.terminate and terminate_reason is None:
+                terminate_reason = f"monitor {mon.name!r}: {verdict.reason}"
 
+        metric_line = ""
+        if monitor_metrics:
+            metric_line = " | monitors: " + " ".join(
+                f"{k}={v:.3g}" for k, v in monitor_metrics.items()
+            )
         log.debug(
             f"chunk {i + 1}/{self.n_diag_intervals} "
             f"sim_t={format_time_seconds(chunk_t1)} | "
             f"{_format_state_stats(state_diag)}"
             + (f" | physics: {phys_line}" if phys_line else "")
             + f" | wall={format_wallclock(chunk_wall)}"
-            + warning
+            + metric_line
+            + ("".join(f" !! {m}" for m in monitor_msgs) if monitor_msgs else "")
         )
 
-        if _has_non_finite(state_diag):
+        if terminate_reason is not None:
             log.debug(
-                f"ABORT at chunk {i + 1}/{self.n_diag_intervals}: non-finite state"
+                f"ABORT at chunk {i + 1}/{self.n_diag_intervals}: {terminate_reason}"
             )
             raise IntegrationDivergedError(
-                f"somax-sim {self.mode} integration produced non-finite values "
-                f"during chunk {i + 1}/{self.n_diag_intervals} "
-                f"(sim_t={format_time_seconds(chunk_t1)}).\n"
+                f"somax-sim {self.mode} integration halted during chunk "
+                f"{i + 1}/{self.n_diag_intervals} "
+                f"(sim_t={format_time_seconds(chunk_t1)}): {terminate_reason}.\n"
                 f"  {_format_state_stats(state_diag)}\n"
-                f"  Refusing to write artifacts. The non-finite values "
-                f"appeared between sim_t={format_time_seconds(chunk_t0)} and "
+                f"  Refusing to write artifacts. The condition appeared between "
+                f"sim_t={format_time_seconds(chunk_t0)} and "
                 f"sim_t={format_time_seconds(chunk_t1)} — earlier chunks were "
-                f"finite. This is consistent with a slow numerical instability, "
-                f"not an immediate CFL violation."
+                f"clean."
             )
 
         # Only retain states at snapshot boundaries. Append in place to the
         # threaded list (amortized O(1)); the same list object flows through
         # every carry, so the final carry holds the full trajectory.
-        is_snapshot_boundary = (i + 1) in self.save_indices
+        # ``is_snapshot_boundary`` was computed above for the ChunkInfo.
         new_save_states = carry.save_states
         if is_snapshot_boundary:
             new_save_states.append(new_state)
@@ -799,7 +830,6 @@ class _ChunkStep(StatefulOperator):
 
         new_carry = _ChunkCarry(
             index=i + 1,
-            prev_energy=new_prev_energy,
             snapshot_ordinal=new_ordinal,
             save_states=new_save_states,
         )
@@ -816,6 +846,8 @@ def _chunked_integrate_with_diagnostics(
     max_steps_per_chunk: int,
     run_log: RunLogContext,
     mode: str,
+    monitors: list[Monitor] | None = None,
+    spec: RunSpec | None = None,
     checkpoint_every_n_chunks: int = 0,
     checkpoint_dir: Path | None = None,
     checkpoint_label: str | None = None,
@@ -879,6 +911,9 @@ def _chunked_integrate_with_diagnostics(
     import jax
 
     log = run_log.log
+    active_monitors: list[Monitor] = (
+        monitors if monitors is not None else default_monitors()
+    )
     save_ts_np = np.asarray(save_ts)
     diag_ts, save_indices = _build_diagnostic_grid(save_ts_np, diagnostics_per_save)
     n_diag_intervals = diag_ts.shape[0] - 1
@@ -893,6 +928,9 @@ def _chunked_integrate_with_diagnostics(
         + " | initial state"
     )
 
+    for mon in active_monitors:
+        mon.on_run_start(model, state0, spec=spec)
+
     step = _ChunkStep(
         model=model,
         state_class=type(state0),
@@ -906,22 +944,30 @@ def _chunked_integrate_with_diagnostics(
         checkpoint_every_n_chunks=checkpoint_every_n_chunks,
         checkpoint_dir=checkpoint_dir,
         checkpoint_label=checkpoint_label,
+        monitors=active_monitors,
     )
     carry0 = _ChunkCarry(
         index=0,
-        prev_energy=None,
         snapshot_ordinal=0,
         save_states=[state0],
     )
     cycle = Cycle(step_op=step, n_steps=n_diag_intervals)
 
     t_chunks_start = time.perf_counter()
-    _final_state, final_carry = cycle(state0, carry0)
+    try:
+        final_state, final_carry = cycle(state0, carry0)
+    except Exception:
+        for mon in active_monitors:
+            mon.on_run_end(model, state0, ok=False)
+        raise
     total_chunks_wall = time.perf_counter() - t_chunks_start
     log.debug(
         f"all {n_diag_intervals} chunks completed in "
         f"{format_wallclock(total_chunks_wall)}"
     )
+
+    for mon in active_monitors:
+        mon.on_run_end(model, final_state, ok=True)
 
     # Concatenate snapshot states into a single time-stacked pytree
     # matching the shape diffrax would have returned with
@@ -999,6 +1045,107 @@ def _maybe_step_count(sol: dfx.Solution) -> int | None:
         return None
 
 
+def _git_provenance() -> dict[str, Any]:
+    """Best-effort ``{git_commit, git_dirty}`` for the somax checkout.
+
+    Returns ``{"git_commit": None, "git_dirty": None}`` if git is unavailable
+    or this is not a working tree (e.g. an installed wheel).
+    """
+    import subprocess
+
+    repo_dir = Path(__file__).resolve().parent
+    try:
+        commit = (
+            subprocess.check_output(
+                ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+        status = subprocess.check_output(
+            ["git", "-C", str(repo_dir), "status", "--porcelain"],
+            stderr=subprocess.DEVNULL,
+        ).decode()
+        return {"git_commit": commit, "git_dirty": bool(status.strip())}
+    except (subprocess.SubprocessError, OSError):
+        return {"git_commit": None, "git_dirty": None}
+
+
+def _build_manifest(spec: RunSpec, *, mode: str, wallclock: float) -> dict[str, Any]:
+    """Assemble the provenance manifest written next to ``metrics.json``.
+
+    Captures the git commit + dirty flag, key library versions, the JAX
+    platform / x64 flag / device count, a config hash, and the
+    solver/timestepping knobs — enough to reproduce a run and to drive a
+    determinism check in CI.
+    """
+    import hashlib
+    import importlib.metadata as importlib_metadata
+    import platform as _platform
+
+    import jax
+
+    def _version(pkg: str) -> str | None:
+        try:
+            return importlib_metadata.version(pkg)
+        except importlib_metadata.PackageNotFoundError:
+            return None
+
+    try:
+        config_repr = json.dumps(spec.to_dict(), sort_keys=True, default=str)
+    except (TypeError, ValueError, AttributeError):
+        config_repr = repr(spec)
+    config_sha = hashlib.sha256(config_repr.encode("utf-8")).hexdigest()
+
+    manifest: dict[str, Any] = {
+        "mode": mode,
+        "somax_version": _version("somax"),
+        "jax_version": getattr(jax, "__version__", None),
+        "diffrax_version": _version("diffrax"),
+        "finitevolx_version": _version("finitevolx"),
+        "x64_enabled": bool(jax.config.read("jax_enable_x64")),
+        "platform": jax.default_backend(),
+        "python": _platform.python_version(),
+        "device_count": jax.device_count(),
+        "config_sha256": config_sha,
+        "t0": spec.timestepping.t0,
+        "t1": spec.timestepping.t1,
+        "dt": spec.timestepping.dt,
+        "wallclock_seconds": wallclock,
+    }
+    manifest.update(_git_provenance())
+    return manifest
+
+
+def _solver_stats(sol: dfx.Solution) -> dict[str, Any]:
+    """Host-side copy of a diffrax solution's solver stats + result.
+
+    Pulls ``num_accepted_steps`` / ``num_rejected_steps`` / ``num_steps``
+    (coerced to plain ints) and the ``result`` so they survive onto a
+    :class:`somax.monitor.ChunkInfo`, where the runner previously discarded
+    them (``stats={}``). Best-effort: returns whatever is available.
+    """
+    import contextlib
+
+    out: dict[str, Any] = {}
+    stats = getattr(sol, "stats", None)
+    if stats:
+        for key in ("num_steps", "num_accepted_steps", "num_rejected_steps"):
+            value = stats.get(key)
+            if value is None:
+                continue
+            with contextlib.suppress(TypeError, ValueError):
+                out[key] = int(np.asarray(value))
+    result = getattr(sol, "result", None)
+    if result is not None:
+        # ``str(result)`` is uninformative (every diffrax RESULTS renders as
+        # ``RESULTS<>``), so record a clean success flag instead.
+        with contextlib.suppress(Exception):
+            out["result_successful"] = bool(result == dfx.RESULTS.successful)
+    return out
+
+
 # ----------------------------------------------------------------------
 # Public entry points — one per CLI subcommand
 # ----------------------------------------------------------------------
@@ -1010,6 +1157,7 @@ def simulate(
     *,
     diagnostics_per_save: int = 1,
     checkpoint_every_n_chunks: int = 0,
+    monitors: list[Monitor] | None = None,
 ) -> SimulationResult:
     """Run a fresh simulation from factory-built initial conditions.
 
@@ -1025,6 +1173,10 @@ def simulate(
             (default 1). Higher = more lines per snapshot in run.log.
         checkpoint_every_n_chunks: Crash-recovery cadence (#70). ``0``
             (default) disables crash checkpoints.
+        monitors: Chunk-boundary monitors (see :mod:`somax.monitor`).
+            ``None`` (default) uses ``default_monitors()`` — the same
+            non-finite abort + energy-growth warning as before, plus
+            record-only conservation/solver/throughput diagnostics.
     """
     return _integrate_and_write(
         spec,
@@ -1033,6 +1185,7 @@ def simulate(
         initial_state=None,
         diagnostics_per_save=diagnostics_per_save,
         checkpoint_every_n_chunks=checkpoint_every_n_chunks,
+        monitors=monitors,
     )
 
 
@@ -1042,6 +1195,7 @@ def spinup(
     *,
     diagnostics_per_save: int = 1,
     checkpoint_every_n_chunks: int = 0,
+    monitors: list[Monitor] | None = None,
 ) -> SimulationResult:
     """Run a spinup integration. Saves only the endpoint.
 
@@ -1056,6 +1210,7 @@ def spinup(
         initial_state=None,
         diagnostics_per_save=diagnostics_per_save,
         checkpoint_every_n_chunks=checkpoint_every_n_chunks,
+        monitors=monitors,
     )
 
 
@@ -1124,6 +1279,7 @@ def restart(
     restart_from: str | Path,
     diagnostics_per_save: int = 1,
     checkpoint_every_n_chunks: int = 0,
+    monitors: list[Monitor] | None = None,
 ) -> SimulationResult:
     """Resume a simulation from a previously saved state.
 
@@ -1184,4 +1340,5 @@ def restart(
         initial_state=state0,
         diagnostics_per_save=diagnostics_per_save,
         checkpoint_every_n_chunks=checkpoint_every_n_chunks,
+        monitors=monitors,
     )

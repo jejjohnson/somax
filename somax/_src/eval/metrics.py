@@ -32,6 +32,7 @@ the metric with boundary / ghost-point artifacts.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
@@ -187,11 +188,80 @@ def geostrophic_imbalance(
     return residual / (scale + eps)
 
 
+def qg_balance_residual(
+    model: Any,
+    state: State,
+    *,
+    interior: bool = True,
+    eps: float = 1e-30,
+) -> Float[Array, ""]:
+    r"""Dimensionless PV-inversion residual for a **barotropic** QG model.
+
+    The QG balance analog of :func:`geostrophic_imbalance` for vorticity /
+    streamfunction models: instead of a velocity-divergence residual (which QG
+    models do not define), it measures how well the state's PV closes its own
+    inversion. For barotropic QG the PV *is* the relative vorticity,
+    ``q = nabla^2 psi``, so with ``psi = L^{-1} q`` and
+    ``q_hat = laplacian(psi)`` it returns
+
+    .. math::
+
+        \frac{\lVert \hat q - q \rVert}{\lVert q \rVert + \epsilon},
+
+    reduced over the grid interior. For a freshly inverted state this is
+    ~machine-eps; a large value flags a state inconsistent with the model's
+    elliptic operator.
+
+    Restricted to barotropic QG (a 2-D PV field). Baroclinic / reparameterized
+    QG invert a *modal Helmholtz* operator ``q = nabla^2 psi - f0^2 A psi``;
+    the bare Laplacian omits the stretching term, so this residual would be
+    O(1) even for a perfectly balanced state. Reconstructing the full
+    stretching operator here would duplicate model internals, so the check is
+    intentionally scoped to the barotropic case (use :meth:`model.diagnose`
+    invariants for the layered models). Returns ``0.0`` for a trivially zero
+    PV field.
+
+    Args:
+        model: The constructed barotropic QG model.
+        state: A state carrying a 2-D PV field ``q``.
+        interior: Drop the one-cell ghost halo before reducing. Defaults True.
+        eps: Small constant guarding the normalisation.
+
+    Returns:
+        Scalar dimensionless residual.
+    """
+    q = state.q
+    psi = model._invert_pv(q)
+    q_hat = model.diff.laplacian(psi)
+    trim = _INTERIOR if interior else (...,)
+    resid = (q_hat - q)[trim]
+    ref = q[trim]
+    return jnp.linalg.norm(resid) / (jnp.linalg.norm(ref) + eps)
+
+
 def _is_fluid_state(state: State) -> bool:
     """A 2D C-grid velocity state we can compute field metrics for."""
     if not (hasattr(state, "u") and hasattr(state, "v")):
         return False
     return jnp.ndim(state.u) == 2 and jnp.ndim(state.v) == 2
+
+
+def _supports_qg_balance(model: Any, state: State) -> bool:
+    """Whether ``qg_balance_residual`` applies — barotropic QG only.
+
+    A 2-D PV field signals the barotropic ``q = nabla^2 psi`` relation the
+    residual assumes; baroclinic / reparameterized QG (3-D PV, modal-Helmholtz
+    inversion with a stretching term) are excluded.
+    """
+    diff = getattr(model, "diff", None)
+    q = getattr(state, "q", None)
+    return (
+        q is not None
+        and jnp.ndim(q) == 2
+        and hasattr(model, "_invert_pv")
+        and diff is not None
+        and hasattr(diff, "laplacian")
+    )
 
 
 def _supports_geostrophy(model: Any, state: State) -> bool:
@@ -229,13 +299,35 @@ def compute_eval_metrics(model: Any, state: State) -> dict[str, float]:
         state: The state to evaluate (typically the final integrated state).
 
     Returns:
-        Flat ``{metric_name: float}`` dict — a subset of ``rms_divergence``,
-        ``total_enstrophy``, ``kinetic_energy`` and ``geostrophic_imbalance``.
+        Flat ``{metric_name: float}`` dict. For velocity-state models a subset
+        of ``rms_divergence`` / ``total_enstrophy`` / ``kinetic_energy`` /
+        ``geostrophic_imbalance``; for QG (vorticity/streamfunction) models a
+        ``qg_balance_residual``. Plus any conserved quantities the model's
+        ``diagnose(state).invariants()`` advertises, prefixed ``invariant_``.
         Empty when no metric applies.
     """
     out: dict[str, float] = {}
+
+    # Conserved-invariant snapshot — works for any model that advertises them
+    # via diagnose().invariants() (SWM mass/energy/enstrophy/Casimir, QG
+    # energy/enstrophy), independent of the velocity-state field metrics below.
+    try:
+        invariants = model.diagnose(state).invariants()
+    except Exception:
+        invariants = {}
+    for name, value in invariants.items():
+        with contextlib.suppress(TypeError, ValueError):
+            out[f"invariant_{name}"] = float(jnp.asarray(value))
+
     if not (hasattr(model, "diff") and hasattr(model, "grid")):
         return out
+
+    # QG (vorticity/streamfunction) models: a PV-inversion balance residual
+    # stands in for the velocity-divergence metric they cannot define.
+    if _supports_qg_balance(model, state):
+        out["qg_balance_residual"] = float(qg_balance_residual(model, state))
+        return out
+
     if not _is_fluid_state(state):
         return out
 

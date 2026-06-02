@@ -37,7 +37,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+import jax.numpy as jnp
 import numpy as np
+from loguru import logger
 
 
 if TYPE_CHECKING:
@@ -115,8 +117,210 @@ def check_cfl(
         )
 
 
+def check_deformation_radius(
+    spec: RunSpec,
+    model: Any,
+    *,
+    n_cells_min: float = 2.0,
+    n_cells_warn: float = 4.0,
+) -> None:
+    """Pre-flight: the first baroclinic deformation radius is resolved.
+
+    Resolving the first internal deformation radius ``L_d = sqrt(g'H)/f0``
+    with at least ``n_cells_min`` grid cells is necessary for baroclinic
+    instability and mesoscale eddies (Hallberg 2013). FAIL when
+    ``L_d/dx < n_cells_min``; WARN when ``n_cells_min <= L_d/dx <
+    n_cells_warn``.
+
+    Requires a stratified model exposing ``model.strat.g_prime`` /
+    ``model.strat.H`` and ``model.consts.f0`` (multilayer SWM, baroclinic /
+    reparameterized QG). Raises for models without that structure so a typo'd
+    config doesn't silently skip the check.
+
+    Args:
+        spec: The validated RunSpec (unused; present for signature symmetry).
+        model: The constructed model instance.
+        n_cells_min: Minimum ``L_d/dx`` below which to FAIL. Defaults to 2.0.
+        n_cells_warn: ``L_d/dx`` below which to WARN. Defaults to 4.0.
+
+    Raises:
+        AssertionFailedError: If the model lacks stratification/Coriolis, or
+            if ``L_d/dx < n_cells_min``.
+    """
+    strat = getattr(model, "strat", None)
+    consts = getattr(model, "consts", None)
+    grid = getattr(model, "grid", None)
+    if strat is None or grid is None or consts is None:
+        raise AssertionFailedError(
+            f"deformation_radius: model {type(model).__name__!r} lacks "
+            f"strat/consts/grid; this check applies to stratified models "
+            f"(multilayer SWM, baroclinic/reparameterized QG)."
+        )
+    g_prime = getattr(strat, "g_prime", None)
+    H = getattr(strat, "H", None)
+    f0 = getattr(consts, "f0", None)
+    if g_prime is None or H is None or f0 is None:
+        raise AssertionFailedError(
+            f"deformation_radius: model {type(model).__name__!r} does not "
+            f"expose strat.g_prime / strat.H / consts.f0; cannot compute L_d."
+        )
+    f0_abs = abs(float(f0))
+    if f0_abs == 0.0:
+        raise AssertionFailedError(
+            "deformation_radius: consts.f0 is zero; L_d is undefined on an "
+            "f-plane with no rotation."
+        )
+    # Per-interface deformation radius sqrt(g'_k H_k) / f0; use the smallest
+    # (the tightest-to-resolve internal mode). The barotropic interface
+    # (g_prime[0] = full gravity) is excluded when internal modes exist.
+    g_prime_arr = np.asarray(jnp.asarray(g_prime))
+    H_arr = np.asarray(jnp.asarray(H))
+    radii = np.sqrt(g_prime_arr * H_arr) / f0_abs
+    internal = radii[1:] if radii.shape[0] > 1 else radii
+    Ld = float(np.min(internal))
+    dx_min = float(min(grid.dx, grid.dy))
+    ratio = Ld / dx_min
+    if ratio < n_cells_min:
+        raise AssertionFailedError(
+            f"deformation_radius check FAILED: L_d/dx = {ratio:.2f} < "
+            f"{n_cells_min}\n"
+            f"  L_d   = {Ld:.0f} m (smallest internal deformation radius)\n"
+            f"  dx    = {dx_min:.0f} m\n"
+            f"  → eddies will be suppressed; refine the grid or pick an "
+            f"eddy-permitting configuration."
+        )
+    if ratio < n_cells_warn:
+        logger.warning(
+            "deformation radius marginally resolved: L_d/dx = {:.2f} "
+            "(L_d={:.0f} m, dx={:.0f} m)",
+            ratio,
+            Ld,
+            dx_min,
+        )
+
+
+def check_pv_inversion(
+    spec: RunSpec,
+    model: Any,
+    *,
+    tol: float = 1e-6,
+) -> None:
+    """Pre-flight: the barotropic-QG PV-inversion round-trip closes to eps.
+
+    Inverts the model's initial PV to a streamfunction and re-derives PV via
+    the Laplacian, asserting a small relative residual. Catches a broken
+    elliptic solver, wrong boundary stencil, or mis-staggered field *before*
+    burning compute on the integration.
+
+    Scoped to **barotropic** QG, where the PV is exactly the relative
+    vorticity ``q = nabla^2 psi`` (a 2-D PV field). Baroclinic /
+    reparameterized QG invert a modal Helmholtz operator
+    ``q = nabla^2 psi - f0^2 A psi``; re-deriving with the bare Laplacian would
+    drop the stretching term and the residual would be O(1) for a perfectly
+    balanced state, so those models are rejected rather than checked with the
+    wrong operator. Raises for non-QG models too, so a typo doesn't silently
+    skip the check.
+
+    Args:
+        spec: The validated RunSpec (used only to rebuild the initial state).
+        model: The constructed barotropic QG model instance.
+        tol: Maximum allowed relative residual ``||L(psi) - q|| / ||q||``.
+
+    Raises:
+        AssertionFailedError: If the model is not a barotropic QG model, or if
+            the round-trip residual exceeds ``tol``.
+    """
+    invert = getattr(model, "_invert_pv", None)
+    diff = getattr(model, "diff", None)
+    if invert is None or diff is None or not hasattr(diff, "laplacian"):
+        raise AssertionFailedError(
+            f"pv_inversion: model {type(model).__name__!r} has no _invert_pv / "
+            f"diff.laplacian; this check applies to barotropic QG."
+        )
+    # Build the factory initial state for this scenario x model pair.
+    from somax._src.cli._factories import build
+    from somax._src.cli._run import _model_params, _scenario_params
+
+    _model, state0 = build(
+        spec.scenario.name,
+        spec.model.name,
+        scenario_params=_scenario_params(spec),
+        model_params=_model_params(spec),
+    )
+    q = state0.q
+    if q.ndim != 2:
+        raise AssertionFailedError(
+            f"pv_inversion: model {type(model).__name__!r} has a "
+            f"{q.ndim}-D PV field; this check is scoped to barotropic QG "
+            f"(2-D PV, q = laplacian(psi)). Baroclinic / reparameterized QG "
+            f"invert a modal Helmholtz operator with a stretching term that "
+            f"the bare Laplacian round-trip cannot reproduce."
+        )
+    psi = invert(q)
+    q_hat = diff.laplacian(psi)
+    # Compare on the interior (drop the one-cell ghost halo the BC owns).
+    interior = (slice(1, -1), slice(1, -1))
+    num = float(jnp.linalg.norm((q_hat - q)[interior]))
+    den = float(jnp.linalg.norm(q[interior]))
+    if den < 1e-30:
+        # A zero initial PV trivially round-trips; nothing to assert.
+        return
+    residual = num / den
+    if residual > tol:
+        raise AssertionFailedError(
+            f"pv_inversion check FAILED: relative residual {residual:.2e} > "
+            f"tol {tol:.0e}\n"
+            f"  ||laplacian(psi) - q|| / ||q|| over the interior.\n"
+            f"  A clean elliptic solver should close this to ~machine eps; a "
+            f"large residual points at a broken solver, wrong BC stencil, or "
+            f"mis-staggered field."
+        )
+
+
+def check_static_stability(spec: RunSpec, model: Any) -> None:
+    """Pre-flight: the stratification is statically stable (g' > 0).
+
+    A layered model is statically stable when every interface reduced gravity
+    is positive (``g'_k > 0`` ⇔ ``N^2 > 0`` ⇔ density increasing with depth).
+    A non-positive interface reduced gravity is a convectively unstable /
+    mis-ordered density profile.
+
+    Applies to stratified models exposing ``model.strat.g_prime``; raises for
+    models without it.
+
+    Args:
+        spec: The validated RunSpec (unused; signature symmetry).
+        model: The constructed model instance.
+
+    Raises:
+        AssertionFailedError: If the model lacks stratification, or any
+            internal interface reduced gravity is non-positive.
+    """
+    strat = getattr(model, "strat", None)
+    g_prime = getattr(strat, "g_prime", None) if strat is not None else None
+    if g_prime is None:
+        raise AssertionFailedError(
+            f"static_stability: model {type(model).__name__!r} has no "
+            f"strat.g_prime; this check applies to stratified layered models."
+        )
+    g_prime_arr = np.asarray(jnp.asarray(g_prime))
+    # g_prime[0] is the surface (full gravity); internal interfaces are [1:].
+    internal = g_prime_arr[1:] if g_prime_arr.shape[0] > 1 else g_prime_arr
+    if np.any(internal <= 0.0):
+        bad = np.where(internal <= 0.0)[0] + 1
+        raise AssertionFailedError(
+            f"static_stability check FAILED: non-positive reduced gravity at "
+            f"interface(s) {bad.tolist()} (g' = {internal.tolist()}).\n"
+            f"  N^2 <= 0 implies a convectively unstable / mis-ordered density "
+            f"profile. Order layers light-to-dense (top-to-bottom)."
+        )
+
+
 PREFLIGHT_ASSERTIONS: dict[str, Callable[..., None]] = {
     "cfl": check_cfl,
+    "deformation_radius": check_deformation_radius,
+    "pv_inversion": check_pv_inversion,
+    "static_stability": check_static_stability,
 }
 
 

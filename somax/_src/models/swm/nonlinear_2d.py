@@ -73,6 +73,10 @@ class NonlinearSW2DDiagnostics(Diagnostics):
     Args:
         energy: Domain-integrated total energy.
         enstrophy: Domain-integrated potential enstrophy.
+        mass: Domain-integrated mass/volume ``dx*dy * sum h`` — conserved
+            to machine precision by the flux-form mass equation.
+        casimir_q3: PV Casimir ``dx*dy * sum q^3 * h`` — higher-moment
+            material invariant.
         potential_vorticity: PV field q = (ζ+f)/h at X-points.
         relative_vorticity: ζ = dv/dx - du/dy at X-points.
         kinetic_energy_field: KE at T-points.
@@ -80,9 +84,20 @@ class NonlinearSW2DDiagnostics(Diagnostics):
 
     energy: Array
     enstrophy: Array
+    mass: Array
+    casimir_q3: Array
     potential_vorticity: Float[Array, "Ny Nx"]
     relative_vorticity: Float[Array, "Ny Nx"]
     kinetic_energy_field: Float[Array, "Ny Nx"]
+
+    def invariants(self) -> dict[str, Array]:
+        """Mass (tight), total energy, potential enstrophy, PV Casimir."""
+        return {
+            "mass": self.mass,
+            "total_energy": self.energy,
+            "potential_enstrophy": self.enstrophy,
+            "casimir_q3": self.casimir_q3,
+        }
 
 
 class NonlinearShallowWater2D(SomaxModel):
@@ -228,9 +243,15 @@ class NonlinearShallowWater2D(SomaxModel):
         h_on_X = self.interp.T_to_X(h)
         enstrophy = 0.5 * cell_area * jnp.sum(q[s] ** 2 * h_on_X[s])
 
+        # Mass/volume (flux-form invariant) and the q^3 Casimir.
+        mass = cell_area * jnp.sum(h[s])
+        casimir_q3 = cell_area * jnp.sum(q[s] ** 3 * h_on_X[s])
+
         return NonlinearSW2DDiagnostics(
             energy=energy,
             enstrophy=enstrophy,
+            mass=mass,
+            casimir_q3=casimir_q3,
             potential_vorticity=q,
             relative_vorticity=zeta,
             kinetic_energy_field=ke,

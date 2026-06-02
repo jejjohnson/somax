@@ -12,6 +12,7 @@ geostrophic manifold.
 from __future__ import annotations
 
 import equinox as eqx
+import jax.numpy as jnp
 from finitevolx import (
     CartesianGrid2D,
     Difference2D,
@@ -43,6 +44,8 @@ class ReparamQGDiagnostics(Diagnostics):
         total_energy: Domain-integrated total energy (scalar).
         enstrophy: Domain-integrated potential enstrophy per layer.
         total_enstrophy: Total potential enstrophy (scalar).
+        mass: Domain-integrated mass/volume per layer (flux-form invariant).
+        casimir_q3: PV Casimir per layer.
         potential_vorticity: PV field per layer.
         relative_vorticity: Relative vorticity per layer.
         kinetic_energy_field: KE at T-points per layer.
@@ -55,12 +58,28 @@ class ReparamQGDiagnostics(Diagnostics):
     total_energy: Array
     enstrophy: Array
     total_enstrophy: Array
+    mass: Array
+    casimir_q3: Array
     potential_vorticity: Float[Array, "nl Ny Nx"]
     relative_vorticity: Float[Array, "nl Ny Nx"]
     kinetic_energy_field: Float[Array, "nl Ny Nx"]
     psi: Float[Array, "nl Ny Nx"]
     u_ageostrophic: Float[Array, "nl Ny Nx"]
     v_ageostrophic: Float[Array, "nl Ny Nx"]
+
+    def invariants(self) -> dict[str, Array]:
+        """Mass (tight), total energy, potential enstrophy, PV Casimir.
+
+        Inherited from the underlying SWM diagnostics — the reparameterized
+        QG integrates the SWM vector field, so the same flux-form mass
+        conservation and implicit-dissipation caveats apply.
+        """
+        return {
+            "mass": jnp.sum(self.mass),
+            "total_energy": self.total_energy,
+            "potential_enstrophy": self.total_enstrophy,
+            "casimir_q3": jnp.sum(self.casimir_q3),
+        }
 
 
 class ReparameterizedQG(SomaxModel):
@@ -218,6 +237,8 @@ class ReparameterizedQG(SomaxModel):
             total_energy=swm_diag.total_energy,
             enstrophy=swm_diag.enstrophy,
             total_enstrophy=swm_diag.total_enstrophy,
+            mass=swm_diag.mass,
+            casimir_q3=swm_diag.casimir_q3,
             potential_vorticity=swm_diag.potential_vorticity,
             relative_vorticity=swm_diag.relative_vorticity,
             kinetic_energy_field=swm_diag.kinetic_energy_field,

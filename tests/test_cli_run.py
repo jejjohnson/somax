@@ -777,3 +777,72 @@ class TestRestartStateValidation:
         # legacy deep-JAX trace.
         with pytest.raises((ValueError, TypeError)):
             _run.restart(wrong_spec, prod_dir, restart_from=final_state_path)
+
+
+# ----------------------------------------------------------------------
+# Monitors + manifest (observability) — integration (auto-marked slow)
+# ----------------------------------------------------------------------
+
+
+class TestMonitorWiring:
+    def test_default_monitors_preserve_clean_run(self, tmp_path: Path) -> None:
+        """Default monitors don't change a well-behaved run's outcome."""
+        spec = _swm_jet_spec(t1_seconds=600.0, dt=10.0, nx=16, ny=16)
+        result = _run.simulate(spec, tmp_path)
+        assert (tmp_path / "metrics.json").exists()
+        assert result.metrics_path is not None
+
+    def test_custom_monitor_can_terminate(self, tmp_path: Path) -> None:
+        """A user monitor requesting termination aborts and writes nothing."""
+        from somax.monitor import BaseMonitor, MonitorVerdict, default_monitors
+
+        class _Stop(BaseMonitor):
+            name = "stop"
+
+            def on_chunk_end(self, model, state, info):
+                return MonitorVerdict(terminate=True, reason="forced stop")
+
+        spec = _swm_jet_spec(t1_seconds=600.0, dt=10.0, nx=16, ny=16)
+        with pytest.raises(IntegrationDivergedError, match="forced stop"):
+            _run.simulate(spec, tmp_path, monitors=[*default_monitors(), _Stop()])
+        assert not (tmp_path / "metrics.json").exists()
+        assert not (tmp_path / "final_state.zarr").exists()
+
+    def test_cfl_blowup_raises_integration_diverged(self, tmp_path: Path) -> None:
+        """An in-JIT guard blow-up still surfaces as IntegrationDivergedError."""
+        spec = _swm_jet_spec(t1_seconds=4 * 3600.0, dt=300.0, nx=64, ny=64)
+        with pytest.raises(IntegrationDivergedError) as exc_info:
+            _run.simulate(spec, tmp_path)
+        msg = str(exc_info.value)
+        assert "non-finite" in msg
+        assert "CFL" in msg
+        assert not (tmp_path / "final_state.zarr").exists()
+
+
+class TestManifest:
+    def test_manifest_written_with_provenance(self, tmp_path: Path) -> None:
+        spec = _swm_jet_spec(t1_seconds=600.0, dt=10.0, nx=16, ny=16)
+        _run.simulate(spec, tmp_path)
+        manifest_path = tmp_path / "manifest.json"
+        assert manifest_path.exists()
+        manifest = json.loads(manifest_path.read_text())
+        for key in (
+            "jax_version",
+            "somax_version",
+            "x64_enabled",
+            "platform",
+            "config_sha256",
+            "dt",
+            "t0",
+            "t1",
+        ):
+            assert key in manifest
+        assert len(manifest["config_sha256"]) == 64
+
+    def test_config_hash_stable_across_runs(self, tmp_path: Path) -> None:
+        spec = _swm_jet_spec(t1_seconds=600.0, dt=10.0, nx=16, ny=16)
+        _run.simulate(spec, tmp_path / "a")
+        _run.simulate(spec, tmp_path / "b")
+        ha = json.loads((tmp_path / "a" / "manifest.json").read_text())["config_sha256"]
+        hb = json.loads((tmp_path / "b" / "manifest.json").read_text())["config_sha256"]
+        assert ha == hb

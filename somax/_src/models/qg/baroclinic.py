@@ -88,6 +88,18 @@ class BaroclinicQGDiagnostics(Diagnostics):
     relative_vorticity: Float[Array, "nl Ny Nx"]
     rossby_radii: Array
 
+    def invariants(self) -> dict[str, Array]:
+        """Total kinetic energy and total enstrophy across layers.
+
+        Quadratic QG invariants summed over layers; conserved up to
+        time-truncation error in the inviscid/unforced limit, otherwise a
+        budget signal.
+        """
+        return {
+            "total_kinetic_energy": self.total_kinetic_energy,
+            "total_enstrophy": self.total_enstrophy,
+        }
+
 
 class BaroclinicQG(SomaxModel):
     r"""Multilayer quasi-geostrophic model on an Arakawa C-grid.

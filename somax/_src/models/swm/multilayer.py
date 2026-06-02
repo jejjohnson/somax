@@ -25,6 +25,7 @@ from jaxtyping import Array, Float, PyTree
 from somax._src.core.model import SomaxModel
 from somax._src.core.transforms import ModalTransform, StratificationProfile
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.guards import guard_finite, guard_positive
 
 
 class MultilayerSW2DState(State):
@@ -79,6 +80,11 @@ class MultilayerSW2DDiagnostics(Diagnostics):
         total_energy: Domain-integrated total energy (scalar).
         enstrophy: Domain-integrated potential enstrophy per layer.
         total_enstrophy: Total potential enstrophy (scalar).
+        mass: Domain-integrated layer mass/volume per layer,
+            ``M_k = dx*dy * sum h_k``. Conserved to machine precision by
+            the flux-form mass equation in a closed/periodic basin.
+        casimir_q3: PV Casimir per layer, ``dx*dy * sum q^3 * h`` — a
+            higher-moment material invariant, more sensitive than enstrophy.
         potential_vorticity: PV field q = (zeta+f)/h at X-points per layer.
         relative_vorticity: Relative vorticity zeta per layer.
         kinetic_energy_field: KE at T-points per layer.
@@ -88,9 +94,26 @@ class MultilayerSW2DDiagnostics(Diagnostics):
     total_energy: Array
     enstrophy: Array
     total_enstrophy: Array
+    mass: Array
+    casimir_q3: Array
     potential_vorticity: Float[Array, "nl Ny Nx"]
     relative_vorticity: Float[Array, "nl Ny Nx"]
     kinetic_energy_field: Float[Array, "nl Ny Nx"]
+
+    def invariants(self) -> dict[str, Array]:
+        """Mass (tight), total energy, potential enstrophy, PV Casimir.
+
+        Mass is conserved to machine precision (flux-form continuity); the
+        energy/enstrophy/Casimir entries drift under the FV upwind PV
+        advection's implicit dissipation and are drift signals, not zero
+        targets.
+        """
+        return {
+            "mass": jnp.sum(self.mass),
+            "total_energy": self.total_energy,
+            "potential_enstrophy": self.total_enstrophy,
+            "casimir_q3": jnp.sum(self.casimir_q3),
+        }
 
 
 class MultilayerShallowWater2D(SomaxModel):
@@ -155,6 +178,11 @@ class MultilayerShallowWater2D(SomaxModel):
     ) -> MultilayerSW2DState:
         """Compute tendencies for the multilayer shallow water equations."""
         h, u, v = state.h, state.u, state.v
+        # FAIL-HARD (in-JIT): layer thickness must stay strictly positive.
+        # The PV q_k = (zeta_k + f) / h_k below is singular as h_k -> 0+, so a
+        # non-positive thickness makes the rest of the tendency meaningless;
+        # halt at this step rather than integrate a blow-up to the chunk end.
+        h = guard_positive(h, where="layer thickness h_k")
         nu = self.params.lateral_viscosity
         kappa = self.params.bottom_drag
         tau0 = self.params.wind_amplitude
@@ -200,6 +228,13 @@ class MultilayerShallowWater2D(SomaxModel):
         # --- 8. Bottom drag (bottom layer only) ---
         du_dt = du_dt.at[-1].add(-kappa * u[-1])
         dv_dt = dv_dt.at[-1].add(-kappa * v[-1])
+
+        # FAIL-HARD (in-JIT): halt at the first step that produces a
+        # non-finite tendency, earlier than the host-side _assert_finite_state
+        # net which only runs once the chunk has fully integrated.
+        dh_dt = guard_finite(dh_dt, where="RHS dh/dt")
+        du_dt = guard_finite(du_dt, where="RHS du/dt")
+        dv_dt = guard_finite(dv_dt, where="RHS dv/dt")
 
         return MultilayerSW2DState(h=dh_dt, u=du_dt, v=dv_dt)
 
@@ -248,11 +283,17 @@ class MultilayerShallowWater2D(SomaxModel):
             0.5 * jnp.sum(q[s] ** 2 * h_on_X[s], axis=(-2, -1)) * cell_area
         )
 
+        # Mass/volume per layer (flux-form invariant) and the q^3 Casimir.
+        mass_per_layer = jnp.sum(h[s], axis=(-2, -1)) * cell_area
+        casimir_q3_per_layer = jnp.sum(q[s] ** 3 * h_on_X[s], axis=(-2, -1)) * cell_area
+
         return MultilayerSW2DDiagnostics(
             energy=energy_per_layer,
             total_energy=jnp.sum(energy_per_layer),
             enstrophy=enstrophy_per_layer,
             total_enstrophy=jnp.sum(enstrophy_per_layer),
+            mass=mass_per_layer,
+            casimir_q3=casimir_q3_per_layer,
             potential_vorticity=q,
             relative_vorticity=zeta,
             kinetic_energy_field=ke,

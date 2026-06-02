@@ -76,6 +76,19 @@ class BarotropicQGDiagnostics(Diagnostics):
     enstrophy: Array
     relative_vorticity: Float[Array, "Ny Nx"]
 
+    def invariants(self) -> dict[str, Array]:
+        """Energy and enstrophy — the barotropic QG quadratic invariants.
+
+        The Arakawa Jacobian used for advection conserves both energy and
+        enstrophy in the inviscid, unforced limit (up to time-truncation
+        error), so for that configuration these drive close to zero; with
+        viscosity/forcing they quantify the budget instead.
+        """
+        return {
+            "kinetic_energy": self.kinetic_energy,
+            "enstrophy": self.enstrophy,
+        }
+
 
 class BarotropicQG(SomaxModel):
     r"""Barotropic quasi-geostrophic model on an Arakawa C-grid.
