@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.10](https://github.com/jejjohnson/somax/compare/somax-v0.0.9...somax-v0.0.10) (2026-06-02)
+
+
+### Features
+
+* **observe:** diagnostics, monitors & fail-fast observability ([#129](https://github.com/jejjohnson/somax/issues/129)) ([92b28d6](https://github.com/jejjohnson/somax/commit/92b28d6b2d63d84d44260a0269c294af5756e66a))
+
+
+### Bug Fixes
+
+* **solvers:** matrix-free IMEX solver to avoid dense-Jacobian OOM ([#55](https://github.com/jejjohnson/somax/issues/55)) ([#131](https://github.com/jejjohnson/somax/issues/131)) ([ef1f323](https://github.com/jejjohnson/somax/commit/ef1f3232161b0d928f2e6db22e8e3b064ab3bf95))
+
 ## [0.0.9](https://github.com/jejjohnson/somax/compare/somax-v0.0.8...somax-v0.0.9) (2026-06-02)
 
 
