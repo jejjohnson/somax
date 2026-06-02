@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.9](https://github.com/jejjohnson/somax/compare/somax-v0.0.8...somax-v0.0.9) (2026-06-02)
+
+
+### Features
+
+* **da:** filterax ensemble-filter integration (Phase 4a) ([#127](https://github.com/jejjohnson/somax/issues/127)) ([71c16e9](https://github.com/jejjohnson/somax/commit/71c16e9a9eeea1b2837f2ee379c63aa3d6f9bd60))
+* **da:** vardax variational 4DVar integration (Phase 4b) ([#128](https://github.com/jejjohnson/somax/issues/128)) ([d7ee90d](https://github.com/jejjohnson/somax/commit/d7ee90d490b3acb737b3ed2bb0cdb01fedd91f42))
+* **eval:** reference-free evaluation metrics on the model grid (Phase 3) ([#125](https://github.com/jejjohnson/somax/issues/125)) ([0b32990](https://github.com/jejjohnson/somax/commit/0b32990bfcd97746460802c9db704f44f1e377b5))
+
 ## [0.0.8](https://github.com/jejjohnson/somax/compare/somax-v0.0.7...somax-v0.0.8) (2026-04-20)
 
 
