@@ -198,24 +198,19 @@ def _render_symbol(name: str, obj: Any) -> list[str]:
 def _render_optional_listing(module_name: str) -> list[str]:
     """Compact bullet listing for an optional module, parsed from source.
 
-    Renders full per-symbol entries when the optional dependency is installed
-    (so the module imports), otherwise a name-only listing parsed statically.
+    The names are read **statically from source**, never by importing the
+    module, so the generated page is byte-identical regardless of whether the
+    optional dependency (the ``sim`` / ``da`` group) happens to be installed
+    in the environment running the generator. (Importing when available and
+    falling back otherwise would make the output env-dependent and break the
+    committed-page sync test across machines / CI.)
     """
     rel_path, group = _OPTIONAL_MODULES[module_name]
-    lines: list[str] = []
-    try:
-        module = importlib.import_module(module_name)
-    except Exception:
-        module = None
-    if module is not None:
-        for name in sorted(_public_names(module)):
-            lines += _render_symbol(name, getattr(module, name))
-        return lines
-    lines.append(
+    lines = [
         f"These symbols live in `{module_name}` and require the optional "
-        f"`{group}` dependency group (`uv sync --group {group}`):"
-    )
-    lines.append("")
+        f"`{group}` dependency group (`uv sync --group {group}`):",
+        "",
+    ]
     for name in sorted(_all_from_source(rel_path)):
         lines.append(f"- `{module_name}.{name}`")
     lines.append("")
