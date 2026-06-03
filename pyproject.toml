@@ -133,6 +133,11 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 "content/tutorials/operators.ipynb" = ["E501", "I001", "RUF003"]
 "content/tutorials/boundary_conditions.py" = ["E501", "I001", "RUF003"]
 "content/tutorials/boundary_conditions.ipynb" = ["E501", "I001", "RUF003"]
+# Phase 1-4 "Theory & Practice" chapters: same authoring conventions as the
+# Phase 0 chapters above (single-line prose, interleaved imports, Unicode math
+# typography such as en-dashes and the × sign).
+"content/tutorials/phase*.py" = ["E501", "I001", "RUF003"]
+"content/tutorials/phase*.ipynb" = ["E501", "I001", "RUF003"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
