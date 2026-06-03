@@ -50,7 +50,7 @@ dev = [
     "pre-commit>=3.7",
 ]
 lint = [
-    "ruff>=0.9",
+    "ruff>=0.15.15",
 ]
 typecheck = [
     "ty==0.0.40",
