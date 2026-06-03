@@ -81,7 +81,7 @@ docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
     "mkdocs-jupyter>=0.26.3",
-    "jupytext>=1.16",
+    "jupytext>=1.19.3",
     "ipykernel>=7.2.0",
     "matplotlib>=3.10.8",
 ]
