@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.11](https://github.com/jejjohnson/somax/compare/somax-v0.0.10...somax-v0.0.11) (2026-06-03)
+
+
+### Documentation
+
+* **book:** generated strict-myst api reference ([#54](https://github.com/jejjohnson/somax/issues/54)) ([#135](https://github.com/jejjohnson/somax/issues/135)) ([629db0a](https://github.com/jejjohnson/somax/commit/629db0a67aef8b8e7f2fe6cc7baf08e050c39b02))
+* **book:** phase 0 foundations chapters — grids, operators, boundary conditions ([#52](https://github.com/jejjohnson/somax/issues/52)) ([#132](https://github.com/jejjohnson/somax/issues/132)) ([540f71f](https://github.com/jejjohnson/somax/commit/540f71f8bad58cf9e8d6e5f146849b9d8dfd56ed))
+* **book:** phase 1-4 theory & practice chapters ([#53](https://github.com/jejjohnson/somax/issues/53)) ([#134](https://github.com/jejjohnson/somax/issues/134)) ([fc606e6](https://github.com/jejjohnson/somax/commit/fc606e6b191b871f172e6a7aa46eb8db05f5674d))
+
 ## [0.0.10](https://github.com/jejjohnson/somax/compare/somax-v0.0.9...somax-v0.0.10) (2026-06-02)
 
 
