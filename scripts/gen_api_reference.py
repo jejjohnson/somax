@@ -38,15 +38,22 @@ OUTPUT = REPO_ROOT / "content" / "api" / "reference.md"
 # (module, human title, one-line blurb). Order defines the page order.
 SECTIONS: list[tuple[str, str, str]] = [
     (
-        "somax",
-        "Core Contract",
-        "The base types every model and component is built on.",
+        "somax.core",
+        "Core",
+        "The base types, model contract, term algebra, forcing, stratification, "
+        "elliptic caches, and checkpointing that every component builds on "
+        "(re-exported at the top level as ``somax`` and ``somax.core``).",
     ),
     (
         "somax.models",
         "Models",
         "Dynamical-system and ocean model classes, with their state, "
         "parameter, and diagnostic companions.",
+    ),
+    (
+        "somax.domain",
+        "Domain",
+        "Spatial and temporal domain descriptors.",
     ),
     (
         "somax.operators",
@@ -74,12 +81,26 @@ SECTIONS: list[tuple[str, str, str]] = [
         "Matrix-free IMEX integration helpers for stiff term models.",
     ),
     (
+        "somax.io",
+        "IO & Persistence",
+        "xarray / zarr helpers that round-trip model states and snapshots "
+        "(requires the ``sim`` dependency group).",
+    ),
+    (
         "somax.da",
         "Data Assimilation",
         "Adapters wiring somax models into the filterax / vardax DA stack "
         "(requires the optional ``da`` dependency group).",
     ),
 ]
+
+# Modules that may be absent in a minimal install (optional dependency
+# groups). They are documented from their ``__all__`` parsed statically from
+# source, so the page generates whether or not the deps are installed.
+_OPTIONAL_MODULES = {
+    "somax.io": ("somax/io.py", "sim"),
+    "somax.da": ("somax/da.py", "da"),
+}
 
 # Suffixes that mark a model's data companions — listed compactly rather than
 # expanded in full, to keep the (large) models section readable.
@@ -114,14 +135,14 @@ def _public_names(module: Any) -> list[str]:
     return [n for n in names if not inspect.ismodule(getattr(module, n, None))]
 
 
-def _da_names_from_source() -> list[str]:
-    """Read ``somax.da.__all__`` from source without importing the module.
+def _all_from_source(rel_path: str) -> list[str]:
+    """Read a module's ``__all__`` from source without importing it.
 
-    ``somax.da`` imports ``filterax`` / ``vardax`` at module load, which are
-    only present with the ``da`` group, so we parse the ``__all__`` list
-    statically instead.
+    Used for optional-dependency modules (``somax.io`` needs the ``sim``
+    group, ``somax.da`` needs the ``da`` group) so the page generates
+    whether or not those deps are installed.
     """
-    src = (REPO_ROOT / "somax" / "da.py").read_text()
+    src = (REPO_ROOT / rel_path).read_text()
     tree = ast.parse(src)
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -174,20 +195,38 @@ def _render_symbol(name: str, obj: Any) -> list[str]:
     return lines
 
 
+def _render_optional_listing(module_name: str) -> list[str]:
+    """Compact bullet listing for an optional module, parsed from source.
+
+    Renders full per-symbol entries when the optional dependency is installed
+    (so the module imports), otherwise a name-only listing parsed statically.
+    """
+    rel_path, group = _OPTIONAL_MODULES[module_name]
+    lines: list[str] = []
+    try:
+        module = importlib.import_module(module_name)
+    except Exception:
+        module = None
+    if module is not None:
+        for name in sorted(_public_names(module)):
+            lines += _render_symbol(name, getattr(module, name))
+        return lines
+    lines.append(
+        f"These symbols live in `{module_name}` and require the optional "
+        f"`{group}` dependency group (`uv sync --group {group}`):"
+    )
+    lines.append("")
+    for name in sorted(_all_from_source(rel_path)):
+        lines.append(f"- `{module_name}.{name}`")
+    lines.append("")
+    return lines
+
+
 def _render_module(module_name: str, title: str, blurb: str) -> list[str]:
     lines = [f"## {title}", "", blurb, ""]
 
-    if module_name == "somax.da":
-        names = _da_names_from_source()
-        lines.append(
-            "These symbols live in `somax.da` and require the optional `da` "
-            "dependency group (`uv sync --group da`):"
-        )
-        lines.append("")
-        for name in sorted(names):
-            lines.append(f"- `somax.da.{name}`")
-        lines.append("")
-        return lines
+    if module_name in _OPTIONAL_MODULES:
+        return lines + _render_optional_listing(module_name)
 
     module = importlib.import_module(module_name)
     names = _public_names(module)

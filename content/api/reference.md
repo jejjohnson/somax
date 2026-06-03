@@ -7,9 +7,47 @@ This page is generated from the public-API docstrings by
 changes; a CI smoke test keeps the committed page in sync.
 ```
 
-## Core Contract
+## Core
 
-The base types every model and component is built on.
+The base types, model contract, term algebra, forcing, stratification, elliptic caches, and checkpointing that every component builds on (re-exported at the top level as ``somax`` and ``somax.core``).
+
+### `Compose`
+
+*class*
+
+```python
+Compose(outer: 'Term', inner: 'Term') -> None
+```
+
+Operator composition: ``Compose(outer, inner)(state) = outer(inner(state))``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+This is the multiplicative ("product") side of the algebra, in the
+operator-composition sense rather than a pointwise product —
+e.g. a biharmonic operator is ``Compose(laplacian, laplacian)``.
+
+The inner term's output is fed back in as the ``state`` argument of
+the outer term (both must map a field to a like-shaped field). ``t``
+and ``args`` are threaded through unchanged.
+
+Args:
+    outer: Applied second (to the inner result).
+    inner: Applied first (to the incoming state).
+```
+````
+
+### `ConstantForcing`
+
+*class*
+
+```python
+ConstantForcing(field: 'Array') -> None
+```
+
+Time-independent forcing field.
 
 ### `Diagnostics`
 
@@ -28,6 +66,173 @@ Base class for on-demand diagnostic quantities.
 Computed from a model state via ``model.diagnose(state)``.
 ```
 ````
+
+### `DirichletHelmholtzCache`
+
+*class*
+
+```python
+DirichletHelmholtzCache(solver: 'eqx.Module') -> None
+```
+
+Helmholtz cache for Dirichlet (DST-based) domains.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Wraps a ``DirichletHelmholtzSolver2D`` from spectraldiffx.
+The solver's ``alpha`` field is set at construction time, so
+``solve`` just forwards the RHS.
+
+Attributes:
+    solver: A ``DirichletHelmholtzSolver2D`` instance (stores dx, dy, alpha).
+```
+````
+
+### `ForcingProtocol`
+
+*class*
+
+```python
+ForcingProtocol() -> None
+```
+
+Base class for forcing terms.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Forcing objects are callable modules that return a forcing field
+given a time and grid. They compose with somax models via the
+``forcing`` attribute.
+```
+````
+
+### `HelmholtzCache`
+
+*class*
+
+```python
+HelmholtzCache() -> None
+```
+
+Cached Helmholtz solver for repeated (lap - lambda) psi = f solves.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Wraps a spectraldiffx Helmholtz solver together with the Helmholtz
+parameter so that models can call ``cache.solve(rhs)`` without
+re-specifying grid or BC details each time.
+
+This is the base class. Use one of the concrete subclasses below.
+```
+````
+
+### `InterpolatedForcing`
+
+*class*
+
+```python
+InterpolatedForcing(path: 'dfx.AbstractPath') -> None
+```
+
+Data-driven forcing via diffrax path interpolation.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Wraps a ``diffrax.AbstractPath`` (e.g. ``LinearInterpolation``,
+``CubicInterpolation``) to provide forcing from tabulated data.
+
+Args:
+    path: A diffrax interpolation path built from data.
+```
+````
+
+### `ModalTransform`
+
+*class*
+
+```python
+ModalTransform(Cl2m: "Float[Array, 'nl nl']", Cm2l: "Float[Array, 'nl nl']", eigenvalues: 'Array', rossby_radii: 'Array') -> None
+```
+
+Precomputed layer-to-mode and mode-to-layer transforms.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Computed from physical parameters (H, g_prime, f0) via
+eigendecomposition of the layer coupling matrix A (delegated
+to ``finitevolx.build_coupling_matrix`` and
+``finitevolx.decompose_vertical_modes``).
+
+Attributes:
+    Cl2m: Layer-to-mode projection matrix.
+    Cm2l: Mode-to-layer reconstruction matrix.
+    eigenvalues: Modal eigenvalues (related to 1/Rd^2).
+    rossby_radii: Rossby deformation radii per mode [m].
+```
+````
+
+### `MultimodalHelmholtzCache`
+
+*class*
+
+```python
+MultimodalHelmholtzCache(caches: 'tuple[HelmholtzCache, ...]') -> None
+```
+
+Batched Helmholtz cache for multilayer modal solves.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Stores one Helmholtz cache per vertical mode, enabling efficient
+per-mode PV inversion for each mode k.
+
+Attributes:
+    caches: Tuple of ``HelmholtzCache`` instances, one per mode.
+```
+````
+
+### `NeumannHelmholtzCache`
+
+*class*
+
+```python
+NeumannHelmholtzCache(solver: 'eqx.Module') -> None
+```
+
+Helmholtz cache for Neumann (DCT-based) domains.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Wraps a ``NeumannHelmholtzSolver2D`` from spectraldiffx.
+
+Attributes:
+    solver: A ``NeumannHelmholtzSolver2D`` instance (stores dx, dy, alpha).
+```
+````
+
+### `NoForcing`
+
+*class*
+
+```python
+NoForcing() -> None
+```
+
+Zero forcing (free evolution).
 
 ### `Params`
 
@@ -48,6 +253,29 @@ Use ``eqx.field(static=True)`` for non-differentiable parameters.
 ```
 ````
 
+### `PeriodicHelmholtzCache`
+
+*class*
+
+```python
+PeriodicHelmholtzCache(solver: 'eqx.Module', lambda_: 'float', zero_mean: 'bool' = True) -> None
+```
+
+Helmholtz cache for periodic (FFT-based) domains.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Wraps a ``SpectralHelmholtzSolver2D`` from spectraldiffx.
+
+Attributes:
+    solver: A ``SpectralHelmholtzSolver2D`` instance.
+    lambda_: Helmholtz parameter (>= 0).
+    zero_mean: Whether to project out the zero mode (default True).
+```
+````
+
 ### `PhysConsts`
 
 *class*
@@ -64,6 +292,78 @@ Base class for frozen physical constants.
 ```text
 All fields should be marked ``static=True`` so they are invisible
 to ``jax.grad`` and treated as compile-time constants.
+```
+````
+
+### `Scaled`
+
+*class*
+
+```python
+Scaled(term: 'Term', coeff: 'float | Array') -> None
+```
+
+A term multiplied by a scalar coefficient.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The coefficient is an ordinary (non-static) field, so it is a JAX
+leaf visible to ``jax.grad`` / ``jax.jit`` — coefficients can be
+optimised or swept. Scaling delegates its :attr:`kind` to the inner
+term.
+
+Args:
+    term: The term to scale.
+    coeff: Scalar multiplier (may be a Python float or a JAX scalar).
+```
+````
+
+### `SeasonalWindForcing`
+
+*class*
+
+```python
+SeasonalWindForcing(tau0: 'Array', omega: 'float', phase: 'float' = 0.0) -> None
+```
+
+Sinusoidal wind forcing with learnable amplitude.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Produces ``tau0 * cos(omega * t + phase)`` where ``tau0`` is a
+differentiable amplitude field visible to ``jax.grad``.
+
+Args:
+    tau0: Learnable amplitude array (visible to ``jax.grad``).
+    omega: Angular frequency (static, e.g. ``2 * pi / T``).
+    phase: Phase offset in radians (static).
+```
+````
+
+### `SimulationCheckpointer`
+
+*class*
+
+```python
+SimulationCheckpointer(checkpoint_dir: 'str', checkpoint_interval: 'int') -> None
+```
+
+Manages periodic checkpointing during long simulations.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Uses orbax-checkpoint for JAX-native pytree serialization.
+Compatible with DVC for versioning checkpoint files.
+
+Attributes:
+    checkpoint_dir: Directory for checkpoint files.
+    checkpoint_interval: Number of steps between saves.
 ```
 ````
 
@@ -106,6 +406,225 @@ Base class for model state vectors.
 ```text
 All model states should subclass this to enable interoperability
 with the somax model contract and JAX transformations.
+```
+````
+
+### `StratificationProfile`
+
+*class*
+
+```python
+StratificationProfile(H: 'Array', g_prime: 'Array', rho: 'Array | None' = None) -> None
+```
+
+Discrete vertical stratification for a layered ocean model.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Stores layer thicknesses, reduced gravities, and (optionally) layer
+densities. Created from physical parameters via factory methods.
+
+Attributes:
+    H: Layer resting thicknesses [m], shape ``(nl,)``, top to bottom.
+    g_prime: Reduced gravities [m/s^2], shape ``(nl,)``.
+        ``g_prime[i]`` is the reduced gravity at the interface above
+        layer i.  For the top layer ``g_prime[0]`` equals full gravity
+        (rigid-lid convention) or a free-surface reduced gravity.
+    rho: Layer densities [kg/m^3], shape ``(nl,)``, or ``None``.
+```
+````
+
+### `Sum`
+
+*class*
+
+```python
+Sum(terms: 'tuple[Term, ...]') -> None
+```
+
+Additive composition of terms: ``sum_i terms[i](t, state, args)``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Construct via the ``+`` operator or :meth:`of` (which flattens nested
+sums so ``(a + b) + c`` and ``a + (b + c)`` yield the same flat tree).
+
+Args:
+    terms: The summands. Leaves are added leaf-wise across the pytree.
+```
+````
+
+### `Term`
+
+*class*
+
+```python
+Term() -> None
+```
+
+A single additive contribution to a model right-hand side.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Subclasses implement :meth:`__call__` with the signature
+``(t, state, args=None) -> tendency`` where ``tendency`` is a pytree
+matching the structure of ``state``.
+
+Terms compose via the arithmetic operators (:meth:`__add__`,
+:meth:`__mul__`, :meth:`__sub__`, :meth:`__neg__`, :meth:`__matmul__`).
+The :attr:`kind` property drives IMEX partitioning; leaf terms are
+``"explicit"`` by default — wrap with :func:`implicit` to mark a term
+for the implicit stage of a splitting integrator.
+```
+````
+
+### `TermFn`
+
+*class*
+
+```python
+TermFn(fn: 'Callable[[float, PyTree, PyTree | None], PyTree]', _kind: 'Kind' = 'explicit') -> None
+```
+
+Adapt a plain callable into a :class:`Term`.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Useful for wrapping an existing model's per-physics function, or for
+quick composition in tests. The callable must accept
+``(t, state, args)`` and return a tendency pytree.
+
+Args:
+    fn: The vector-field callable.
+    kind: IMEX label for the wrapped function. Defaults to
+        ``"explicit"``.
+```
+````
+
+### `TermModel`
+
+*class*
+
+```python
+TermModel(terms: 'Term') -> None
+```
+
+A :class:`SomaxModel` whose RHS is an assembled :class:`Term` tree.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Instead of hand-writing ``vector_field``, a ``TermModel`` carries a
+composed term (a :class:`~somax._src.core.terms.Sum` of physics
+contributions). ``vector_field`` evaluates the tree, and
+``build_terms`` delegates to
+:func:`~somax._src.core.terms.build_diffrax_terms`, which returns a
+:class:`diffrax.MultiTerm` when the tree mixes explicit and implicit
+summands — so an IMEX solver can route each physics term through the
+appropriate stage.
+
+Subclasses still own ``apply_boundary_conditions``. The base
+implementation here is a pass-through; override it to enforce BCs.
+
+Args:
+    terms: The assembled right-hand-side term tree.
+
+Example:
+    >>> rhs = AdvectionTerm(grid) + diffusivity * DiffusionTerm(grid)
+    >>> model = MyTermModel(terms=rhs)
+    >>> sol = model.integrate(state0, t0=0.0, t1=1.0, dt=0.01)
+```
+````
+
+### `build_diffrax_terms`
+
+*function*
+
+```python
+build_diffrax_terms(term: 'Term', *, state_fn: 'Callable[[PyTree], PyTree] | None' = None) -> 'dfx.AbstractTerm'
+```
+
+Build the diffrax term object for ``term``, IMEX-aware.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+- If every summand shares a single kind, returns one
+  :class:`diffrax.ODETerm`.
+- If the term mixes explicit and implicit summands, returns a
+  :class:`diffrax.MultiTerm` whose first element is the explicit
+  ``ODETerm`` and whose second is the implicit ``ODETerm`` — the
+  ordering expected by diffrax IMEX solvers
+  (``KenCarp3``/``KenCarp4``/``Sil3``/``KenCarp5``).
+
+Args:
+    term: The assembled right-hand-side term.
+    state_fn: Optional state preprocessor applied to ``y`` before
+        each sub-term evaluation (e.g. boundary-condition
+        enforcement). Applied uniformly to the explicit and implicit
+        parts so both integrator stages see a BC-consistent state.
+
+Returns:
+    A diffrax term suitable for ``diffrax.diffeqsolve``.
+
+Raises:
+    ValueError: If ``term`` has no summands (e.g. the zero term).
+```
+````
+
+### `explicit`
+
+*function*
+
+```python
+explicit(term: 'Term') -> 'Term'
+```
+
+Tag ``term`` for the explicit stage of an IMEX integrator.
+
+### `implicit`
+
+*function*
+
+```python
+implicit(term: 'Term') -> 'Term'
+```
+
+Tag ``term`` for the implicit stage of an IMEX integrator.
+
+### `partition`
+
+*function*
+
+```python
+partition(term: 'Term') -> 'tuple[Term | None, Term | None]'
+```
+
+Split ``term`` into ``(explicit, implicit)`` sub-terms by kind.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Flattens nested :class:`Sum` nodes and groups the summands by their
+:attr:`Term.kind`. A non-Sum term is treated as a single summand.
+
+Args:
+    term: The (possibly composite) term to split.
+
+Returns:
+    ``(explicit_part, implicit_part)``. Either element is ``None``
+    when no summand of that kind is present.
 ```
 ````
 
@@ -984,6 +1503,46 @@ Each model carries dataclass companions for its state, differentiable parameters
 - `NonlinearSW2DState` — State for the 2D nonlinear shallow water model.
 - `ReparamQGDiagnostics` — Diagnostics for the reparameterized QG model.
 
+## Domain
+
+Spatial and temporal domain descriptors.
+
+### `Domain`
+
+*class*
+
+```python
+Domain(xmin: Union[float, Iterable[float]], xmax: Union[float, Iterable[float]], dx: Union[float, Iterable[float]], Nx: Union[int, Iterable[int]], Lx: Union[float, Iterable[float]])
+```
+
+Domain class for a rectangular domain
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Attributes:
+    size (Tuple[int]): The size of the domain
+    xmin: (Iterable[float]): The min bounds for the input domain
+    xmax: (Iterable[float]): The max bounds for the input domain
+    coord (List[Array]): The coordinates of the domain
+    grid (Array): A grid of the domain
+    ndim (int): The number of dimenions of the domain
+    size (Tuple[int]): The size of each dimenions of the domain
+    cell_volume (float): The total volume of a grid cell
+```
+````
+
+### `TimeDomain`
+
+*class*
+
+```python
+TimeDomain(tmin: float, tmax: float, dt: float)
+```
+
+TimeDomain(tmin, tmax, dt)
+
 ## pipekit Operators
 
 Bridge that exposes somax models as ``pipekit.Operator`` stages.
@@ -1696,6 +2255,183 @@ Args:
 Returns:
     A ``diffrax.PIDController`` for ``model.integrate(...,
     stepsize_controller=...)``.
+```
+````
+
+## IO & Persistence
+
+xarray / zarr helpers that round-trip model states and snapshots (requires the ``sim`` dependency group).
+
+### `append_to_dataset`
+
+*function*
+
+```python
+append_to_dataset(ds: 'xr.Dataset', path: 'str | Path', *, append_dim: 'str' = 'time') -> 'None'
+```
+
+Append a Dataset to an existing zarr store along a dimension.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Used by chunked-integration workflows (see GitHub issue #70) where
+snapshots are written incrementally rather than all at once.
+
+Args:
+    ds: Dataset to append. Must share dim ordering and non-append
+        shapes with the existing store.
+    path: Existing zarr store written by :func:`save_dataset`.
+    append_dim: Dimension to append along. Defaults to ``"time"``.
+```
+````
+
+### `dataset_to_state`
+
+*function*
+
+```python
+dataset_to_state(ds: 'xr.Dataset', state_class: 'type[State] | None' = None, *, time_index: 'int' = -1) -> 'State'
+```
+
+Reconstruct a single State from an xarray Dataset.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The inverse of :func:`state_to_dataset` and :func:`snapshots_to_dataset`.
+If the Dataset has a ``time`` axis, ``time_index`` selects which slice
+to materialize (default: the last slice, suitable for restart from a
+final state).
+
+Args:
+    ds: Dataset previously produced by ``state_to_dataset`` or
+        ``snapshots_to_dataset``.
+    state_class: Target State class. If omitted, recovered from the
+        Dataset attrs (``state_class`` and ``state_module``).
+    time_index: Time slice to extract when ``ds`` has a ``time``
+        dimension. Defaults to ``-1``.
+
+Returns:
+    State instance whose fields are JAX arrays matching the Dataset
+    variables.
+```
+````
+
+### `load_dataset`
+
+*function*
+
+```python
+load_dataset(path: 'str | Path') -> 'xr.Dataset'
+```
+
+Open a zarr store as an xarray Dataset.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Returns a Dataset backed by the on-disk store. Variables are read
+lazily by xarray on first access (no extra chunking framework
+required). Pass the result through ``.load()`` to materialize, or
+use dask-aware tooling if you need parallel chunking.
+
+Args:
+    path: Filesystem path to a zarr store written by
+        :func:`save_dataset`.
+```
+````
+
+### `save_dataset`
+
+*function*
+
+```python
+save_dataset(ds: 'xr.Dataset', path: 'str | Path', *, mode: 'str' = 'w') -> 'None'
+```
+
+Persist a Dataset to a zarr store.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Uses zarr v3 by default. The store is a directory tree at ``path``.
+
+Args:
+    ds: Dataset to write.
+    path: Filesystem path for the zarr store (directory).
+    mode: ``"w"`` to overwrite, ``"w-"`` to fail if exists,
+        ``"a"`` to append.
+```
+````
+
+### `snapshots_to_dataset`
+
+*function*
+
+```python
+snapshots_to_dataset(snapshots: 'State', ts: 'jnp.ndarray | np.ndarray', *, state_class: 'type[State] | None' = None, attrs: 'dict[str, Any] | None' = None) -> 'xr.Dataset'
+```
+
+Convert a time-stacked PyTree of states to an xarray Dataset.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+``diffrax.diffeqsolve`` returns a ``Solution`` whose ``ys`` field has
+the same PyTree structure as ``y0`` but with each leaf array stacked
+along a leading time axis. This function maps that structure into an
+xarray Dataset with a proper ``time`` coordinate.
+
+Args:
+    snapshots: PyTree (typically ``sol.ys``) where each leaf has shape
+        ``(Nt, ...)``. Must be the same class as a single State.
+    ts: 1-D array of save times of length ``Nt``.
+    state_class: Optional explicit State class. If omitted, the class
+        of ``snapshots`` is used (this is the common case for
+        ``sol.ys`` since diffrax preserves the y0 type).
+    attrs: Extra attrs to merge into the Dataset.
+
+Returns:
+    Dataset with a ``time`` coordinate and one variable per State
+    field, each carrying the canonical dimension names.
+```
+````
+
+### `state_to_dataset`
+
+*function*
+
+```python
+state_to_dataset(state: 'State', *, time: 'float | None' = None, attrs: 'dict[str, Any] | None' = None) -> 'xr.Dataset'
+```
+
+Convert a single model State to an xarray Dataset.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Each field of the State PyTree becomes a Dataset variable. Dimension
+names are inferred from array rank using the canonical convention
+(1D → ``x``; 2D → ``y x``; 3D → ``layer y x``).
+
+Args:
+    state: A somax ``State`` instance (equinox.Module subclass).
+    time: Optional scalar time at which this state was sampled. If
+        provided, a singleton ``time`` dimension is prepended to every
+        variable and a matching coordinate is created.
+    attrs: Extra attrs to merge into the Dataset (in addition to the
+        automatic ``state_class`` / ``state_module`` markers).
+
+Returns:
+    Self-describing xarray Dataset suitable for round-tripping via
+    :func:`dataset_to_state`.
 ```
 ````
 

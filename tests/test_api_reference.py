@@ -49,7 +49,16 @@ def test_page_has_no_autodoc_directive() -> None:
 
 
 def test_page_covers_core_and_models() -> None:
-    """Sanity: the page documents the core contract and the model classes."""
+    """Sanity: the page documents the core, model, domain, and IO surfaces."""
     text = PAGE_PATH.read_text()
-    for token in ("## Core Contract", "## Models", "`Lorenz63`", "`BarotropicQG`"):
+    for token in (
+        "## Core",
+        "## Models",
+        "## Domain",
+        "`Lorenz63`",
+        "`BarotropicQG`",
+        "`TermModel`",
+        "`SimulationCheckpointer`",
+        "`Domain`",
+    ):
         assert token in text
