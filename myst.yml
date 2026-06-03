@@ -56,7 +56,7 @@ project:
         - file: content/tutorials/step13_channel_flow
     - title: API Reference
       children:
-        - file: content/api/reference
+        - file: content/api/reference.md
 site:
   template: book-theme
   title: "somax: Simple Ocean Models in JAX"
