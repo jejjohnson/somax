@@ -83,7 +83,7 @@ docs = [
     "mkdocs-jupyter>=0.26.3",
     "jupytext>=1.16",
     "ipykernel>=7.2.0",
-    "matplotlib>=3.10.8",
+    "matplotlib>=3.10.9",
 ]
 
 [build-system]
