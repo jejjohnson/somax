@@ -25,14 +25,19 @@ from somax.core import (
     SeasonalWindForcing,
     SpatialBasis,
     TransformedForcing,
+    VectorBasisForcing,
     add_to,
+    add_vector_to,
     control_filter,
+    geostrophic_currents,
     matern_spectral_density,
+    spatial_from_divfree,
     spatial_from_eof,
     spatial_from_fourier,
     spatial_from_gabor,
     spatial_from_graph_laplacian,
     spatial_from_rbf,
+    spatial_from_spherical_rbf,
     spatial_from_wavelet,
     ssh_geostrophic,
     sss_coastal,
@@ -452,6 +457,117 @@ class TestSSTFrontalPreset:
         bf = sst_frontal(domain, num_basis_per_dim=4, length_scale=0.3)
         diff, static = eqx.partition(bf, control_filter(bf))
         diff = eqx.tree_at(lambda d: d.coeffs, diff, jnp.ones_like(bf.coeffs))
+
+        def loss(diff):
+            return jnp.sum(eqx.combine(diff, static)(0.0) ** 2)
+
+        grads = jax.grad(loss)(diff)
+        assert grads.spatial.Phi is None
+        assert bool(jnp.any(grads.coeffs != 0.0))
+
+
+# --- geodesic (on-sphere) and divergence-free (vector) bases ------------------
+
+
+class TestSpatialFromSphericalRBF:
+    def _lonlat_domain(self):
+        return Domain(
+            xmin=(-20.0, -10.0),
+            xmax=(20.0, 10.0),
+            dx=(40.0 / 5, 20.0 / 5),
+            Nx=(6, 6),
+            Lx=(40.0, 20.0),
+        )
+
+    def test_shape_and_finite(self):
+        domain = self._lonlat_domain()
+        centers = jnp.array([[0.0, 0.0], [10.0, 5.0]])
+        sb = spatial_from_spherical_rbf(domain, centers, jnp.array([0.3, 0.3]))
+        assert sb.Phi.shape == (domain.coords.shape[0], 2)
+        assert bool(jnp.all(jnp.isfinite(sb.Phi)))
+
+    def test_peak_near_centre(self):
+        # an atom centred at an actual grid node peaks (==1) at that node.
+        domain = self._lonlat_domain()
+        node = domain.coords[7]  # some interior (lon, lat) node, in degrees
+        sb = spatial_from_spherical_rbf(domain, node[None, :], jnp.array([0.2]))
+        np.testing.assert_allclose(jnp.max(sb.Phi[:, 0]), 1.0, atol=1e-5)
+
+    def test_rejects_non_2d_domain(self):
+        d1 = Domain(xmin=0.0, xmax=1.0, dx=0.25, Nx=5, Lx=1.0)
+        with pytest.raises(ValueError):
+            spatial_from_spherical_rbf(d1, jnp.zeros((1, 2)), jnp.ones(1))
+
+
+class TestVectorDivFreeForcing:
+    def test_builder_and_field_shapes(self):
+        domain = _domain_2d(ny=6, nx=6)
+        ngrid = domain.coords.shape[0]
+        vsb = spatial_from_divfree(domain, num_basis_per_dim=3, length_scale=2.0)
+        assert vsb.Phi.shape == (ngrid, 9, 2)  # (Ngrid, m, ncomp)
+        assert vsb.std.shape == (9,)
+        vf = geostrophic_currents(domain, num_basis_per_dim=3, length_scale=2.0)
+        assert isinstance(vf, VectorBasisForcing)
+        assert vf(0.0).shape == (2, *tuple(domain.Nx))  # (ncomp, Ny, Nx)
+
+    def test_add_vector_to_places_components(self):
+        domain = _domain_2d(ny=6, nx=6)
+        vf = geostrophic_currents(domain, num_basis_per_dim=3, length_scale=2.0)
+        vf = eqx.tree_at(lambda f: f.coeffs, vf, jnp.ones_like(vf.coeffs))
+
+        class UVH(eqx.Module):
+            u: jnp.ndarray
+            v: jnp.ndarray
+            h: jnp.ndarray
+
+        zeros = jnp.zeros(tuple(domain.Nx))
+        state = UVH(u=zeros, v=zeros, h=zeros)
+        term = ForcingTerm(vf, place=add_vector_to(("u", "v")))
+        tendency = term(0.0, state)
+        field = vf(0.0)
+        np.testing.assert_allclose(tendency.u, field[0], atol=1e-6)
+        np.testing.assert_allclose(tendency.v, field[1], atol=1e-6)
+        # the untargeted component stays zero
+        assert bool((tendency.h == 0).all())
+
+    def test_field_is_divergence_free(self):
+        # The forcing the bank builds is incompressible *analytically*: the
+        # continuous field reconstructed with the same centring/box mapping the
+        # builder uses has zero divergence (autodiff, not finite differences).
+        from geonnax.basis import divfree_basis
+
+        domain = _domain_2d(ny=6, nx=6)
+        vf = geostrophic_currents(domain, num_basis_per_dim=3, length_scale=2.0)
+        coeffs = jnp.ones_like(vf.coeffs)
+        xmin, xmax = jnp.asarray(domain.xmin), jnp.asarray(domain.xmax)
+        centre = 0.5 * (xmin + xmax)
+        L = tuple(float(h) for h in 0.5 * (xmax - xmin))
+
+        def velocity(p):
+            phi, _ = divfree_basis((p - centre)[None, :], 3, L)  # (1, m, 2)
+            return jnp.einsum("gmc,m->gc", phi, coeffs)[0]  # (u, v)
+
+        for p in jnp.array([[3.0, 7.0], [5.0, 5.0], [1.0, 9.0]]):
+            jac = jax.jacfwd(velocity)(p)  # (2, 2): d (u, v)_i / d (x, y)_k
+            div = jac[0, 0] + jac[1, 1]
+            np.testing.assert_allclose(div, 0.0, atol=1e-5)
+
+    def test_whiten_and_regularization(self):
+        domain = _domain_2d(ny=6, nx=6)
+        vf = geostrophic_currents(domain, num_basis_per_dim=3, length_scale=2.0)
+        u = jax.random.normal(jax.random.PRNGKey(11), vf.coeffs.shape)
+        whitened = vf.whiten(u)
+        np.testing.assert_allclose(
+            whitened.coeffs, vf.spatial.prior_std() * u, atol=1e-6
+        )
+        expected = 0.5 * jnp.sum((whitened.coeffs / vf.spatial.prior_std()) ** 2)
+        np.testing.assert_allclose(whitened.regularization(), expected, atol=1e-5)
+
+    def test_gradient_scoped_to_coeffs(self):
+        domain = _domain_2d(ny=6, nx=6)
+        vf = geostrophic_currents(domain, num_basis_per_dim=3, length_scale=2.0)
+        diff, static = eqx.partition(vf, control_filter(vf))
+        diff = eqx.tree_at(lambda d: d.coeffs, diff, jnp.ones_like(vf.coeffs))
 
         def loss(diff):
             return jnp.sum(eqx.combine(diff, static)(0.0) ** 2)

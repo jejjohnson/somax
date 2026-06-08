@@ -7,17 +7,16 @@ spatial basis on a :class:`~somax._src.domain.domain.Domain` to build a
 as a :class:`~somax._src.core.basis.TemporalBasis`, and assembles them into
 ready-made :class:`~somax._src.core.basis.BasisForcing` presets (the "bank").
 
-Only the **public** ``geonnax.basis`` surface is used: the overcomplete Gabor
-frame (``gabor_frame_grid``), the placeable radial basis (``rbf_basis``), and
-the Gaussian-in-time window (``gaussian_window_features``). geonnax returns the
-synthesis matrix plus the *geometry* half of its basis contract (per-atom
-wavenumbers for the frame); somax turns that geometry into a per-mode prior std
-(``Lambda^{1/2}``) via a spectral law. The spectral *eigenbases*
-(``fourier_basis``, ``graph_laplacian_eigpairs``) currently live in geonnax's
-private ``geonnax._basis`` namespace, so the presets that need the eigenvalue
-half of the contract (HSGP Fourier, graph-Laplacian) are deferred until those
-primitives are promoted to the public API. See
-``content/notes/forcing_basis.md`` for the full design.
+Only the **public** ``geonnax.basis`` surface is used. The frames
+(``gabor_frame_grid``, ``rbf_basis``, ``spherical_rbf_basis``) return the
+synthesis matrix plus the *geometry* half of the basis contract, which somax
+turns into a per-mode prior std via a spectral / prescribed law; the spectral
+eigenbases (``fourier_basis``, ``graph_laplacian_eigpairs``) return eigenvalues,
+weighted here by the Matérn spectral density; ``eof_basis`` is data-driven and
+returns its own singular spectrum; ``wavelet_basis_2d`` is orthonormal. The
+vector ``divfree_basis`` feeds the :class:`~somax._src.core.basis.VectorBasisForcing`
+seam for incompressible ``(u, v)`` forcing. See ``content/notes/forcing_basis.md``
+for the full design.
 
 The dictionary is evaluated once, at build time, on the static ``Domain``; the
 resulting :class:`~somax._src.core.basis.BasisForcing` keeps ``__call__`` to one
@@ -31,12 +30,14 @@ import math
 import jax.numpy as jnp
 import numpy as np
 from geonnax.basis import (
+    divfree_basis,
     eof_basis,
     fourier_basis,
     gabor_frame_grid,
     gaussian_window_features,
     graph_laplacian_eigpairs,
     rbf_basis,
+    spherical_rbf_basis,
     wavelet_basis_2d,
 )
 from jaxtyping import Array, Float
@@ -46,6 +47,8 @@ from somax._src.core.basis import (
     ConstantInTime,
     SpatialBasis,
     TemporalBasis,
+    VectorBasisForcing,
+    VectorSpatialBasis,
 )
 from somax._src.domain.domain import Domain
 
@@ -538,14 +541,173 @@ def sst_frontal(
     )
 
 
+# --- geodesic (on-sphere) and divergence-free (vector) builders --------------
+#
+# The last two geonnax bases: spherical_rbf_basis is scalar but needs unit
+# Cartesian inputs (the domain's lon/lat coords are mapped to the sphere here),
+# and divfree_basis is a vector basis that feeds the VectorBasisForcing seam.
+
+
+def _lonlat_to_xyz(lonlat: Float[Array, "N 2"]) -> Float[Array, "N 3"]:
+    """Map ``(lon, lat)`` (radians) to unit Cartesian directions ``(x, y, z)``."""
+    lon = lonlat[:, 0]
+    lat = lonlat[:, 1]
+    cos_lat = jnp.cos(lat)
+    return jnp.stack(
+        [cos_lat * jnp.cos(lon), cos_lat * jnp.sin(lon), jnp.sin(lat)], axis=-1
+    )
+
+
+def spatial_from_spherical_rbf(
+    domain: Domain,
+    centers_lonlat: Float[Array, "m 2"],
+    widths: Float[Array, " m"],
+    *,
+    kernel: str = "gaussian",
+    std: Float[Array, " m"] | float = 1.0,
+    degrees: bool = True,
+) -> SpatialBasis:
+    """Build a :class:`SpatialBasis` from a geodesic (on-sphere) radial basis.
+
+    Maps the domain's ``(lon, lat)`` ``coords`` and the ``(lon, lat)`` atom
+    centres onto the unit sphere, then evaluates geonnax
+    :func:`~geonnax.basis.spherical_rbf_basis` in great-circle distance — placed
+    atoms whose support is a geodesic cap, for global / regional ocean fields.
+    The prior std is prescribed per centre.
+
+    Args:
+        domain: A 2D ``(lon, lat)`` domain; ``coords`` are the evaluation points.
+        centers_lonlat: Atom centres as ``(lon, lat)`` of shape ``(m, 2)``.
+        widths: Per-atom geodesic width (radians) of shape ``(m,)``.
+        kernel: ``"gaussian"`` or ``"wendland_c2"`` / ``"wendland_c4"``.
+        std: Prescribed per-centre prior std; a scalar is broadcast.
+        degrees: If ``True`` (default), ``coords`` and ``centers_lonlat`` are in
+            degrees and converted to radians before mapping to the sphere.
+
+    Returns:
+        A :class:`SpatialBasis` over the placed geodesic atoms.
+
+    Raises:
+        ValueError: If the domain is not 2D.
+    """
+    if domain.ndim != 2:
+        raise ValueError(
+            "spatial_from_spherical_rbf needs a 2D (lon, lat) domain; "
+            f"got {domain.ndim}D"
+        )
+    coords = domain.coords  # (Ngrid, 2) = (lon, lat)
+    centres = jnp.asarray(centers_lonlat)
+    if degrees:
+        coords = jnp.deg2rad(coords)
+        centres = jnp.deg2rad(centres)
+    Phi = spherical_rbf_basis(
+        _lonlat_to_xyz(coords),
+        _lonlat_to_xyz(centres),
+        jnp.asarray(widths),
+        kernel=kernel,
+    )
+    std_arr = jnp.broadcast_to(jnp.asarray(std, dtype=Phi.dtype), (Phi.shape[1],))
+    return SpatialBasis(Phi=Phi, std=std_arr)
+
+
+def spatial_from_divfree(
+    domain: Domain,
+    *,
+    num_basis_per_dim: int | tuple[int, ...],
+    length_scale: float = 1.0,
+    nu: float = 1.5,
+    variance: float = 1.0,
+) -> VectorSpatialBasis:
+    """Build a :class:`VectorSpatialBasis` of divergence-free velocity atoms.
+
+    Evaluates geonnax :func:`~geonnax.basis.divfree_basis` on ``domain.coords``
+    (centred on the box) — incompressible ``(u, v)`` atoms, the skew gradients of
+    the box stream functions, for parameterising near-geostrophic current error.
+    The per-mode prior follows the Matérn spectral density of the stream-function
+    eigenvalues (a kinetic-energy spectral law).
+
+    Args:
+        domain: A 2D model domain.
+        num_basis_per_dim: Per-axis number of 1D stream-function modes.
+        length_scale: Matérn length scale of the prior.
+        nu: Matérn smoothness of the prior.
+        variance: Marginal variance of the prior.
+
+    Returns:
+        A :class:`VectorSpatialBasis` whose ``Phi`` is ``(Ngrid, m, 2)``.
+
+    Raises:
+        ValueError: If the domain is not 2D.
+    """
+    if domain.ndim != 2:
+        raise ValueError(f"spatial_from_divfree needs a 2D domain; got {domain.ndim}D.")
+    coords = domain.coords
+    xmin = jnp.asarray(domain.xmin)
+    xmax = jnp.asarray(domain.xmax)
+    xy = coords - 0.5 * (xmin + xmax)  # centred on the box
+    L = tuple(float(h) for h in 0.5 * (xmax - xmin))
+    Phi, lam = divfree_basis(xy, num_basis_per_dim, L)  # (Ngrid, m, 2), (m,)
+    var = matern_spectral_density(
+        jnp.sqrt(lam),
+        variance=variance,
+        length_scale=length_scale,
+        nu=nu,
+        ndim=coords.shape[1],
+    )
+    return VectorSpatialBasis(Phi=Phi, std=jnp.sqrt(var))
+
+
+def geostrophic_currents(
+    domain: Domain,
+    *,
+    num_basis_per_dim: int | tuple[int, ...] = 8,
+    length_scale: float = 1.0,
+    nu: float = 1.5,
+    variance: float = 1.0,
+) -> VectorBasisForcing:
+    """Vector preset: incompressible ``(u, v)`` current-error forcing.
+
+    A divergence-free velocity frame (geonnax ``divfree_basis``) with a Matérn
+    kinetic-energy prior, constant in time. Lift it onto a model's velocity
+    components with ``ForcingTerm(forcing, place=add_vector_to(("u", "v")))``.
+
+    Args:
+        domain: A 2D model domain.
+        num_basis_per_dim: Per-axis number of 1D stream-function modes.
+        length_scale: Matérn length scale of the prior.
+        nu: Matérn smoothness of the prior.
+        variance: Marginal variance of the prior.
+
+    Returns:
+        A :class:`~somax._src.core.basis.VectorBasisForcing` with zero initial
+        coefficients.
+    """
+    spatial = spatial_from_divfree(
+        domain,
+        num_basis_per_dim=num_basis_per_dim,
+        length_scale=length_scale,
+        nu=nu,
+        variance=variance,
+    )
+    return VectorBasisForcing(
+        coeffs=jnp.zeros(spatial.Phi.shape[1]),
+        spatial=spatial,
+        temporal=ConstantInTime(m=spatial.Phi.shape[1]),
+        grid_shape=tuple(domain.Nx),
+    )
+
+
 __all__ = [
     "GaussianWindowsInTime",
+    "geostrophic_currents",
     "matern_spectral_density",
+    "spatial_from_divfree",
     "spatial_from_eof",
     "spatial_from_fourier",
     "spatial_from_gabor",
     "spatial_from_graph_laplacian",
     "spatial_from_rbf",
+    "spatial_from_spherical_rbf",
     "spatial_from_wavelet",
     "ssh_geostrophic",
     "sss_coastal",

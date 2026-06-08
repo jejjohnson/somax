@@ -275,3 +275,120 @@ def control_filter(forcing: BasisForcing) -> BasisForcing:
     """
     filt = jtu.tree_map(lambda _: False, forcing)
     return eqx.tree_at(lambda f: f.coeffs, filt, replace=True)
+
+
+# --- vector forcing (multi-component fields) ----------------------------------
+#
+# The scalar :class:`BasisForcing` above synthesises one field placed onto one
+# state component. A *vector* basis (e.g. geonnax ``divfree_basis``, whose atoms
+# are divergence-free ``(u, v)`` velocities) needs a dictionary with a trailing
+# component axis and a placement that writes each component onto its own state
+# attribute. These mirror the scalar pieces with that one extra axis.
+
+
+class VectorSpatialBasis(eqx.Module):
+    """A precomputed vector dictionary plus the per-mode prior std.
+
+    Like :class:`SpatialBasis` but every atom is an ``ncomp``-vector field, so
+    ``Phi`` carries a trailing component axis. ``synthesize`` contracts the mode
+    axis and keeps the components, giving a ``(Ngrid, ncomp)`` field.
+
+    Attributes:
+        Phi: Dictionary of shape ``(Ngrid, m, ncomp)`` on the flattened grid.
+        std: Per-mode prior std of shape ``(m,)``.
+    """
+
+    Phi: Float[Array, " Ngrid m ncomp"]
+    std: Float[Array, " m"]
+
+    @classmethod
+    def from_array(
+        cls,
+        Phi: Float[Array, " Ngrid m ncomp"],
+        std: Float[Array, " m"] | None = None,
+    ) -> VectorSpatialBasis:
+        """Build from a precomputed vector dictionary, defaulting ``std`` to ones."""
+        Phi = jnp.asarray(Phi)
+        std = jnp.ones(Phi.shape[1]) if std is None else jnp.asarray(std)
+        return cls(Phi=Phi, std=std)
+
+    def synthesize(self, coeffs: Float[Array, " m"]) -> Float[Array, " Ngrid ncomp"]:
+        """Expand coefficients into a flat vector field, summing over the modes."""
+        return jnp.einsum("gmc,m->gc", self.Phi, coeffs)
+
+    def prior_std(self) -> Float[Array, " m"]:
+        """Return the per-mode prior std ``Lambda^{1/2}``."""
+        return self.std
+
+
+class VectorBasisForcing(ForcingProtocol):
+    """Reduced-order *vector* forcing: a fixed vector frame driven by coeffs.
+
+    The vector analogue of :class:`BasisForcing`. A single coefficient vector
+    drives all components jointly (so a divergence-free dictionary yields a
+    divergence-free forcing), and ``__call__`` returns a component-major field
+    ``(ncomp, *grid_shape)`` that :class:`ForcingTerm` places with
+    :func:`add_vector_to`.
+
+    Attributes:
+        coeffs: Learnable control of shape ``(m,)``.
+        spatial: Fixed vector dictionary and prior std.
+        temporal: Fixed temporal gate.
+        grid_shape: Field shape ``domain.Nx`` used to reshape each component.
+    """
+
+    coeffs: Float[Array, " m"]
+    spatial: VectorSpatialBasis
+    temporal: TemporalBasis
+    grid_shape: tuple[int, ...] = eqx.field(static=True)
+
+    def __call__(self, t: float, grid: eqx.Module | None = None) -> Array:
+        """Evaluate the vector forcing at ``t`` as ``(ncomp, *grid_shape)``."""
+        b = self.temporal.weights(t)  # (m,)
+        flat = self.spatial.synthesize(self.coeffs * b)  # (Ngrid, ncomp)
+        ncomp = flat.shape[-1]
+        comps = [flat[:, c].reshape(self.grid_shape) for c in range(ncomp)]
+        return jnp.stack(comps, axis=0)  # (ncomp, Ny, Nx)
+
+    def whiten(self, u: Float[Array, " m"]) -> VectorBasisForcing:
+        """Return a copy with ``coeffs = Lambda^{1/2} u`` (diagonal prior)."""
+        w = self.spatial.prior_std() * u
+        return eqx.tree_at(lambda f: f.coeffs, self, w)
+
+    def regularization(self) -> Float[Array, " "]:
+        """Prior penalty ``0.5 * sum (w / sigma)^2`` for the diagonal prior."""
+        std = self.spatial.prior_std()
+        return 0.5 * jnp.sum((self.coeffs / std) ** 2)
+
+
+def add_vector_to(
+    components: tuple[str, ...],
+    layer: int | None = None,
+) -> Callable[[PyTree, Array], PyTree]:
+    """Build a placement that adds a component-major field onto named components.
+
+    The vector counterpart of :func:`add_to`: ``field[i]`` is written onto
+    ``components[i]`` (e.g. the ``(u, v)`` velocity components), optionally at a
+    single layer. Used as the ``place`` of a :class:`ForcingTerm` wrapping a
+    :class:`VectorBasisForcing`.
+
+    Args:
+        components: State attribute names, one per field component, in order.
+        layer: Optional layer index for stacked components.
+
+    Returns:
+        A ``place(zeros, field) -> tendency`` callable, with ``field`` shaped
+        ``(len(components), *grid)``.
+    """
+
+    def _place(zeros: PyTree, field: Array) -> PyTree:
+        out = zeros
+        for i, comp in enumerate(components):
+            leaf = getattr(out, comp)
+            leaf = (
+                leaf.at[layer].add(field[i]) if layer is not None else leaf + field[i]
+            )
+            out = eqx.tree_at(lambda s, c=comp: getattr(s, c), out, leaf)
+        return out
+
+    return _place
