@@ -17,6 +17,7 @@ project:
         - file: content/notes/qg_spinup_durations
         - file: content/notes/basin_data_sources
         - file: content/notes/ecosystem_refactor_plan
+        - file: content/notes/forcing_basis
     - title: "Foundations (Phase 0)"
       children:
         - file: content/tutorials/arakawa_cgrid.ipynb
