@@ -17,6 +17,14 @@ from somax._src.core.forcing import (
     NoForcing,
     SeasonalWindForcing,
 )
+from somax._src.core.forcing_bank import (
+    GaussianWindowsInTime,
+    spatial_from_gabor,
+    spatial_from_rbf,
+    ssh_geostrophic,
+    sss_coastal,
+    tile_in_time,
+)
 from somax._src.core.helmholtz import (
     DirichletHelmholtzCache,
     HelmholtzCache,
@@ -50,6 +58,7 @@ __all__ = [
     "ForcingProtocol",
     "ForcingTerm",
     "FourierInTime",
+    "GaussianWindowsInTime",
     "HelmholtzCache",
     "InterpolatedForcing",
     "ModalTransform",
@@ -78,4 +87,9 @@ __all__ = [
     "explicit",
     "implicit",
     "partition",
+    "spatial_from_gabor",
+    "spatial_from_rbf",
+    "ssh_geostrophic",
+    "sss_coastal",
+    "tile_in_time",
 ]

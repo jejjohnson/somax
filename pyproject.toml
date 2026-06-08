@@ -34,6 +34,11 @@ dependencies = [
     "spectraldiffx>=0.0.10",
     "pipekit",
     "pipekit-cycle",
+    # Pure-function basis zoo. Supplies the spatial dictionaries (Gabor frame,
+    # radial basis) and temporal features that the reduced-order forcing
+    # (``somax._src.core.forcing_bank``) evaluates on a ``Domain``. Pinned to
+    # the 0.0.4 release commit; only the public ``geonnax.basis`` surface is used.
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@de70e81",
 ]
 
 [project.urls]

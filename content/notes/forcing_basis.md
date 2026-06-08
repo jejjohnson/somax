@@ -2,7 +2,9 @@
 
 A design note for a reduced-order, differentiable forcing API in somax, assembled from external basis primitives (geonnax) rather than reimplemented here. It introduces a single `BasisForcing` that pairs a differentiable coefficient vector with a fixed spatial dictionary, a temporal gate, and a prior — and, crucially, the small **adapter** that lets such a forcing enter a somax model's right-hand side at all.
 
-> **Status:** Proposed, with a landed vertical slice. This note was fact-checked against the somax tree (`core/forcing.py`, `core/terms.py`, `core/model.py`, `domain/domain.py`, `da/vardax_bridge.py`) and the pinned sibling repos. Several integration points the design needs **do not exist yet** and are called out explicitly below rather than assumed. The **dependency-free core** of the design has shipped in `somax/_src/core/basis.py` (re-exported from `somax.core`): `SpatialBasis`, `TemporalBasis` / `ConstantInTime` / `FourierInTime`, `BasisForcing`, `TransformedForcing`, the `ForcingTerm` seam + `add_to`, and `control_filter` — covered by `tests/core/test_basis.py`, including the QG bit-for-bit parity (TODOs 1, 2, 3, 8 below). Still open: the geonnax `spatial_from_*` builders and presets (need the geonnax dep), the Weaver–Courtier basis, and the weak-constraint vardax integration. Presets target `somax/_src/core/forcing_bank.py`. The prior layer is a separate concern (companion note `content/notes/forcing_basis_flow_prior.md`, not yet written).
+> **Status:** Proposed, with a landed vertical slice **and** the geonnax-facing builders wired in. This note was fact-checked against the somax tree (`core/forcing.py`, `core/terms.py`, `core/model.py`, `domain/domain.py`, `da/vardax_bridge.py`) and the pinned sibling repos. Several integration points the design needs **do not exist yet** and are called out explicitly below rather than assumed. The **dependency-free core** of the design shipped in `somax/_src/core/basis.py` (re-exported from `somax.core`): `SpatialBasis`, `TemporalBasis` / `ConstantInTime` / `FourierInTime`, `BasisForcing`, `TransformedForcing`, the `ForcingTerm` seam + `add_to`, and `control_filter` — covered by `tests/core/test_basis.py`, including the QG bit-for-bit parity (TODOs 1, 2, 3, 8 below). The **geonnax-facing layer** then shipped in `somax/_src/core/forcing_bank.py` (also re-exported from `somax.core`): `spatial_from_gabor` / `spatial_from_rbf` evaluate the public geonnax frames on `Domain.coords`, `GaussianWindowsInTime` wraps `gaussian_window_features`, `tile_in_time` builds the separable space-time frame, and the `ssh_geostrophic` / `sss_coastal` presets compose them (TODOs 4, 6 below, modulo the spectral presets — see next paragraph). Still open: the spectral-eigenbasis presets (HSGP Fourier, graph-Laplacian — blocked on public geonnax API, below), the Weaver–Courtier basis, and the weak-constraint vardax integration. The prior layer is a separate concern (companion note `content/notes/forcing_basis_flow_prior.md`, not yet written).
+
+> **geonnax dependency — landed pin and public-vs-private.** `geonnax` is now a real, git-pinned somax dependency (`geonnax @ git+…@de70e81`, the 0.0.4 release commit). The forcing bank uses **only the public `geonnax.basis` surface**: `gabor_frame_grid`, `rbf_basis`, `wendland_c2/c4`, `gaussian_window_features`, `seasonal_features`. The **spectral eigenbases** the design also names — `fourier_basis` / `fourier_eigenvalues_1d` (box-Laplacian) and `graph_laplacian_eigpairs` — currently live in geonnax's *private* `geonnax._basis` namespace and are deliberately left out of `geonnax.basis.__all__`. Rather than import a private namespace, the HSGP-Fourier and graph-Laplacian presets are **deferred** until those primitives are promoted to a public API (a small geonnax change: add them as convenience re-exports in `geonnax.basis`, as the Gabor/RBF frames already are). Confirmed return contracts as of the pin: `gabor_frame_grid(x, bounds, *, n_scales, base_scale, oversample) -> (Phi (N,M), centers (M,d), scales (M,), wavenumbers (M,))` with `bounds` a build-time-concrete `(d, 2)` `[lo, hi]` box; `rbf_basis(x, centers (M,d), widths (M,), *, kernel) -> Phi (N,M)`; `gaussian_window_features(t (N,), centers (M,), widths (M,)) -> (N, M)`; `fourier_basis(x, num_basis_per_dim, L) -> (Phi, lam)`; `graph_laplacian_eigpairs(A, num_basis, *, normalized) -> (eigvals (M,), eigvecs (V,M))`.
 
 > **What is real today vs. what this adds.** `core/forcing.py` defines `ForcingProtocol`, `ConstantForcing`, `NoForcing`, `SeasonalWindForcing` (learnable `tau0`), and `InterpolatedForcing` — but **no somax model currently consumes a `ForcingProtocol`.** The QG models bake a static `wind_forcing: Float[Array, "Ny Nx"]` times a learnable scalar `tau0` directly into the tendency (`qg/barotropic.py:159`, `qg/baroclinic.py:196`); the shallow-water models apply wind to the top layer directly. The model RHS is the **term algebra** (`core/terms.py`): a `Term` is `(t, state, args) -> tendency`, assembled by `build_diffrax_terms` into a `diffrax` solve. So this note is **not** "extend `forcing.py` without changing anything"; it is "add the missing seam (`ForcingTerm`) that lifts a `ForcingProtocol` field onto a state component as a tendency," and then build the reduced-order forcing on top of it. The existing `tau0 * wind_forcing` becomes the genuine, testable special case.
 
@@ -230,24 +232,30 @@ A `SpatialBasis` is built by evaluating a geonnax function on `domain.coords`; t
 
 ```python
 import jax.numpy as jnp
-from geonnax.basis import gabor_frame_grid, fourier_basis, fourier_eigenvalues
+import numpy as np
+from geonnax.basis import gabor_frame_grid          # public surface
 
 
 def spatial_from_gabor(domain, *, n_scales, base_scale, slope, amp) -> SpatialBasis:
     xy = domain.coords                          # (Ngrid, ndim)
+    # bounds is a build-time-concrete (ndim, 2) [lo, hi] box, from the static
+    # xmin / xmax tuples — not (domain.xmin, domain.xmax) directly.
+    bounds = np.stack([np.asarray(domain.xmin), np.asarray(domain.xmax)], axis=-1)
     Phi, centers, scales, wavenumbers = gabor_frame_grid(
-        xy, bounds=(domain.xmin, domain.xmax), n_scales=n_scales, base_scale=base_scale
+        xy, bounds, n_scales=n_scales, base_scale=base_scale
     )
     std = jnp.sqrt(amp * wavenumbers ** (-slope))      # SSH-like spectral law
     return SpatialBasis(Phi=Phi, std=std)
 
 
-def spatial_from_fourier(domain, *, m, length, kernel_psd) -> SpatialBasis:
-    xy = domain.coords
-    Phi = fourier_basis(xy, n_modes=m, length=length)
-    lam = fourier_eigenvalues(n_modes=m, length=length)
-    std = jnp.sqrt(kernel_psd(jnp.sqrt(lam)))          # HSGP: S(sqrt(lambda))
-    return SpatialBasis(Phi=Phi, std=std)
+# Deferred until the box-Laplacian eigenbasis is public (it currently lives in
+# the private geonnax._basis). The shape, once promoted, is:
+#
+#   from geonnax.basis import fourier_basis        # (Phi, lam), private today
+#   def spatial_from_fourier(domain, *, m, length, kernel_psd) -> SpatialBasis:
+#       Phi, lam = fourier_basis(domain.coords, num_basis_per_dim=m, L=length)
+#       std = jnp.sqrt(kernel_psd(jnp.sqrt(lam)))      # HSGP: S(sqrt(lambda))
+#       return SpatialBasis(Phi=Phi, std=std)
 ```
 
 Lognormal variables (ocean colour) wrap the synthesis in a transform:
@@ -279,15 +287,17 @@ Each preset is a thin factory: pick a geonnax spatial primitive, a geonnax tempo
 
 The spectral and Slepian bases use the **eigenvalue half** of the geonnax contract, so their `std` is a kernel spectral density of the returned eigenvalues. The Gabor frame and RBF basis use the **geometry half**, so their `std` is the wavenumber law or a prescribed per-centre value. These two return contracts — `(Phi, eigenvalues)` for spectral bases and `(Phi, centers, scales, wavenumbers)` for frames — are exactly what somax depends on and must be pinned (§ Dependency reality).
 
+As landed in `forcing_bank.py` (`GaussianWindowsInTime` wraps `gaussian_window_features`; `tile_in_time` builds the separable space-time frame; the preset defaults to constant-in-time and switches to the time-distributed regime when `windows=(centers, widths)` is passed):
+
 ```python
-from geonnax.basis import gaussian_window_features
-
-
-def ssh_geostrophic(domain, *, n_scales=6, base_scale=20e3, slope=4.0, amp=2e-6,
-                    n_time=8, window=5 * 86400.0) -> BasisForcing:
+def ssh_geostrophic(domain, *, n_scales=6, base_scale=20e3, slope=4.0,
+                    amplitude=2e-6, oversample=1.0, windows=None) -> BasisForcing:
     spatial = spatial_from_gabor(domain, n_scales=n_scales, base_scale=base_scale,
-                                 slope=slope, amp=amp)
-    temporal = GaussianWindowsInTime(tau=..., T=...)   # wraps gaussian_window_features
+                                 slope=slope, amplitude=amplitude, oversample=oversample)
+    if windows is None:
+        temporal = ConstantInTime(m=spatial.Phi.shape[1])
+    else:
+        spatial, temporal = tile_in_time(spatial, windows[0], windows[1])
     return BasisForcing(
         coeffs=jnp.zeros(spatial.Phi.shape[1]),
         spatial=spatial,
@@ -313,12 +323,12 @@ Until (1) and (2) land, weak-constraint `BasisForcing` should be exercised only 
 
 ## 10. TODOs
 
-1. `somax/_src/core/basis.py`: `SpatialBasis`, `TemporalBasis`, `BasisForcing`, `TransformedForcing`, and the `spatial_from_*` builders that call geonnax. → verify: `tests/core/test_basis.py` checks synthesis shapes, the `whiten` round-trip, the `regularization` value, and the `(Ngrid,) -> (Ny, Nx)` reshape.
+1. ✅ `somax/_src/core/basis.py`: `SpatialBasis`, `TemporalBasis`, `BasisForcing`, `TransformedForcing` (the dependency-free core); the `spatial_from_*` builders that call geonnax landed in `somax/_src/core/forcing_bank.py`. → verified: `tests/core/test_basis.py` checks synthesis shapes, the `whiten` round-trip, the `regularization` value, and the `(Ngrid,) -> (Ny, Nx)` reshape.
 2. **The `ForcingTerm` seam** (`core/terms.py` or `core/basis.py`) plus `add_to(component, layer)`. → verify: `ForcingTerm` wrapping a `ConstantForcing(wind_forcing)` scaled by `tau0` reproduces the QG `dq[0] += tau0 * wind_forcing` tendency bit for bit. **This is the highest-value first step** — it de-risks the whole design without geonnax.
 3. Wrap the geonnax temporal features as `TemporalBasis` subclasses (`FourierInTime` over `seasonal_features`, `GaussianWindowsInTime` over `gaussian_window_features`, `SplineInTime` over `InterpolatedForcing`). → verify: a one-mode `FourierInTime` reproduces `SeasonalWindForcing`.
-4. Bank presets in `forcing_bank.py`, each composing a geonnax primitive, a temporal feature, and a prior. → verify: `ssh_geostrophic` synthesises a sensible SSH-scale field and its `prior_std` follows the wavenumber law.
+4. ✅ Bank presets in `forcing_bank.py`, each composing a geonnax primitive, a temporal feature, and a prior: `ssh_geostrophic` (Gabor frame + wavenumber-law prior) and `sss_coastal` (placeable Wendland RBFs + prescribed prior), both with an optional Gaussian-window temporal gate via `tile_in_time`. → verified: `ssh_geostrophic`'s `prior_std` follows the wavenumber law and the windowed form is time-dependent. *Deferred:* the spectral presets (`sst_frontal` HSGP, `global_largescale` spherical/Slepian) wait on the public geonnax eigenbasis API.
 5. The Weaver–Courtier diffusion basis, somax-local, using the model Laplacian. → verify: a single column matches a heat-kernel smoothing of a point source.
-6. **Add and pin the prior/basis dependencies**: `geonnax` (with `rbf_basis`, `gabor_frame_grid`, `gaussian_window_features`, the eigenvalue and frame return contracts), and the prior layer (`pyrox` / `gauss_flows`). → verify: imports resolve; the documented return signatures match. *(Blocker for everything geonnax-facing.)*
+6. ✅ **Add and pin the basis dependency**: `geonnax` is git-pinned (`@de70e81`, 0.0.4) and the `rbf_basis` / `gabor_frame_grid` / `gaussian_window_features` return contracts are confirmed against the pin (see the geonnax-dependency status block above). → verified: imports resolve and the documented return signatures match. *Still open:* promote the spectral eigenbases to the public `geonnax.basis` API, and add the prior layer (`pyrox` / `gauss_flows`).
 7. **Weak-constraint vardax integration** (path 9b): per-substep absolute time in the `ForwardModel` rollout, a coefficient control, and a cost hook consuming `regularization()` / `whiten()`. → verify: a small weak-constraint reconstruction recovers a known injected forcing. *(Vardax-side project, not a wire-up.)*
 8. `control_filter` helper so optimisers update only `coeffs`. → verify: `jax.grad` of a loss has zero cotangent on `spatial.Phi`.
 9. Propagating geostrophic atoms (advected centres) for Rossby-wave structure, by passing time-dependent centres to `gabor_frame`. → verify: a propagating single atom tracks the expected phase speed.
