@@ -12,6 +12,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from somax._src.domain.domain import Domain
 from somax._src.models.qg.barotropic import BarotropicQGState
@@ -26,10 +27,16 @@ from somax.core import (
     TransformedForcing,
     add_to,
     control_filter,
+    matern_spectral_density,
+    spatial_from_eof,
+    spatial_from_fourier,
     spatial_from_gabor,
+    spatial_from_graph_laplacian,
     spatial_from_rbf,
+    spatial_from_wavelet,
     ssh_geostrophic,
     sss_coastal,
+    sst_frontal,
     tile_in_time,
 )
 
@@ -351,6 +358,104 @@ class TestSSSCoastalPreset:
 
         # seed non-zero coeffs so the loss has a gradient
         diff = eqx.tree_at(lambda d: d.coeffs, diff, jnp.ones_like(bf.coeffs))
+        grads = jax.grad(loss)(diff)
+        assert grads.spatial.Phi is None
+        assert bool(jnp.any(grads.coeffs != 0.0))
+
+
+# --- spectral / data-driven / wavelet builders (geonnax#25 public bases) ------
+
+
+class TestSpatialFromFourier:
+    def test_shape_and_matern_prior_decay(self):
+        domain = _domain_2d(ny=8, nx=8)
+        sb = spatial_from_fourier(domain, num_basis_per_dim=4, length_scale=0.3)
+        assert sb.Phi.shape[0] == domain.coords.shape[0]
+        assert sb.std.shape == (sb.Phi.shape[1],)
+        # Matern HSGP prior: variance falls off with the eigen-wavenumber, so the
+        # lowest mode carries more std than the highest.
+        assert float(sb.std[0]) > float(sb.std[-1])
+        assert bool(jnp.all(jnp.isfinite(sb.std)))
+
+    def test_matern_spectral_density_matches_closed_form(self):
+        import math
+
+        omega = jnp.array([0.0, 1.0, 2.0])
+        nu, ell, var, d = 1.5, 0.7, 2.0, 2
+        out = matern_spectral_density(
+            omega, variance=var, length_scale=ell, nu=nu, ndim=d
+        )
+        kappa2 = 2.0 * nu / ell**2
+        alpha = nu + d / 2.0
+        const = (
+            var
+            * 2.0**d
+            * math.pi ** (d / 2.0)
+            * math.gamma(alpha)
+            * (2.0 * nu) ** nu
+            / (math.gamma(nu) * ell ** (2.0 * nu))
+        )
+        expected = const * (kappa2 + omega**2) ** (-alpha)
+        np.testing.assert_allclose(out, expected, rtol=1e-6)
+
+
+class TestSpatialFromGraphLaplacian:
+    def test_shapes_and_smoothness_prior(self):
+        # ring graph over 12 nodes
+        v = 12
+        a = np.zeros((v, v))
+        for i in range(v):
+            a[i, (i + 1) % v] = 1.0
+            a[(i + 1) % v, i] = 1.0
+        sb = spatial_from_graph_laplacian(jnp.asarray(a), 5)
+        assert sb.Phi.shape == (v, 5)
+        assert sb.std.shape == (5,)
+        # smoother (lower-eigenvalue) modes carry at least as much prior std
+        assert bool(jnp.all(jnp.diff(sb.std) <= 1e-6))
+
+
+class TestSpatialFromEOF:
+    def test_orthonormal_and_prior_from_singular_values(self):
+        domain = _domain_2d(ny=5, nx=7)
+        ngrid = domain.coords.shape[0]
+        data = jax.random.normal(jax.random.PRNGKey(7), (15, ngrid))
+        sb = spatial_from_eof(data, n_modes=4)
+        assert sb.Phi.shape == (ngrid, 4)
+        np.testing.assert_allclose(sb.Phi.T @ sb.Phi, jnp.eye(4), atol=1e-4)
+        # prior std descends with the singular spectrum
+        assert bool(jnp.all(jnp.diff(sb.std) <= 1e-5))
+
+
+class TestSpatialFromWavelet:
+    def test_orthonormal_basis_over_grid(self):
+        domain = _domain_2d(ny=8, nx=8)
+        ngrid = domain.coords.shape[0]
+        sb = spatial_from_wavelet(domain, wavelet="db2")
+        assert sb.Phi.shape == (ngrid, ngrid)
+        np.testing.assert_allclose(sb.Phi.T @ sb.Phi, jnp.eye(ngrid), atol=1e-5)
+
+    def test_rejects_non_2d_domain(self):
+        d1 = Domain(xmin=0.0, xmax=1.0, dx=0.25, Nx=8, Lx=1.0)
+        with pytest.raises(ValueError):
+            spatial_from_wavelet(d1)
+
+
+class TestSSTFrontalPreset:
+    def test_call_shape_and_zero_init(self):
+        domain = _domain_2d(ny=8, nx=8)
+        bf = sst_frontal(domain, num_basis_per_dim=4, length_scale=0.3)
+        np.testing.assert_array_equal(bf.coeffs, jnp.zeros_like(bf.coeffs))
+        assert bf(0.0).shape == tuple(domain.Nx)
+
+    def test_gradient_scoped_to_coeffs(self):
+        domain = _domain_2d(ny=8, nx=8)
+        bf = sst_frontal(domain, num_basis_per_dim=4, length_scale=0.3)
+        diff, static = eqx.partition(bf, control_filter(bf))
+        diff = eqx.tree_at(lambda d: d.coeffs, diff, jnp.ones_like(bf.coeffs))
+
+        def loss(diff):
+            return jnp.sum(eqx.combine(diff, static)(0.0) ** 2)
+
         grads = jax.grad(loss)(diff)
         assert grads.spatial.Phi is None
         assert bool(jnp.any(grads.coeffs != 0.0))

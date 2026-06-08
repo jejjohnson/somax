@@ -19,10 +19,16 @@ from somax._src.core.forcing import (
 )
 from somax._src.core.forcing_bank import (
     GaussianWindowsInTime,
+    matern_spectral_density,
+    spatial_from_eof,
+    spatial_from_fourier,
     spatial_from_gabor,
+    spatial_from_graph_laplacian,
     spatial_from_rbf,
+    spatial_from_wavelet,
     ssh_geostrophic,
     sss_coastal,
+    sst_frontal,
     tile_in_time,
 )
 from somax._src.core.helmholtz import (
@@ -86,10 +92,16 @@ __all__ = [
     "control_filter",
     "explicit",
     "implicit",
+    "matern_spectral_density",
     "partition",
+    "spatial_from_eof",
+    "spatial_from_fourier",
     "spatial_from_gabor",
+    "spatial_from_graph_laplacian",
     "spatial_from_rbf",
+    "spatial_from_wavelet",
     "ssh_geostrophic",
     "sss_coastal",
+    "sst_frontal",
     "tile_in_time",
 ]
