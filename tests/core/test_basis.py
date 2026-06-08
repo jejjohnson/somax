@@ -575,3 +575,40 @@ class TestVectorDivFreeForcing:
         grads = jax.grad(loss)(diff)
         assert grads.spatial.Phi is None
         assert bool(jnp.any(grads.coeffs != 0.0))
+
+
+class TestForcingTermGrid:
+    def test_passes_carried_grid_to_forcing(self):
+        # A grid-dependent forcing reads grid.coords; ForcingTerm must hand it
+        # the carried grid, not None.
+        domain = _domain_2d(ny=4, nx=5)
+
+        class GridForcing(eqx.Module):
+            def __call__(self, t, grid=None):
+                assert grid is not None
+                return grid.coords.sum(axis=-1).reshape(tuple(grid.Nx))
+
+        class QState(eqx.Module):
+            q: jnp.ndarray
+
+        state = QState(q=jnp.zeros(tuple(domain.Nx)))
+        term = ForcingTerm(GridForcing(), place=add_to("q"), grid=domain)
+        tendency = term(0.0, state)
+        expected = domain.coords.sum(axis=-1).reshape(tuple(domain.Nx))
+        np.testing.assert_allclose(tendency.q, expected, atol=1e-6)
+
+    def test_default_grid_is_none(self):
+        # Back-compat: with no grid carried, the forcing is called with None.
+        seen = {}
+
+        class RecordGrid(eqx.Module):
+            def __call__(self, t, grid=None):
+                seen["grid"] = grid
+                return jnp.zeros((3, 3))
+
+        class QState(eqx.Module):
+            q: jnp.ndarray
+
+        term = ForcingTerm(RecordGrid(), place=add_to("q"))
+        term(0.0, QState(q=jnp.zeros((3, 3))))
+        assert seen["grid"] is None

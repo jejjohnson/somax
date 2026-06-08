@@ -247,13 +247,19 @@ class ForcingTerm(Term):
         forcing: The forcing whose field is lifted.
         place: A ``(zeros_tendency, field) -> tendency`` placement, typically
             from :func:`add_to`.
+        grid: Optional grid passed to the forcing as its ``grid`` argument, so
+            grid-dependent forcings (those evaluating from ``grid.coords``) work
+            inside the term algebra — the term carries the grid the RHS does not
+            supply. ``None`` (the default) suits forcings that ignore ``grid``
+            (``BasisForcing``, ``ConstantForcing``, ``SeasonalWindForcing``).
     """
 
     forcing: ForcingProtocol
     place: Callable[[PyTree, Array], PyTree] = eqx.field(static=True)
+    grid: eqx.Module | None = None
 
     def __call__(self, t: float, state: PyTree, args: PyTree | None = None) -> PyTree:
-        field = self.forcing(t, None)
+        field = self.forcing(t, self.grid)
         zeros = jtu.tree_map(lambda leaf: leaf * 0.0, state)
         return self.place(zeros, field)
 

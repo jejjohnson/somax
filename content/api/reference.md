@@ -164,7 +164,7 @@ given a time and grid. They compose with somax models via the
 *class*
 
 ```python
-ForcingTerm(forcing: 'ForcingProtocol', place: 'Callable[[PyTree, Array], PyTree]') -> None
+ForcingTerm(forcing: 'ForcingProtocol', place: 'Callable[[PyTree, Array], PyTree]', grid: 'eqx.Module | None' = None) -> None
 ```
 
 Lift a :class:`ForcingProtocol` field into the term algebra as a tendency.
@@ -183,6 +183,11 @@ Attributes:
     forcing: The forcing whose field is lifted.
     place: A ``(zeros_tendency, field) -> tendency`` placement, typically
         from :func:`add_to`.
+    grid: Optional grid passed to the forcing as its ``grid`` argument, so
+        grid-dependent forcings (those evaluating from ``grid.coords``) work
+        inside the term algebra — the term carries the grid the RHS does not
+        supply. ``None`` (the default) suits forcings that ignore ``grid``
+        (``BasisForcing``, ``ConstantForcing``, ``SeasonalWindForcing``).
 ```
 ````
 
