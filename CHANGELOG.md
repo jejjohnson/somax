@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.12](https://github.com/jejjohnson/somax/compare/somax-v0.0.11...somax-v0.0.12) (2026-06-08)
+
+
+### Features
+
+* **core:** reduced-order forcing basis + geonnax-wired forcing bank ([#143](https://github.com/jejjohnson/somax/issues/143)) ([0bf7933](https://github.com/jejjohnson/somax/commit/0bf79339fdf678154a2027388a628986c3b6591a))
+
 ## [0.0.11](https://github.com/jejjohnson/somax/compare/somax-v0.0.10...somax-v0.0.11) (2026-06-03)
 
 
