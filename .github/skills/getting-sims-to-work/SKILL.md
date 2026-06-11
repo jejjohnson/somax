@@ -93,6 +93,14 @@ Compile cost and run cost are different. Measure before you wait.
 - **Scale up only after green:** 32²/64² smoke (finite + sane diagnostics) →
   full-resolution figure run. Optionally spin up coarse, then interpolate the
   balanced state to fine resolution so the fine run only has to grow the eddies.
+- **Checkpoint the expensive result BEFORE any post-processing.** Never let a
+  plot/diagnostic crash a long integration: the instant the solve returns, write
+  the arrays (`np.savez` / zarr) to disk, *then* compute figures from the saved
+  arrays in a separate cheap step. A one-character matplotlib/LaTeX typo
+  (`\tfrac` is not valid mathtext) at the end of an 8-minute run is otherwise a
+  total loss. Corollary: run long jobs **unbuffered** (`python -u` and/or
+  `print(..., flush=True)`) so the diagnostics survive a crash, and re-plot from
+  the `.npz` rather than re-integrating.
 - **Run from the project root** (`cd /home/user/somax`) so `uv run` finds the
   env — "`No module named 'diffrax'`" / "`--no-sync` outside of a project" means
   wrong cwd, not a code bug.
