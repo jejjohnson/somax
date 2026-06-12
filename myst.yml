@@ -40,6 +40,9 @@ project:
         - file: content/tutorials/composable_models_terms_operators_cycles
         - file: content/tutorials/data_assimilation_etkf
         - file: content/tutorials/data_assimilation_4dvar
+    - title: "Double Gyre Gallery"
+      children:
+        - file: content/tutorials/doublegyre_barotropic_qg.ipynb
     - title: "13 Steps to Navier-Stokes"
       children:
         - file: content/tutorials/step01_linear_convection_1d

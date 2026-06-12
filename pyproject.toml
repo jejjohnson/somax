@@ -131,6 +131,11 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 [tool.ruff.lint.per-file-ignores]
 "content/tutorials/step*.py" = ["E501", "I001", "B018"]
 "content/tutorials/step*.ipynb" = ["E501", "I001", "B018"]
+# Double-gyre gallery pages: prose markdown cells run long, imports follow the
+# intro cell, and figure titles/comments use Unicode math typography (ψ, ζ, ν,
+# √, ², ½, ×) — same authoring convention as the step/phase tutorials.
+"content/tutorials/doublegyre_*.py" = ["E501", "I001", "B018", "RUF001", "RUF002", "RUF003"]
+"content/tutorials/doublegyre_*.ipynb" = ["E501", "I001", "B018", "RUF001", "RUF002", "RUF003"]
 # Phase 0 "Foundations" theory chapters: prose paragraphs are single long
 # lines (the jupytext authoring rule, so MyST-NB renders them without spurious
 # soft breaks), and imports are interleaved after the intro markdown cells.
