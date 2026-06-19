@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.13](https://github.com/jejjohnson/somax/compare/somax-v0.0.12...somax-v0.0.13) (2026-06-19)
+
+
+### Documentation
+
+* **gallery:** double-gyre bring-up methodology + barotropic QG page ([#154](https://github.com/jejjohnson/somax/issues/154)) ([cbf0459](https://github.com/jejjohnson/somax/commit/cbf045988ef810a6de1b59179faf824e122e223f))
+
 ## [0.0.12](https://github.com/jejjohnson/somax/compare/somax-v0.0.11...somax-v0.0.12) (2026-06-08)
 
 
