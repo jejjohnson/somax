@@ -27,6 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from configs._authoring import (  # noqa: E402
     doublegyre_bc_qg,
+    doublegyre_bc_qg_hires,
     doublegyre_bt_qg,
     doublegyre_bt_qg_hires,
     spinup_bc_qg,
@@ -42,6 +43,7 @@ CONFIGS: dict[str, dict] = {
     "doublegyre_bt_qg_hires": doublegyre_bt_qg_hires.DoubleGyreBTQGHiResConfig,
     "spinup_bc_qg": spinup_bc_qg.SpinupBCQGConfig,
     "doublegyre_bc_qg": doublegyre_bc_qg.DoubleGyreBCQGConfig,
+    "doublegyre_bc_qg_hires": doublegyre_bc_qg_hires.DoubleGyreBCQGHiResConfig,
 }
 
 
