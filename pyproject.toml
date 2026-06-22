@@ -72,7 +72,7 @@ da = [
     "vardax @ git+https://github.com/jejjohnson/vardax@a00b1ae",
 ]
 sim = [
-    "hydra-core>=1.3.2",
+    "hydra-core>=1.3.3",
     "hydra-zen>=0.16.0",
     "omegaconf>=2.3",
     "orbax-checkpoint>=0.11.37",
