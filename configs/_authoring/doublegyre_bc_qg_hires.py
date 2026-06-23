@@ -14,8 +14,11 @@ so the first baroclinic deformation radius is actually sampled:
 At 128 the deformation radius is sub-grid and baroclinic instability is
 suppressed; at 256 the western boundary current goes baroclinically
 unstable and sheds eddies, so the separated eastward jet and inertial
-recirculation gyres — the structures a single-layer barotropic model
-cannot sustain — emerge in the time mean.
+recirculation gyres emerge in the time mean. A single-layer barotropic
+model *can* also produce a separated jet + recirculation (the classic
+inertial double-gyre), but only in a much more inertial regime — a far
+stronger wind or weaker friction — since it lacks the baroclinic
+instability that does the work here; see :mod:`doublegyre_bt_qg_hires`.
 
 Run from rest as a multi-year spinup with snapshots, so the jet's
 development can be tracked. Not a CI config: ~1.5 h per simulated year
