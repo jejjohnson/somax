@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import diffrax as dfx
 import equinox as eqx
+import jax
 import jax.numpy as jnp
+from finitevolx import build_coupling_matrix
 
 from somax import Diagnostics, Params, PhysConsts, SomaxModel, State
 from somax.core import StratificationProfile
@@ -188,6 +190,49 @@ class TestBaroclinicQG:
         )
         roundtrip = model.modal.to_layer(model.modal.to_modal(q0))
         assert jnp.allclose(roundtrip, q0, atol=1e-5)
+
+    def test_modal_transform_diagonalizes_coupling_matrix(self):
+        """The built double-gyre model's modal transform must diagonalize the
+        (non-symmetric, unequal-thickness) coupling matrix A and its
+        ``helmholtz_lambdas`` must be non-negative. Guards the full build path
+        against the modal-decomposition bugs that diverged multilayer QG.
+        """
+        model, _ = _doublegyre_baroclinic_qg(16, 16)
+        coupling = build_coupling_matrix(
+            jnp.asarray(model.strat.H), jnp.asarray(model.strat.g_prime)
+        )
+        diagonalized = model.modal.Cl2m @ coupling @ model.modal.Cm2l
+        off_diagonal = diagonalized - jnp.diag(jnp.diagonal(diagonalized))
+        assert jnp.max(jnp.abs(off_diagonal)) < 1e-6
+        assert jnp.all(model.helmholtz_lambdas >= 0.0)
+
+    def test_doublegyre_integration_stays_subinertial(self):
+        """Behavioral regression: the 3-layer double-gyre integrated from rest
+        must not diverge. Two modal-inversion bugs (a negative barotropic
+        eigenvalue, and ``eigh`` on the non-symmetric coupling matrix) each blew
+        the run up (Rossby number -> 1, then NaN) within ~2 simulated weeks. Step
+        ~2 weeks and assert the relative vorticity stays finite and sub-inertial
+        (``|q| < f0``).
+        """
+        model, state0 = _doublegyre_baroclinic_qg(64, 64)
+        f0 = abs(float(model.consts.f0))
+        dt = 600.0
+
+        @eqx.filter_jit
+        def advance(m, q):
+            def step(qf, _):
+                dq = m.vector_field(0.0, BaroclinicQGState(q=qf)).q
+                qf = m.apply_boundary_conditions(BaroclinicQGState(q=qf + dt * dq)).q
+                return qf, None
+
+            qf, _ = jax.lax.scan(step, q, None, length=1000)
+            return qf
+
+        q = state0.q
+        for _ in range(2):  # ~2000 steps ≈ 2 simulated weeks (past the old blow-up)
+            q = advance(model, q)
+            assert jnp.all(jnp.isfinite(q))
+        assert float(jnp.max(jnp.abs(q))) < f0
 
     def test_boundary_conditions(self):
         """BCs should zero out boundary cells for all layers."""

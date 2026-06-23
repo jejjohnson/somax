@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from finitevolx import build_coupling_matrix, decompose_vertical_modes
+from finitevolx import build_coupling_matrix
 from jaxtyping import Array, Float
 
 
@@ -151,10 +151,11 @@ class StratificationProfile(eqx.Module):
 class ModalTransform(eqx.Module):
     """Precomputed layer-to-mode and mode-to-layer transforms.
 
-    Computed from physical parameters (H, g_prime, f0) via
-    eigendecomposition of the layer coupling matrix A (delegated
-    to ``finitevolx.build_coupling_matrix`` and
-    ``finitevolx.decompose_vertical_modes``).
+    Computed from physical parameters (H, g_prime, f0) via the
+    eigendecomposition of the layer coupling matrix A (built by
+    ``finitevolx.build_coupling_matrix``). A is non-symmetric for unequal
+    layer thicknesses, so it is diagonalized through its symmetric similarity
+    (see :meth:`from_physics`) rather than with a symmetric eigensolver.
 
     Attributes:
         Cl2m: Layer-to-mode projection matrix.
@@ -176,8 +177,10 @@ class ModalTransform(eqx.Module):
     ) -> ModalTransform:
         """Build transform from physical parameters.
 
-        Delegates to ``finitevolx.build_coupling_matrix`` and
-        ``finitevolx.decompose_vertical_modes``.
+        Builds the layer coupling matrix with ``finitevolx.build_coupling_matrix``
+        and diagonalizes it via its symmetric similarity (see body) so the modal
+        transform is correct for unequal layer thicknesses (where the coupling
+        matrix is not symmetric).
 
         Args:
             H: Layer depths (top to bottom).
@@ -190,8 +193,39 @@ class ModalTransform(eqx.Module):
         H_arr = jnp.asarray(H, dtype=float)
         gp_arr = jnp.asarray(g_prime, dtype=float)
         A = build_coupling_matrix(H_arr, gp_arr)
-        rossby_radii, Cl2m, Cm2l = decompose_vertical_modes(A, f0)
-        eigenvalues, _ = jnp.linalg.eigh(A)
+
+        # A = diag(1/H) @ B with B = diag(H) @ A symmetric, so A itself is NOT
+        # symmetric for unequal layer thicknesses. Diagonalizing A with `eigh`
+        # (which assumes symmetry and reads a single triangle) silently
+        # decomposes the wrong matrix: the eigenvalues come out close, but the
+        # eigenvectors do NOT diagonalize A, so the modal transform fails to
+        # decouple the layers and the multilayer PV inversion solves the wrong
+        # coupled elliptic problem. Diagonalize the symmetric similarity
+        # S = D^(1/2) A D^(-1/2) (D = diag(H)) instead: it shares A's real,
+        # non-negative eigenvalues, and A's layer eigenvectors are r = D^(-1/2) v
+        # for S's orthonormal eigenvectors v. (MQGeometry uses a general
+        # eigensolver for the same reason; the symmetric route is more accurate
+        # and yields sorted, real eigenvalues without complex round-off.)
+        sqrt_H = jnp.sqrt(H_arr)
+        S = (sqrt_H[:, None] * A) / sqrt_H[None, :]
+        S = 0.5 * (S + S.T)  # drop residual asymmetry from round-off
+        eigenvalues, V = jnp.linalg.eigh(S)  # ascending, real; V orthonormal
+        # A is positive semi-definite. eigh on the (correct) symmetric S keeps
+        # the gravest eigenvalue accurate, but clamp to the physical floor of 0
+        # as a guard: a *negative* barotropic eigenvalue would flip the sign of
+        # the gravest-wavenumber denominators in the Helmholtz PV inversion
+        # (lambda = f0^2 * eigenvalue) and diverge multilayer QG within ~2 weeks.
+        eigenvalues = jnp.clip(eigenvalues, 0.0, None)
+        Cm2l = V / sqrt_H[:, None]  # layer eigenvectors r = D^(-1/2) v (columns)
+        Cl2m = jnp.linalg.inv(Cm2l)
+        # Rossby radii: Rd = 1/(|f0| sqrt(lambda)); the gravest mode -> inf only
+        # if its eigenvalue is exactly 0 (true rigid lid with no surface term).
+        positive = eigenvalues > 0
+        safe_eig = jnp.where(positive, eigenvalues, 1.0)
+        finite_radii = 1.0 / (
+            jnp.abs(jnp.asarray(f0, dtype=float)) * jnp.sqrt(safe_eig)
+        )
+        rossby_radii = jnp.where(positive, finite_radii, jnp.inf)
         return ModalTransform(
             Cl2m=Cl2m,
             Cm2l=Cm2l,

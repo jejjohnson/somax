@@ -822,11 +822,28 @@ class _ChunkStep(StatefulOperator):
                 ckpt_ds = io.state_to_dataset(
                     new_state, time=float(chunk_t1), attrs=ckpt_attrs
                 )
-                io.save_dataset(ckpt_ds, ckpt_path, mode="w")
-                log.debug(
-                    f"checkpoint written at snapshot {snapshot_ordinal} "
-                    f"(sim_t={format_time_seconds(chunk_t1)}) → {ckpt_path.name}"
-                )
+                # A transient I/O error writing the crash-recovery checkpoint
+                # (e.g. an SMB / network-mount hiccup) must not kill an
+                # otherwise-healthy run — that defeats the point of the
+                # checkpoint. Retry once, then warn and continue; the next
+                # snapshot boundary will checkpoint again.
+                for _attempt in (1, 2):
+                    try:
+                        io.save_dataset(ckpt_ds, ckpt_path, mode="w")
+                        log.debug(
+                            f"checkpoint written at snapshot {snapshot_ordinal} "
+                            f"(sim_t={format_time_seconds(chunk_t1)}) "
+                            f"→ {ckpt_path.name}"
+                        )
+                        break
+                    except OSError as exc:
+                        if _attempt == 1:
+                            log.warning(f"checkpoint write failed ({exc!r}); retrying")
+                        else:
+                            log.warning(
+                                f"checkpoint write failed twice ({exc!r}); "
+                                f"continuing without this checkpoint"
+                            )
 
         new_carry = _ChunkCarry(
             index=i + 1,
