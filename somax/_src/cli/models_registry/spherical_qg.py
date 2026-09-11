@@ -45,6 +45,58 @@ def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
     return BuiltModel(model=model, state0=state0)
 
 
+#: YAML keys accepted in a ``scenario.nondim`` block. There is no
+#: ``burger``: barotropic QG is rigid-lid, and no ``beta_hat``: on a
+#: sphere the planetary vorticity gradient follows from the geometry.
+_NONDIM_KEYS = {
+    "rossby": "rossby",
+    "ekman": "ekman",
+    "ekman_lateral": "ekman_lateral",
+    "wind_hat": "wind_hat",
+}
+
+
+def _build_nondimensional(
+    scenario: ScenarioBundle, nondim: dict[str, Any]
+) -> BuiltModel:
+    """Build from a ``scenario.nondim`` block instead of SI constants."""
+    from somax.models import SphericalQG, SphericalQGState
+
+    lon_bounds, lat_bounds = _require_spherical(scenario, "spherical_qg")
+    unknown = sorted(set(nondim) - set(_NONDIM_KEYS))
+    if unknown:
+        raise ValueError(
+            f"spherical_qg: unknown scenario.nondim key(s) {unknown}. "
+            f"Accepted: {sorted(_NONDIM_KEYS)}."
+        )
+    if "rossby" not in nondim:
+        raise ValueError(
+            "spherical_qg: scenario.nondim requires 'rossby'; it has no "
+            "sensible default."
+        )
+
+    kwargs = {_NONDIM_KEYS[key]: value for key, value in nondim.items()}
+    geometry = scenario.geometry
+    model, _ = SphericalQG.from_nondimensional(
+        nx=geometry.nx,
+        ny=geometry.ny,
+        lon_range=lon_bounds,
+        lat_range=lat_bounds,
+        wind_profile=str(scenario.forcing_params.get("wind_profile", "zonal")),
+        mask=geometry.mask,
+        **kwargs,
+    )
+
+    ic = scenario.initial_condition
+    if ic.type != "at_rest":
+        raise NotImplementedError(
+            f"spherical_qg: initial_condition.type={ic.type!r} not supported "
+            "for a nondimensional build (only 'at_rest')."
+        )
+    state0 = SphericalQGState(q=jnp.zeros((model.grid.Ny, model.grid.Nx)))
+    return BuiltModel(model=model, state0=state0)
+
+
 SPHERICAL_QG = ModelEntry(
     name="spherical_qg",
     family="qg",
@@ -52,4 +104,5 @@ SPHERICAL_QG = ModelEntry(
     coordinates="spherical",
     supports=SupportFlags(masks=True, spherical=True, forcing=("tau_x", "tau_y")),
     build=_build,
+    from_nondimensional=_build_nondimensional,
 )

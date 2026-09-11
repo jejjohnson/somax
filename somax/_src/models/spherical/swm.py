@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -19,7 +21,13 @@ from finitevolx._src.utils.constants import OMEGA, R_EARTH
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.models._nondim import (
+    require_non_negative,
+    require_positive,
+    resolve_burger_spherical,
+)
 
 
 class SphericalSWMState(State):
@@ -275,6 +283,134 @@ class SphericalSWM(SomaxModel):
             relative_vorticity=zeta,
             kinetic_energy_field=ke,
         )
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 128,
+        ny: int = 64,
+        rossby: float,
+        burger: float | None = None,
+        froude: float | None = None,
+        lamb: float | None = None,
+        ekman: float = 0.0,
+        ekman_lateral: float = 0.0,
+        wind_hat: float = 0.0,
+        lat_range: tuple[float, float] = (-80.0, 80.0),
+        lon_range: tuple[float, float] = (0.0, 360.0),
+        check_resolution: bool = True,
+        **create_kw: Any,
+    ) -> tuple[SphericalSWM, Scales]:
+        r"""Build the model from dimensionless numbers instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Scale set: **planetary** (:meth:`somax.Scales.planetary`), with
+        ``a = Omega = H = 1``. The planet radius is the length scale and
+        the rotation period the time scale, so ``T = 1/Omega = 1`` and
+        ``f0 = 2 Omega = 2``; the velocity scale follows from the Rossby
+        number as ``U = 2 Omega a Ro = 2 Ro``.
+
+        The factor of two is not cosmetic. On a sphere the Coriolis
+        parameter is ``f(phi) = 2 Omega sin(phi)``, so the quantity that
+        plays the role of a Cartesian ``f0`` is ``2 Omega``, and the
+        conventional spherical Rossby number is ``U/(2 Omega a)``.
+        Writing it that way keeps :attr:`Scales.rossby` the same
+        ``U/(f0 L)`` it is for every other family, at the cost of the
+        twos that appear in the table below.
+
+        ==================  ==================================  ====================
+        Input               Definition                          ``create()`` kwarg
+        ==================  ==================================  ====================
+        ``rossby``          :math:`Ro = U/(2\Omega a)`           sets ``U``
+        ``burger``          :math:`Bu = gH/(2\Omega a)^2`        ``g = 4Bu``
+        ``froude``          :math:`Fr = U/\sqrt{gH}`             ``g`` (via ``Bu``)
+        ``lamb``            :math:`\varepsilon = 1/Bu`           ``g = 4/\varepsilon``
+        ``ekman``           :math:`\kappa/(2\Omega)`             ``bottom_drag``
+        ``ekman_lateral``   :math:`\nu/(2\Omega a^2)`            ``lateral_viscosity``
+        ``wind_hat``        :math:`\tau_0/(2\Omega U)`           ``wind_amplitude``
+        ==================  ==================================  ====================
+
+        The latitude range stays in degrees: it is a geometric choice,
+        not a scale, and a nondimensional sphere is still a sphere.
+
+        Args:
+            nx: Interior cells in longitude.
+            ny: Interior cells in latitude.
+            rossby: Rossby number; sets the velocity scale.
+            burger: Burger number. Give exactly one of this,
+                ``froude`` or ``lamb``.
+            froude: Froude number. Equivalent through
+                ``Bu = (Ro/Fr)**2``.
+            lamb: Lamb parameter ``eps = 4 Omega**2 a**2/(gH)``, the
+                inverse Burger number and the usual spelling in the
+                spherical literature.
+            ekman: Linear bottom-drag Ekman number.
+            ekman_lateral: Lateral-viscosity Ekman number.
+            wind_hat: Dimensionless wind acceleration.
+            lat_range: ``(lat_min, lat_max)`` in degrees.
+            lon_range: ``(lon_min, lon_max)`` in degrees.
+            check_resolution: Run the equatorial-deformation-radius
+                guard and raise if the grid cannot span it. Set
+                ``False`` only to build a deliberately coarse model.
+            **create_kw: Forwarded to :meth:`create` (``wind_profile``,
+                ``method``, ``mask``).
+
+        Returns:
+            ``(model, scales)`` with ``scales.kind == "planetary"``.
+
+        Raises:
+            ValueError: If an input is out of range, or if not exactly
+                one of ``burger``, ``froude`` and ``lamb`` is given.
+            AssertionFailedError: If ``check_resolution`` is set and the
+                equatorial deformation radius is unresolved.
+
+        Example:
+            >>> model, scales = SphericalSWM.from_nondimensional(
+            ...     nx=128, ny=64, rossby=0.05, lamb=10.0,
+            ... )
+            >>> scales.kind
+            'planetary'
+        """
+        context = "SphericalSWM.from_nondimensional"
+        require_positive(context, rossby=rossby)
+        require_non_negative(
+            context,
+            ekman=ekman,
+            ekman_lateral=ekman_lateral,
+            wind_hat=wind_hat,
+        )
+        bu = resolve_burger_spherical(context, burger, froude, lamb, rossby)
+
+        # Unit scales: a = Omega = H0 = 1, so f0 = 2 and U = 2 Ro. Rate
+        # coefficients carry one factor of f0; the wind is an
+        # acceleration and so carries f0 * U.
+        f0 = 2.0
+        velocity = f0 * rossby
+        model = SphericalSWM.create(
+            nx=nx,
+            ny=ny,
+            lon_range=lon_range,
+            lat_range=lat_range,
+            radius=1.0,
+            omega=1.0,
+            g=f0**2 * bu,
+            H0=1.0,
+            lateral_viscosity=f0 * ekman_lateral,
+            bottom_drag=f0 * ekman,
+            wind_amplitude=wind_hat * f0 * velocity,
+            **create_kw,
+        )
+        scales = Scales.planetary(a=1.0, Omega=1.0, H=1.0, rossby=rossby, g=f0**2 * bu)
+
+        if check_resolution:
+            from somax._src.cli._assertions import (
+                check_equatorial_deformation_radius,
+            )
+
+            check_equatorial_deformation_radius(None, model)
+
+        return model, scales
 
     @staticmethod
     def create(
