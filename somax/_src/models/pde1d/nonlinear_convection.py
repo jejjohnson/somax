@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import Advection1D, CartesianGrid1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, State
 
 
@@ -72,6 +75,40 @@ class NonlinearConvection1D(SomaxModel):
         """Compute energy diagnostic."""
         energy = 0.5 * jnp.sum(state.u[1:-1] ** 2) * self.grid.dx
         return NonlinearConvection1DDiagnostics(energy=energy)
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 100,
+        **create_kw: Any,
+    ) -> tuple[NonlinearConvection1D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Advective scale set (:meth:`somax.Scales.advective`) with
+        ``L = U = 1``, so ``T = 1`` and the equation reads
+        ``d_t u + u . grad u = 0``. Inviscid nonlinear convection has no
+        coefficient to scale out, so this factory only fixes the domain
+        and reports the scale set; it exists so the family presents one
+        interface.
+
+
+        Args:
+            nx: Interior grid cells.
+            **create_kw: Forwarded to :meth:`create` (``periodic``,
+                ``method``, ``mask``).
+
+        Returns:
+            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
+            to pick a step size in the same time unit.
+        """
+        model = NonlinearConvection1D.create(
+            nx=nx,
+            Lx=1.0,
+            **create_kw,
+        )
+        return model, Scales.advective(L=1.0, U=1.0)
 
     @staticmethod
     def create(

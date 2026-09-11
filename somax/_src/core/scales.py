@@ -15,9 +15,11 @@ constant and dimensionless groups can be used in Python control flow
 There is no universal scale set. The characteristic time in particular
 is *part of* the choice, not something derivable from ``L`` and ``U``:
 quasi-geostrophic models are advective (``T = L/U``), shallow-water
-models are inertial (``T = 1/f0``), and spherical models are planetary
-(``T = 1/Omega``). Pick the set that matches the equation family with
-the corresponding classmethod, and read it back off :attr:`Scales.kind`.
+models are inertial (``T = 1/f0``), spherical models are planetary
+(``T = 1/Omega``), and a pure diffusion problem has no velocity scale at
+all, so its time scale is diffusive (``T = L**2/kappa``). Pick the set
+that matches the equation family with the corresponding classmethod,
+and read it back off :attr:`Scales.kind`.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from typing import Literal
 import equinox as eqx
 
 
-ScaleKind = Literal["advective", "inertial", "planetary"]
+ScaleKind = Literal["advective", "inertial", "planetary", "diffusive"]
 
 #: Standard gravity (m/s^2), the default for the ``g`` field.
 GRAVITY = 9.81
@@ -171,6 +173,46 @@ class Scales(eqx.Module):
             kind="planetary",
         )
 
+    @classmethod
+    def diffusive(
+        cls,
+        L: float,
+        kappa: float,
+        g: float = GRAVITY,
+    ) -> Scales:
+        """Diffusive set: ``T = L**2 / kappa``.
+
+        The set for a pure diffusion problem, which has no velocity to
+        build a time scale from. The implied velocity ``U = L/T =
+        kappa/L`` is recorded so the derived properties stay
+        well-defined, but it is a bookkeeping quantity rather than a
+        physical flow speed.
+
+        Under this scaling the nondimensional diffusivity is exactly 1,
+        so a diffusion model has no free dimensionless number left.
+
+        Args:
+            L: Horizontal length scale [m].
+            kappa: Diffusivity [m^2/s].
+            g: Gravitational acceleration [m/s^2].
+
+        Returns:
+            A ``Scales`` with ``kind="diffusive"``.
+
+        Raises:
+            ValueError: If ``L`` or ``kappa`` is not strictly positive.
+        """
+        _require_positive(L=L, kappa=kappa)
+        return cls(
+            L=L,
+            U=kappa / L,
+            H=1.0,
+            f0=1.0,
+            T=L**2 / kappa,
+            g=g,
+            kind="diffusive",
+        )
+
     # ------------------------------------------------------------------
     # Derived dimensionless groups
     # ------------------------------------------------------------------
@@ -224,6 +266,46 @@ class Scales(eqx.Module):
         """Planet angular velocity ``f0 / 2`` [rad/s]."""
         return self.f0 / 2.0
 
+    def dt_from_cfl(
+        self,
+        cfl: float,
+        n_cells: int,
+        *,
+        mode: str | None = None,
+    ) -> float:
+        """Largest time step meeting a CFL target, in this set's time unit.
+
+        Args:
+            cfl: Target Courant number.
+            n_cells: Interior cells across ``L``, so ``dx = L/n_cells``.
+            mode: ``"advective"`` for ``dt <= C dx / U``, ``"diffusive"``
+                for ``dt <= C dx**2 / (2 kappa)``. Defaults to the
+                diffusive form for a diffusive scale set and the
+                advective form otherwise.
+
+        Returns:
+            The time step, expressed in units of :attr:`T` — the unit a
+            nondimensional model built from these scales expects.
+
+        Raises:
+            ValueError: If ``cfl`` or ``n_cells`` is not positive, or
+                ``mode`` is unrecognised.
+        """
+        _require_positive(cfl=cfl, n_cells=float(n_cells))
+        if mode is None:
+            mode = "diffusive" if self.kind == "diffusive" else "advective"
+        dx = 1.0 / n_cells  # in units of L
+        if mode == "advective":
+            # dt <= C dx/U; in units of T = L/U for the advective set the
+            # velocity is 1, so this is C * dx scaled by T/(L/U).
+            return cfl * dx * (self.T / (self.L / self.U))
+        if mode == "diffusive":
+            kappa = self.L * self.U  # the diffusivity implied by the set
+            return cfl * dx**2 / 2.0 * (self.T * kappa / self.L**2)
+        raise ValueError(
+            f"dt_from_cfl: mode must be 'advective' or 'diffusive'; got {mode!r}."
+        )
+
     def nondimensional(self) -> Scales:
         """The unit scale set of the same family.
 
@@ -240,6 +322,8 @@ class Scales(eqx.Module):
             return Scales.advective(L=1.0, U=1.0, f0=1.0 / self.rossby, H=1.0, g=self.g)
         if self.kind == "inertial":
             return Scales.inertial(L=1.0, f0=1.0, H=1.0, rossby=self.rossby, g=self.g)
+        if self.kind == "diffusive":
+            return Scales.diffusive(L=1.0, kappa=1.0, g=self.g)
         return Scales.planetary(a=1.0, Omega=1.0, H=1.0, rossby=self.rossby, g=self.g)
 
 

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import CartesianGrid1D, Difference1D, Interpolation1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, Params, State
 
 
@@ -90,6 +93,41 @@ class LinearConvection1D(SomaxModel):
         """Compute energy diagnostic."""
         energy = 0.5 * jnp.sum(state.u[1:-1] ** 2) * self.grid.dx
         return LinearConvection1DDiagnostics(energy=energy)
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 100,
+        **create_kw: Any,
+    ) -> tuple[LinearConvection1D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Advective scale set (:meth:`somax.Scales.advective`) with
+        ``L = 1`` and the wave speed as the velocity scale, so ``T = 1``
+        and the equation reads ``d_t u + grad u = 0``. Scaling out the
+        speed leaves no free dimensionless number; the Courant number
+        is a time-step choice, not a property of the problem, so use
+        ``scales.dt_from_cfl``.
+
+
+        Args:
+            nx: Interior grid cells.
+            **create_kw: Forwarded to :meth:`create` (``periodic``,
+                ``method``, ``mask``).
+
+        Returns:
+            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
+            to pick a step size in the same time unit.
+        """
+        model = LinearConvection1D.create(
+            nx=nx,
+            Lx=1.0,
+            c=1.0,
+            **create_kw,
+        )
+        return model, Scales.advective(L=1.0, U=1.0)
 
     @staticmethod
     def create(

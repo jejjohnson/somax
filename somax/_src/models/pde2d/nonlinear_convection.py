@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -14,7 +16,9 @@ from finitevolx import (
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, State
+from somax._src.models._nondim import require_positive
 
 
 class NonlinearConvection2DState(State):
@@ -87,6 +91,48 @@ class NonlinearConvection2D(SomaxModel):
         ui, vi = state.u[1:-1, 1:-1], state.v[1:-1, 1:-1]
         ke = 0.5 * jnp.sum(ui**2 + vi**2) * self.grid.dx * self.grid.dy
         return NonlinearConvection2DDiagnostics(kinetic_energy=ke)
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        aspect: float = 1.0,
+        **create_kw: Any,
+    ) -> tuple[NonlinearConvection2D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Advective scale set (:meth:`somax.Scales.advective`) with
+        ``L = U = 1``, so ``T = 1`` and the equation reads
+        ``d_t u + u . grad u = 0``. Inviscid nonlinear convection has no
+        coefficient to scale out, so this factory only fixes the domain
+        and reports the scale set; it exists so the family presents one
+        interface.
+
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
+            **create_kw: Forwarded to :meth:`create` (``method``,
+                ``mask``).
+
+        Returns:
+            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with the
+            cell count to pick a step size in the same time unit.
+        """
+        context = "NonlinearConvection2D.from_nondimensional"
+        require_positive(context, aspect=aspect)
+        model = NonlinearConvection2D.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            **create_kw,
+        )
+        return model, Scales.advective(L=1.0, U=1.0)
 
     @staticmethod
     def create(
