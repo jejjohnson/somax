@@ -106,27 +106,71 @@ class TestMaskSupport:
         )
 
 
-# Phase-3 (#77) populated the six cartesian models; the two spherical
-# models stay stubs until Phase 5 (#73). Keep the stub list explicit so
-# accidentally unstubbing a model fails loudly here.
-_STUB_MODELS = {"spherical_swm", "spherical_qg"}
+# Phase-3 (#77) populated the six cartesian models; #73 populated the
+# two spherical ones, so nothing in the registry is a stub any more.
+_STUB_MODELS: set[str] = set()
 
-_PHASE3_MODELS = EXPECTED_MODELS - _STUB_MODELS
+_SPHERICAL_MODELS = {"spherical_swm", "spherical_qg"}
+
+_PHASE3_MODELS = EXPECTED_MODELS - _STUB_MODELS - _SPHERICAL_MODELS
 
 
-class TestStubsRaiseWithMeaningfulMessage:
-    @pytest.mark.parametrize("name", sorted(_STUB_MODELS))
-    def test_stub_build_raises_not_implemented(self, name):
-        entry = MODELS[name]
-        # The stub build takes (bundle, params); we can pass ``None, {}``
-        # because it raises before touching either.
-        with pytest.raises(NotImplementedError) as exc_info:
-            entry.build(None, {})
-        msg = str(exc_info.value)
-        assert name in msg, f"stub message for {name!r} lacks its own name"
-        assert "phase" in msg.lower() or "blocked" in msg.lower(), (
-            f"stub message for {name!r} doesn't mention phase/blocker"
+def _spherical_bundle():
+    """A minimal spherical-cap bundle for the spherical model entries."""
+    from somax._src.cli.scenarios._types import (
+        Constants,
+        ForcingFields,
+        Geometry,
+        InitialConditionSpec,
+        ScenarioBundle,
+    )
+
+    return ScenarioBundle(
+        name="test_spherical_cap",
+        geometry=Geometry(
+            kind="spherical_cap",
+            nx=16,
+            ny=8,
+            lon_bounds=(0.0, 360.0),
+            lat_bounds=(-70.0, -40.0),
+        ),
+        constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+        forcing=ForcingFields(),
+        initial_condition=InitialConditionSpec(type="at_rest"),
+    )
+
+
+class TestNothingIsStubbed:
+    def test_no_model_is_still_a_stub(self):
+        """#73 was the last one; the list is kept so re-stubbing is loud."""
+        assert not _STUB_MODELS
+
+    @pytest.mark.parametrize("name", sorted(_SPHERICAL_MODELS))
+    def test_spherical_models_build(self, name):
+        """They used to raise NotImplementedError; now they build.
+
+        The bundle is constructed here rather than taken from the
+        ``southern_ocean`` scenario, which is still stubbed on the
+        scenario side (#79). This keeps the model entry testable
+        without waiting for it.
+        """
+        built = MODELS[name].build(_spherical_bundle(), {})
+        assert built.model is not None
+        assert built.state0 is not None
+
+    @pytest.mark.parametrize("name", sorted(_SPHERICAL_MODELS))
+    def test_spherical_models_reject_a_cartesian_geometry(self, name):
+        """Without lon/lat bounds there is no sphere to build on."""
+        from somax._src.cli.scenarios import SCENARIOS
+
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "initial_condition": {"type": "at_rest"},
+            }
         )
+        with pytest.raises(ValueError, match="lon_bounds"):
+            MODELS[name].build(bundle, {})
 
     @pytest.mark.parametrize("name", sorted(_PHASE3_MODELS))
     def test_phase3_models_are_not_stubs(self, name):
