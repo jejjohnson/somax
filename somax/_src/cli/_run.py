@@ -306,6 +306,7 @@ def _integrate_and_write(
         spec.model.name,
         scenario_params=_scenario_params(spec),
         model_params=_model_params(spec),
+        nondim=spec.scenario.nondim,
     )
     state0 = initial_state if initial_state is not None else factory_state0
 
@@ -1320,6 +1321,7 @@ def restart(
         spec.model.name,
         scenario_params=_scenario_params(spec),
         model_params=_model_params(spec),
+        nondim=spec.scenario.nondim,
     )
     expected_state_class = type(factory_state0)
     state0 = io.dataset_to_state(ds, state_class=expected_state_class)

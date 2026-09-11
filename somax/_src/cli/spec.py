@@ -38,6 +38,12 @@ class ScenarioSpec:
             that the scenario uses to build ``ForcingFields``).
         initial_condition: ``{"type": "...", "params": {...}}`` — IC
             shape and its parameters.
+        nondim: Dimensionless numbers routed to the model's
+            ``from_nondimensional`` factory (``rossby``, ``beta_hat``,
+            ``munk``, ``stommel``, ...). Mutually exclusive with
+            ``consts``: the two describe the same physics in different
+            units, and accepting both would let a config state a pair
+            that disagrees. Empty means a dimensional run.
     """
 
     name: str
@@ -45,6 +51,7 @@ class ScenarioSpec:
     consts: dict[str, Any] = field(default_factory=dict)
     forcing: dict[str, Any] = field(default_factory=dict)
     initial_condition: dict[str, Any] = field(default_factory=dict)
+    nondim: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -198,6 +205,14 @@ class RunSpec:
         if not isinstance(self.model.name, str) or not self.model.name:
             raise ValueError("model.name must be a non-empty string")
 
+        if self.scenario.nondim and self.scenario.consts:
+            raise ValueError(
+                "scenario.nondim and scenario.consts are mutually exclusive: "
+                f"nondim sets {sorted(self.scenario.nondim)} while consts sets "
+                f"{sorted(self.scenario.consts)}. They describe the same "
+                "physics in different units, so give one or the other."
+            )
+
     # ------------------------------------------------------------------
     # Debug merge
     # ------------------------------------------------------------------
@@ -312,6 +327,7 @@ class RunSpec:
             consts=dict(scenario_data.get("consts", {})),
             forcing=dict(scenario_data.get("forcing", {})),
             initial_condition=dict(scenario_data.get("initial_condition", {})),
+            nondim=dict(scenario_data.get("nondim", {})),
         )
         model = ModelSpec(
             name=model_data["name"],

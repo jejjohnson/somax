@@ -284,3 +284,98 @@ def append_to_dataset(
         append_dim: Dimension to append along. Defaults to ``"time"``.
     """
     ds.to_zarr(Path(path), mode="a", append_dim=append_dim, consolidated=False)
+
+
+# ----------------------------------------------------------------------
+# Scale metadata
+# ----------------------------------------------------------------------
+
+#: Prefix for the non-dimensionalisation attrs written onto a Dataset.
+SCALES_ATTR_PREFIX = "somax:scales:"
+
+
+def scales_attrs(scales: Any) -> dict[str, Any]:
+    """Flat Dataset attrs describing the scale set a run used.
+
+    netCDF and Zarr attrs must be scalars or strings, so the ``Scales``
+    fields are written one per key under
+    :data:`SCALES_ATTR_PREFIX` rather than as a nested mapping. The
+    derived time scale is included because re-dimensionalising a time
+    axis offline needs it and it cannot be recomputed from ``L`` and
+    ``U`` alone — the scale families disagree about it.
+
+    Args:
+        scales: A :class:`~somax.Scales`.
+
+    Returns:
+        Attrs to merge into a Dataset, e.g.
+        ``{"somax:scales:kind": "advective", "somax:scales:L": 1e6, ...}``.
+    """
+    return {
+        f"{SCALES_ATTR_PREFIX}kind": scales.kind,
+        f"{SCALES_ATTR_PREFIX}L": float(scales.L),
+        f"{SCALES_ATTR_PREFIX}U": float(scales.U),
+        f"{SCALES_ATTR_PREFIX}H": float(scales.H),
+        f"{SCALES_ATTR_PREFIX}f0": float(scales.f0),
+        f"{SCALES_ATTR_PREFIX}T": float(scales.T),
+        f"{SCALES_ATTR_PREFIX}g": float(scales.g),
+    }
+
+
+def transform_attrs(transform: Any) -> dict[str, dict[str, Any]]:
+    """Per-variable ``loc`` / ``scale`` attrs for an affine transform.
+
+    Only scalar leaves are written: a per-gridpoint ``loc`` or ``scale``
+    is an array the size of the field itself and belongs in the data,
+    not in the metadata. Such a variable simply gets no attrs, and
+    offline re-dimensionalisation needs the transform itself.
+
+    Args:
+        transform: A :class:`~somax.StateAffine`.
+
+    Returns:
+        Mapping from variable name to the attrs for that variable.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    fields = getattr(type(transform.loc), "__dataclass_fields__", {})
+    for name in fields:
+        loc = getattr(transform.loc, name)
+        scale = getattr(transform.scale, name)
+        if jnp.ndim(loc) == 0 and jnp.ndim(scale) == 0:
+            out[name] = {"loc": float(loc), "scale": float(scale)}
+    return out
+
+
+def apply_scale_metadata(
+    ds: xr.Dataset,
+    *,
+    scales: Any | None = None,
+    transform: Any | None = None,
+    nondimensional: bool = False,
+) -> xr.Dataset:
+    """Attach scale / transform metadata to an exported Dataset.
+
+    Enough for a downstream tool to re-dimensionalise offline, which is
+    where re-dimensionalisation happens: somax itself reports
+    diagnostics in whatever units its model runs in.
+
+    Args:
+        ds: The Dataset to annotate, modified in place and returned.
+        scales: Optional :class:`~somax.Scales` for the run.
+        transform: Optional :class:`~somax.StateAffine` whose scalar
+            ``loc`` / ``scale`` leaves become per-variable attrs.
+        nondimensional: Mark every variable's ``units`` as ``"-"``.
+
+    Returns:
+        The same Dataset.
+    """
+    if scales is not None:
+        ds.attrs.update(scales_attrs(scales))
+    if transform is not None:
+        for name, attrs in transform_attrs(transform).items():
+            if name in ds:
+                ds[name].attrs.update(attrs)
+    if nondimensional:
+        for name in ds.data_vars:
+            ds[name].attrs["units"] = "-"
+    return ds

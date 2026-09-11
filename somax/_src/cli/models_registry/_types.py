@@ -80,6 +80,12 @@ class ModelEntry:
         build: Callable that takes a :class:`ScenarioBundle` plus a
             model-parameter dict and returns a :class:`BuiltModel`.
             Stubs in Phase 2 raise :class:`NotImplementedError`.
+        from_nondimensional: Optional callable taking a
+            :class:`ScenarioBundle` plus the ``scenario.nondim`` dict
+            and returning a :class:`BuiltModel`. ``None`` means the
+            model has no nondimensional factory yet, and a config using
+            a ``nondim`` block with it is rejected rather than silently
+            falling back to the dimensional path.
     """
 
     name: str
@@ -88,3 +94,6 @@ class ModelEntry:
     coordinates: Coordinates
     supports: SupportFlags
     build: Callable[[ScenarioBundle, dict[str, Any]], BuiltModel] = field(repr=False)
+    from_nondimensional: (
+        Callable[[ScenarioBundle, dict[str, Any]], BuiltModel] | None
+    ) = field(default=None, repr=False)
