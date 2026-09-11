@@ -45,6 +45,7 @@ from somax._src.core.helmholtz import (
     PeriodicHelmholtzCache,
 )
 from somax._src.core.model import SomaxModel, TermModel
+from somax._src.core.scaled import ScaledModel
 from somax._src.core.scales import Scales
 from somax._src.core.terms import (
     Compose,
@@ -94,6 +95,7 @@ __all__ = [
     "PeriodicHelmholtzCache",
     "PhysConsts",
     "Scaled",
+    "ScaledModel",
     "Scales",
     "SeasonalWindForcing",
     "SimulationCheckpointer",
