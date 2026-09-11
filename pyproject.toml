@@ -54,6 +54,11 @@ Repository = "https://github.com/jejjohnson/somax"
 [project.scripts]
 somax-sim = "somax._src.cli.app:main"
 
+[project.optional-dependencies]
+flows = [
+    "flowjax",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
