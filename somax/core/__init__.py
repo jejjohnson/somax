@@ -45,6 +45,7 @@ from somax._src.core.helmholtz import (
     PeriodicHelmholtzCache,
 )
 from somax._src.core.model import SomaxModel, TermModel
+from somax._src.core.scales import Scales
 from somax._src.core.terms import (
     Compose,
     Scaled,
@@ -56,7 +57,11 @@ from somax._src.core.terms import (
     implicit,
     partition,
 )
-from somax._src.core.transforms import ModalTransform, StratificationProfile
+from somax._src.core.transforms import (
+    ModalTransform,
+    StateAffine,
+    StratificationProfile,
+)
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State
 
 
@@ -81,11 +86,13 @@ __all__ = [
     "PeriodicHelmholtzCache",
     "PhysConsts",
     "Scaled",
+    "Scales",
     "SeasonalWindForcing",
     "SimulationCheckpointer",
     "SomaxModel",
     "SpatialBasis",
     "State",
+    "StateAffine",
     "StratificationProfile",
     "Sum",
     "TemporalBasis",

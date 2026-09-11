@@ -454,6 +454,36 @@ Args:
 ```
 ````
 
+### `Scales`
+
+*class*
+
+```python
+Scales(L: 'float', U: 'float', H: 'float', f0: 'float', T: 'float', g: 'float' = 9.81, kind: 'ScaleKind' = 'advective') -> None
+```
+
+Characteristic scales of a run. All fields static.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Attributes:
+    L: Horizontal length scale [m].
+    U: Velocity scale [m/s].
+    H: Depth / layer-thickness scale [m].
+    f0: Reference Coriolis parameter [1/s]. For the planetary set
+        this is ``2 * Omega``, so that ``f(phi) = f0 * sin(phi)``
+        and the Rossby number keeps its usual definition.
+    T: Time scale [s]. Set by the constructor for the chosen family
+        rather than derived, because the families disagree about it.
+    g: Gravitational acceleration [m/s^2].
+    kind: Which canonical set this is — ``"advective"``,
+        ``"inertial"`` or ``"planetary"``. Recorded so that
+        transforms, factories and the CLI can dispatch on it.
+```
+````
+
 ### `SeasonalWindForcing`
 
 *class*
@@ -567,6 +597,46 @@ Base class for model state vectors.
 ```text
 All model states should subclass this to enable interoperability
 with the somax model contract and JAX transformations.
+```
+````
+
+### `StateAffine`
+
+*class*
+
+```python
+StateAffine(loc: 'PyTree', scale: 'PyTree') -> None
+```
+
+Per-leaf affine map on a ``State`` pytree: ``y = (x - loc) / scale``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+One abstraction serves both jobs that need a change of state
+variables:
+
+* **Non-dimensionalisation** — ``loc`` and ``scale`` come from a
+  :class:`~somax._src.core.scales.Scales` via :meth:`from_scales`,
+  giving ``u' = u/U``, ``h' = (h - H)/dH``, ``q' = q/(U/L)``.
+* **Standardisation** — ``loc`` and ``scale`` are the sample mean
+  and standard deviation from :meth:`from_samples`, per field or
+  per gridpoint.
+
+They are the same map, so they compose (:meth:`compose`), invert,
+and can be used interchangeably by the DA flattening bridge, by
+ML input/output pipelines, and by ``ScaledModel``.
+
+Attributes:
+    loc: Pytree matching the state's structure; each leaf is
+        broadcastable against the corresponding field.
+    scale: Pytree of the same structure. Leaves must be non-zero.
+
+Notes:
+    ``loc`` and ``scale`` are ordinary pytrees, so a leaf may be a
+    scalar (one number for the whole field), a per-layer column of
+    shape ``(nl, 1, 1)``, or a full per-gridpoint array.
 ```
 ````
 

@@ -133,7 +133,9 @@ Example pattern for a notebook in `notebooks/`:
 ```python
 from pathlib import Path
 
-IMG_DIR = Path(__file__).resolve().parent.parent / "content" / "images" / "notebook_name"
+IMG_DIR = (
+    Path(__file__).resolve().parent.parent / "content" / "images" / "notebook_name"
+)
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 ```
 
