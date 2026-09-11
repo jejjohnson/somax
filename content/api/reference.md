@@ -384,6 +384,26 @@ Base class for differentiable model parameters.
 ```text
 Fields on Params subclasses are visible to ``jax.grad`` by default.
 Use ``eqx.field(static=True)`` for non-differentiable parameters.
+
+Fields may also hold a ``paramax`` wrapper instead of a bare array.
+:func:`positive` and :func:`interval` store a constrained value in an
+unconstrained space, and :func:`frozen` hides a value from gradients.
+A wrapped field is reconstituted by ``paramax.unwrap`` at RHS time —
+:meth:`somax.SomaxModel.build_terms` and
+:meth:`somax.SomaxModel.diagnose` both call it — so model code always
+sees the constrained value and never needs to know about the wrapper.
+
+Gradients of a wrapped field are taken **with respect to the
+unconstrained value**, not the constrained one. For a
+``positive``-wrapped viscosity ``nu = softplus(r)`` the gradient lands
+on ``r``, so an optimiser stepping it can never drive ``nu`` negative.
+Chain-rule factors (``sigmoid(r)`` for ``positive``) mean the
+magnitudes differ from those of an unwrapped parameterisation; that
+is the point, and optimiser learning rates should be set accordingly.
+
+Example:
+    >>> params = MyParams(lateral_viscosity=positive(100.0))
+    >>> paramax.unwrap(params).lateral_viscosity  # 100.0
 ```
 ````
 
@@ -1002,6 +1022,33 @@ explicit(term: 'Term') -> 'Term'
 
 Tag ``term`` for the explicit stage of an IMEX integrator.
 
+### `frozen`
+
+*function*
+
+```python
+frozen(value: 'ArrayLike') -> 'NonTrainable'
+```
+
+Hide a parameter from gradients while keeping it a runtime value.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The leaf stays in the pytree but is cut out of the backward pass,
+so it behaves like an ``eqx.field(static=True)`` constant without
+having to be hashable or known at trace time. Its gradient comes
+back as exact zero rather than being absent.
+
+Args:
+    value: The value to freeze.
+
+Returns:
+    A ``NonTrainable`` wrapper that unwraps to ``value``.
+```
+````
+
 ### `geostrophic_currents`
 
 *function*
@@ -1042,6 +1089,40 @@ implicit(term: 'Term') -> 'Term'
 ```
 
 Tag ``term`` for the implicit stage of an IMEX integrator.
+
+### `interval`
+
+*function*
+
+```python
+interval(value: 'ArrayLike', lower: 'float', upper: 'float') -> 'Parameterize'
+```
+
+Constrain a parameter to the open interval ``(lower, upper)``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The value is stored in logit space and reconstituted as
+``lower + (upper - lower) * sigmoid(raw)``. As with :func:`positive`,
+the bound is exact in arithmetic and saturating in floating point:
+far into either tail ``sigmoid`` reaches exactly 0 or 1, so the
+constrained value can land *on* a bound but never outside it.
+
+Args:
+    value: The initial constrained value, strictly inside the interval.
+    lower: Lower bound, exclusive.
+    upper: Upper bound, exclusive.
+
+Returns:
+    A ``Parameterize`` that unwraps to ``value``.
+
+Raises:
+    ValueError: If the bounds are not ordered, or ``value`` lies
+        outside the open interval.
+```
+````
 
 ### `matern_spectral_density`
 
@@ -1105,6 +1186,45 @@ Args:
 Returns:
     ``(explicit_part, implicit_part)``. Either element is ``None``
     when no summand of that kind is present.
+```
+````
+
+### `positive`
+
+*function*
+
+```python
+positive(value: 'ArrayLike') -> 'Parameterize'
+```
+
+Constrain a parameter to be strictly positive.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The value is stored in softplus space and reconstituted as
+``softplus(raw)`` by ``paramax.unwrap``, so gradient descent on the
+stored value cannot make it negative. Use it for quantities that are
+physically non-negative — lateral viscosity, bottom drag, wind
+amplitude — whenever they are being calibrated.
+
+The guarantee is exact in arithmetic and near-exact in floating
+point: ``softplus`` underflows to exactly ``0.0`` once the stored
+value falls below roughly ``-90`` in float32, so the constrained
+value is non-negative always and strictly positive everywhere an
+optimiser that has not already diverged will go. It is never
+negative.
+
+Args:
+    value: The initial constrained value. Must be strictly positive.
+
+Returns:
+    A ``Parameterize`` that unwraps to ``value``.
+
+Raises:
+    ValueError: If ``value`` is not strictly positive, which has no
+        representation in softplus space.
 ```
 ````
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import diffrax as dfx
 import equinox as eqx
 import jax.tree_util as jtu
+import paramax
 from jaxtyping import PyTree
 
 
@@ -48,11 +49,19 @@ class SomaxModel(eqx.Module):
         The default wraps ``vector_field`` in an ``ODETerm``, applying
         boundary conditions to the state before each RHS evaluation.
         Override for SDE (``MultiTerm``) or IMEX splitting.
+
+        ``paramax.unwrap`` runs inside the RHS, so any constrained
+        parameter (see :func:`somax.positive`) is reconstituted before
+        the model sees it. Unwrapping happens per evaluation rather than
+        once up front so that gradients flow to the *stored*
+        unconstrained values. It is a no-op for a model whose parameters
+        are plain arrays.
         """
 
         def _rhs(t, state, args=None):
-            state = self.apply_boundary_conditions(state)
-            return self.vector_field(t, state, args)
+            model = paramax.unwrap(self)
+            state = model.apply_boundary_conditions(state)
+            return model.vector_field(t, state, args)
 
         return dfx.ODETerm(_rhs)
 
@@ -147,8 +156,29 @@ class SomaxModel(eqx.Module):
         """Compute on-demand diagnostics from state.
 
         Override to return a ``Diagnostics`` instance.
+
+        Overrides receive an already-unwrapped model, because callers
+        reach this through :meth:`diagnostics`. Calling ``diagnose``
+        directly on a model with constrained parameters is a mistake;
+        it raises rather than returning a wrong number, since arithmetic
+        on a ``paramax`` wrapper is a type error.
         """
         return {}
+
+    def diagnostics(self, state: PyTree) -> PyTree:
+        """Diagnostics with constrained parameters reconstituted.
+
+        The entry point to prefer over :meth:`diagnose`: it applies
+        ``paramax.unwrap`` first, so a model carrying wrapped
+        parameters reports the same diagnostics as the equivalent model
+        carrying plain arrays. A no-op for unwrapped models.
+
+        Somax's own monitors and runners spell this out as
+        ``paramax.unwrap(model).diagnose(state)`` instead, because they
+        accept any object exposing ``diagnose`` rather than requiring a
+        ``SomaxModel``.
+        """
+        return paramax.unwrap(self).diagnose(state)
 
     @property
     def state_signature(self) -> None:
@@ -209,4 +239,7 @@ class TermModel(SomaxModel):
         """
         from somax._src.core.terms import build_diffrax_terms
 
-        return build_diffrax_terms(self.terms, state_fn=self.apply_boundary_conditions)
+        model = paramax.unwrap(self)
+        return build_diffrax_terms(
+            model.terms, state_fn=model.apply_boundary_conditions
+        )

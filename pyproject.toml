@@ -30,6 +30,11 @@ dependencies = [
     "lineax>=0.1.1",
     "optimistix>=0.1",
     "einops>=0.8.2",
+    # Constrained / frozen parameters. ``Parameterize`` stores a bounded
+    # parameter in an unconstrained space and ``unwrap`` reconstitutes it at
+    # RHS time, so an optimiser can never step viscosity or drag negative.
+    # equinox is its only dependency.
+    "paramax>=0.0.5",
     "finitevolx @ git+https://github.com/jejjohnson/finitevolX.git@v0.0.41",
     "spectraldiffx>=0.0.10",
     "pipekit",

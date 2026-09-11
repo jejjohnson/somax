@@ -62,7 +62,15 @@ from somax._src.core.transforms import (
     StateAffine,
     StratificationProfile,
 )
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    frozen,
+    interval,
+    positive,
+)
 
 
 __all__ = [
@@ -107,10 +115,13 @@ __all__ = [
     "build_diffrax_terms",
     "control_filter",
     "explicit",
+    "frozen",
     "geostrophic_currents",
     "implicit",
+    "interval",
     "matern_spectral_density",
     "partition",
+    "positive",
     "spatial_from_divfree",
     "spatial_from_eof",
     "spatial_from_fourier",

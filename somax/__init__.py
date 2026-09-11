@@ -6,4 +6,7 @@ from somax.core import (
     SomaxModel as SomaxModel,
     State as State,
     StateAffine as StateAffine,
+    frozen as frozen,
+    interval as interval,
+    positive as positive,
 )
