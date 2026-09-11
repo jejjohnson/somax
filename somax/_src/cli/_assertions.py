@@ -203,16 +203,16 @@ def check_deformation_radius(
         raise AssertionFailedError(
             f"deformation_radius check FAILED: L_d/dx = {ratio:.2f} < "
             f"{n_cells_min}\n"
-            f"  L_d   = {Ld:.0f} m (smallest internal deformation radius, "
+            f"  L_d   = {Ld:.4g} (smallest internal deformation radius, "
             f"from {source})\n"
-            f"  dx    = {dx_min:.0f} m\n"
+            f"  dx    = {dx_min:.4g}\n"
             f"  → eddies will be suppressed; refine the grid or pick an "
             f"eddy-permitting configuration."
         )
     if ratio < n_cells_warn:
         logger.warning(
             "deformation radius marginally resolved: L_d/dx = {:.2f} "
-            "(L_d={:.0f} m, dx={:.0f} m)",
+            "(L_d={:.4g}, dx={:.4g})",
             ratio,
             Ld,
             dx_min,

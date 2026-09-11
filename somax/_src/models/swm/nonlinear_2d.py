@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -20,7 +22,13 @@ from finitevolx import (
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.models._nondim import (
+    require_non_negative,
+    require_positive,
+    resolve_burger,
+)
 
 
 class NonlinearSW2DState(State):
@@ -256,6 +264,99 @@ class NonlinearShallowWater2D(SomaxModel):
             relative_vorticity=zeta,
             kinetic_energy_field=ke,
         )
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        rossby: float,
+        burger: float | None = None,
+        froude: float | None = None,
+        beta_hat: float = 0.0,
+        ekman: float = 0.0,
+        ekman_lateral: float = 0.0,
+        wind_hat: float = 0.0,
+        aspect: float = 1.0,
+        **create_kw: Any,
+    ) -> tuple[NonlinearShallowWater2D, Scales]:
+        r"""Build the model from dimensionless numbers instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Scale set: **inertial** (:meth:`somax.Scales.inertial`), with
+        ``L = f0 = H = 1`` so that ``T = 1/f0 = 1`` and the velocity
+        scale is ``U = f0 L Ro = Ro``. The model's own velocity fields
+        are therefore ``O(Ro)``; wrap it in a
+        :class:`~somax.ScaledModel` built from the returned ``Scales``
+        to work in ``O(1)`` state instead.
+
+        ==================  ==============================  ====================
+        Input               Definition                      ``create()`` kwarg
+        ==================  ==============================  ====================
+        ``rossby``          :math:`Ro = U/(f_0 L)`          sets ``U``
+        ``burger``          :math:`Bu = gH/(f_0 L)^2`       ``g``
+        ``froude``          :math:`Fr = U/\sqrt{gH}`         ``g`` (via ``Bu``)
+        ``beta_hat``        :math:`\beta L/f_0`              ``beta``
+        ``ekman``           :math:`\kappa/f_0`               ``bottom_drag``
+        ``ekman_lateral``   :math:`\nu/(f_0 L^2)`            ``lateral_viscosity``
+        ``wind_hat``        :math:`\tau_0/(f_0 U)`           ``wind_amplitude``
+        ==================  ==============================  ====================
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            rossby: Rossby number; sets the velocity scale.
+            burger: Burger number. Give this or ``froude``, not both.
+            froude: Froude number. Equivalent to ``burger`` through
+                ``Bu = (Ro/Fr)**2``.
+            beta_hat: Dimensionless planetary vorticity gradient. Zero
+                (the default) is an f-plane.
+            ekman: Linear bottom-drag Ekman number.
+            ekman_lateral: Lateral-viscosity Ekman number.
+            wind_hat: Dimensionless wind acceleration.
+            aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
+            **create_kw: Forwarded to :meth:`create` (``bc``,
+                ``method``, ``wind_profile``, ``mask``).
+
+        Returns:
+            ``(model, scales)`` with ``scales.kind == "inertial"``.
+
+        Raises:
+            ValueError: If an input is out of range, or if neither or
+                both of ``burger`` and ``froude`` is given.
+        """
+        context = "NonlinearShallowWater2D.from_nondimensional"
+        require_positive(context, rossby=rossby, aspect=aspect)
+        require_non_negative(
+            context,
+            beta_hat=beta_hat,
+            ekman=ekman,
+            ekman_lateral=ekman_lateral,
+            wind_hat=wind_hat,
+        )
+        bu = resolve_burger(context, burger, froude, rossby)
+
+        # Unit scales: L = f0 = H0 = 1, so every coefficient below is
+        # the dimensionless group itself. The exception is the wind,
+        # which enters the momentum equation as an acceleration and so
+        # carries the velocity scale U = Ro.
+        model = NonlinearShallowWater2D.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            g=bu,
+            f0=1.0,
+            beta=beta_hat,
+            H0=1.0,
+            lateral_viscosity=ekman_lateral,
+            bottom_drag=ekman,
+            wind_amplitude=wind_hat * rossby,
+            **create_kw,
+        )
+        scales = Scales.inertial(L=1.0, f0=1.0, H=1.0, rossby=rossby, g=bu)
+        return model, scales
 
     @staticmethod
     def create(
