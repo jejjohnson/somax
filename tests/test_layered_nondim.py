@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from somax._src.cli._assertions import (
+    PREFLIGHT_ASSERTIONS,
     AssertionFailedError,
     check_deformation_radius,
 )
@@ -792,3 +793,111 @@ class TestDeformationRadiusUsesTheCoarserSpacing:
         with pytest.raises(AssertionFailedError) as excinfo:
             check_deformation_radius(None, model)
         assert f"{max(model.grid.dx, model.grid.dy):.4g}" in str(excinfo.value)
+
+
+class TestGuardsDoNotNeedTheCliExtras:
+    """A base install must reach the resolution guards.
+
+    The previous round moved the Munk and Stommel guards out of the
+    CLI package but left the factories importing them from
+    ``somax._src.cli._assertions``, which still pulls in ``loguru`` —
+    declared only in the optional ``sim`` group. The deformation-radius
+    guard was still defined there too.
+    """
+
+    def test_the_deformation_guard_lives_in_the_base_package(self):
+        from somax._src.core import resolution
+
+        assert (
+            resolution.check_deformation_radius.__module__
+            == "somax._src.core.resolution"
+        )
+
+    def test_the_cli_registry_uses_the_same_object(self):
+        from somax._src.core import resolution
+
+        assert (
+            PREFLIGHT_ASSERTIONS["deformation_radius"]
+            is resolution.check_deformation_radius
+        )
+
+    @pytest.mark.parametrize(
+        "factory",
+        ["BarotropicQG", "BaroclinicQG", "ReparameterizedQG"],
+    )
+    def test_the_factory_builds_without_loguru(self, factory):
+        import subprocess
+        import sys
+        import textwrap
+
+        layered = """burger=[1.0, 0.02], thickness_ratio=[1.0, 4.0], beta_hat=20.0"""
+        args = "beta_hat=50.0" if factory == "BarotropicQG" else layered
+        script = textwrap.dedent(f"""
+            import builtins
+            real = builtins.__import__
+            def guarded(name, *a, **k):
+                if name == "loguru":
+                    raise ModuleNotFoundError("No module named 'loguru'")
+                return real(name, *a, **k)
+            builtins.__import__ = guarded
+            from somax.models import {factory}
+            {factory}.from_nondimensional(
+                nx=128, ny=128, rossby=0.02, delta_M=0.06, {args}
+            )
+            print("ok")
+        """)
+        out = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        assert out.stdout.strip() == "ok", out.stderr[-800:]
+
+
+class TestArrayBackedSequencesAreAccepted:
+    """``burger`` and ``thickness_ratio`` are sequences of numbers.
+
+    ``if not burger`` raises on a multi-element array — ambiguous truth
+    value — so array inputs were rejected before the conversion that
+    would have handled them.
+    """
+
+    def build(self, maker):
+        return BaroclinicQG.from_nondimensional(
+            nx=128,
+            ny=128,
+            rossby=0.02,
+            beta_hat=20.0,
+            burger=maker([1.0, 0.02]),
+            thickness_ratio=maker([1.0, 4.0]),
+            delta_M=0.06,
+        )
+
+    def test_a_numpy_array_works(self):
+        _, scales = self.build(np.asarray)
+        assert scales.burger == pytest.approx(1.0, rel=1e-6)
+
+    def test_a_jax_array_works(self):
+        _, scales = self.build(jnp.asarray)
+        assert scales.burger == pytest.approx(1.0, rel=1e-6)
+
+    def test_a_list_still_works(self):
+        _, scales = self.build(list)
+        assert scales.burger == pytest.approx(1.0, rel=1e-6)
+
+    def test_all_three_agree(self):
+        values = [
+            float(self.build(m)[1].burger) for m in (np.asarray, jnp.asarray, list)
+        ]
+        assert values[0] == pytest.approx(values[1]) == pytest.approx(values[2])
+
+    def test_an_empty_sequence_is_still_rejected(self):
+        for maker in (np.asarray, list):
+            with pytest.raises(ValueError, match="must not be empty"):
+                BaroclinicQG.from_nondimensional(
+                    nx=64,
+                    ny=64,
+                    rossby=0.02,
+                    beta_hat=20.0,
+                    burger=maker([]),
+                    thickness_ratio=maker([]),
+                    delta_M=0.06,
+                )

@@ -387,7 +387,7 @@ class BaroclinicQG(SomaxModel):
         scales = Scales.advective(L=1.0, U=1.0, f0=f0, H=thickness[0], g=g_prime[0])
 
         if check_resolution:
-            from somax._src.cli._assertions import (
+            from somax._src.core.resolution import (
                 check_deformation_radius,
                 check_munk_width,
                 check_stommel_width,
