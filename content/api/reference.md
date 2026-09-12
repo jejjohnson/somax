@@ -499,9 +499,10 @@ Attributes:
         ``vector_field`` and parameters are untouched.
     transform: The affine state map. ``forward`` takes an inner
         state to wrapped coordinates.
-    time_scale: Inner time units per wrapped time unit. For a
-        nondimensionalising wrapper this is ``scales.T``; for a
-        purely statistical one it stays at 1.
+    time_scale: Inner time units per wrapped time unit, finite and
+        strictly positive. For a nondimensionalising wrapper this
+        is ``scales.T``; for a purely statistical one it stays
+        at 1.
 ```
 ````
 
