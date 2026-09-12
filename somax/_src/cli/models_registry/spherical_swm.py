@@ -47,6 +47,40 @@ def _spherical_mask(scenario: ScenarioBundle) -> Any:
     return Mask2D.from_mask(jnp.asarray(padded))
 
 
+def _at_rest(model: Any) -> Any:
+    """A resting state, dry over land.
+
+    Filling ``h`` with ``H0`` everywhere would leave water standing on
+    land: the masked operators never touch those cells, so the value
+    persists into the saved states and into ``diagnose``, where it
+    counts towards mass and potential energy.
+    """
+    from somax.models import SphericalSWMState
+
+    shape = (model.grid.Ny, model.grid.Nx)
+    depth = jnp.full(shape, model.consts.H0)
+    if model.mask is not None:
+        depth = depth * model.mask.h
+    return SphericalSWMState(h=depth, u=jnp.zeros(shape), v=jnp.zeros(shape))
+
+
+def _forcing_fields(scenario: ScenarioBundle, *names: str) -> dict[str, Any]:
+    """Pass a scenario's precomputed forcing fields to the model.
+
+    Both spherical entries advertise ``forcing=("tau_x", "tau_y")``, so
+    a scenario that supplies those fields expects them to be used.
+    Reading only the scalar ``forcing_params`` left such a run on the
+    default analytic pattern — usually at zero amplitude, so unforced.
+    """
+    forcing = scenario.forcing
+    out: dict[str, Any] = {}
+    for model_name, scenario_name in zip(names[::2], names[1::2], strict=True):
+        field = getattr(forcing, scenario_name, None)
+        if field is not None:
+            out[model_name] = jnp.asarray(field)
+    return out
+
+
 def _numerics(params: dict[str, Any], *keys: str) -> dict[str, Any]:
     """Pick the numerical knobs a model exposes out of ``model.params``.
 
@@ -69,7 +103,7 @@ def _require_spherical(scenario: ScenarioBundle, name: str) -> tuple:
 
 
 def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
-    from somax.models import SphericalSWM, SphericalSWMState
+    from somax.models import SphericalSWM
 
     lon_bounds, lat_bounds = _require_spherical(scenario, "spherical_swm")
     geometry = scenario.geometry
@@ -93,6 +127,7 @@ def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
         wind_amplitude=float(forcing.get("wind_amplitude", 0.0)),
         wind_profile=str(forcing.get("wind_profile", "zonal")),
         mask=_spherical_mask(scenario),
+        **_forcing_fields(scenario, "wind_stress_x", "tau_x", "wind_stress_y", "tau_y"),
         **_numerics(params, "method"),
     )
 
@@ -102,13 +137,7 @@ def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
             f"spherical_swm: initial_condition.type={ic.type!r} not supported "
             "(only 'at_rest')."
         )
-    shape = (model.grid.Ny, model.grid.Nx)
-    state0 = SphericalSWMState(
-        h=jnp.full(shape, model.consts.H0),
-        u=jnp.zeros(shape),
-        v=jnp.zeros(shape),
-    )
-    return BuiltModel(model=model, state0=state0)
+    return BuiltModel(model=model, state0=_at_rest(model))
 
 
 #: YAML keys accepted in a ``scenario.nondim`` block, mapped to the

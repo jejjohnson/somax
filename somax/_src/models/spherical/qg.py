@@ -258,6 +258,11 @@ class SphericalQG(SomaxModel):
         dq_dt = dq_dt + self.diffusion(q, nu)
         dq_dt = dq_dt - kappa * q
 
+        # Same reason as the shallow-water model: the polar rows carry
+        # a Dirichlet condition that the integrator does not reapply to
+        # the returned state, so the tendency there has to be zero for
+        # the condition to survive a step.
+        dq_dt = dq_dt.at[0, :].set(0.0).at[-1, :].set(0.0)
         return SphericalQGState(q=dq_dt)
 
     def apply_boundary_conditions(self, state: PyTree) -> SphericalQGState:
@@ -402,6 +407,7 @@ class SphericalQG(SomaxModel):
         mask: Mask2D | None = None,
         cg_tol: float = 1e-6,
         cg_max_steps: int = 500,
+        wind_forcing: Float[Array, "Ny Nx"] | None = None,
     ) -> SphericalQG:
         """Convenience factory.
 
@@ -424,6 +430,9 @@ class SphericalQG(SomaxModel):
             is chosen for float32: a tighter absolute tolerance never
             trips, and CG runs to its step cap.
             cg_max_steps: Iteration cap for the PV inversion.
+            wind_forcing: Precomputed wind-stress-curl pattern on the
+                model grid, overriding ``wind_profile``. For a scenario
+                that supplies its own forcing field.
 
         Returns:
             A ``SphericalQG`` instance.
@@ -442,7 +451,9 @@ class SphericalQG(SomaxModel):
 
         lat_T = grid.lat_T
         f_field = 2.0 * omega * jnp.sin(lat_T)
-        if wind_profile == "none":
+        if wind_forcing is not None:
+            wind_forcing = jnp.asarray(wind_forcing)
+        elif wind_profile == "none":
             wind_forcing = jnp.zeros_like(lat_T)
         else:
             wind_forcing = -jnp.sin(2.0 * lat_T)

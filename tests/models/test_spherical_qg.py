@@ -322,3 +322,35 @@ class TestPvInversionAssertionAcceptsThisModel:
             jnp.linalg.norm(residual[INTERIOR]) / jnp.linalg.norm(q[INTERIOR])
         )
         assert relative < 1e-4
+
+
+class TestConstrainedRowsStayConstrained:
+    """``q = 0`` on the polar rows must survive a step.
+
+    The integrator projects only the RHS input, so a nonzero tendency
+    there would accumulate and break the Dirichlet condition the PV
+    inversion assumes.
+    """
+
+    def state(self, model):
+        return model.apply_boundary_conditions(
+            SphericalQGState(q=model.laplacian(smooth_streamfunction(model)))
+        )
+
+    def test_the_tendency_vanishes_on_the_polar_rows(self):
+        model = build()
+        tendency = model.vector_field(0.0, self.state(model))
+        np.testing.assert_array_equal(np.asarray(tendency.q)[0, :], 0.0)
+        np.testing.assert_array_equal(np.asarray(tendency.q)[-1, :], 0.0)
+
+    def test_the_interior_tendency_is_not_zero(self):
+        model = build()
+        tendency = model.vector_field(0.0, self.state(model))
+        assert float(jnp.abs(tendency.q[2:-2, 2:-2]).max()) > 0.0
+
+    def test_the_condition_survives_an_integration(self):
+        model = build(nx=32, ny=16, lateral_viscosity=1e4)
+        out = model.integrate(self.state(model), t0=0.0, t1=6 * 3600.0, dt=1800.0).ys
+        final = np.asarray(out.q[-1])
+        np.testing.assert_allclose(final[0, :], 0.0, atol=1e-12)
+        np.testing.assert_allclose(final[-1, :], 0.0, atol=1e-12)

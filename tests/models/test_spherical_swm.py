@@ -399,3 +399,51 @@ class TestGeometryRestrictionsAreStated:
     def test_an_offset_global_span_is_accepted(self):
         """It is the 360-degree width that matters, not the origin."""
         assert build(lon_range=(-180.0, 180.0)) is not None
+
+
+class TestConstrainedRowsStayConstrained:
+    """The integrator projects the RHS input, not its output.
+
+    ``apply_boundary_conditions`` zeroes the wall-normal ``v`` before
+    each evaluation, but neither the returned nor the saved state is
+    projected — so a nonzero tendency on those rows accumulates there
+    and the snapshots show flow through a wall the model calls closed.
+    """
+
+    def sheared(self, model):
+        """Zonal flow at the walls, which drives a Coriolis dv/dt."""
+        lat = np.asarray(model.grid.lat_T)
+        shape = lat.shape
+        return model.apply_boundary_conditions(
+            SphericalSWMState(
+                h=jnp.full(shape, DEPTH),
+                u=jnp.full(shape, JET_SPEED),
+                v=jnp.zeros(shape),
+            )
+        )
+
+    def test_the_meridional_tendency_vanishes_on_the_walls(self):
+        model = build()
+        tendency = model.vector_field(0.0, self.sheared(model))
+        for row in (0, -2, -1):
+            np.testing.assert_array_equal(np.asarray(tendency.v)[row, :], 0.0)
+
+    def test_the_interior_tendency_is_not_zero(self):
+        """Otherwise the test above would be vacuous."""
+        model = build()
+        tendency = model.vector_field(0.0, self.sheared(model))
+        assert float(jnp.abs(tendency.v[2:-2, :]).max()) > 0.0
+
+    def test_the_wall_stays_closed_through_an_integration(self):
+        model = build(nx=32, ny=16)
+        out = model.integrate(self.sheared(model), t0=0.0, t1=6 * 3600.0, dt=600.0).ys
+        final = np.asarray(out.v[-1])
+        for row in (0, -2, -1):
+            np.testing.assert_allclose(final[row, :], 0.0, atol=1e-12)
+
+    def test_the_other_tendencies_are_untouched(self):
+        """Only ``v`` is constrained; ``h`` and ``u`` are free there."""
+        model = build()
+        tendency = model.vector_field(0.0, self.sheared(model))
+        assert np.isfinite(np.asarray(tendency.h)).all()
+        assert np.isfinite(np.asarray(tendency.u)).all()

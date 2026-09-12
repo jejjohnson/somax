@@ -134,9 +134,12 @@ class LinearConvection2D(SomaxModel):
 
         Returns:
             ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
-            extent=(1.0, aspect))`` gives a step in the same time unit;
-            pass both cell counts and the aspect ratio, since the bound
-            depends on the *smaller* spacing.
+            extent=(1.0, aspect))`` gives a step in the same time unit.
+            Pass ``direction=`` as well, the same pair given here: the
+            advective bound sums ``|c_i|/dx_i`` over the axes, so
+            without it the worst case over all directions is used and
+            the step comes out up to ``sqrt(2)`` smaller than it needs
+            to be.
         """
         context = "LinearConvection2D.from_nondimensional"
         require_positive(context, aspect=aspect)

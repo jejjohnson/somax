@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -29,6 +31,9 @@ class NonlinearSW1DState(State):
     h: Array
     u: Array
     v: Array
+
+    # The 1-D Coriolis partner sits at T-points.
+    mask_locations: ClassVar[dict[str, str]] = {"v": "h"}
 
 
 class NonlinearSW1DParams(Params):
