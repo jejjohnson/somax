@@ -576,3 +576,59 @@ class TestGuardsAreImportableWithoutTheCliExtras:
                 resolution.check_munk_width(None, model, n_cells_warn=1e9)
         finally:
             resolution._logger = saved
+
+
+class TestGuardsRejectNonFiniteInputs:
+    """A NaN makes every comparison false, so a guard silently passes.
+
+    Both routes reach the guards without the nondimensional factory's
+    validation: ``beta`` through ``create`` or a CLI adapter, and the
+    thresholds straight from YAML — ``n_cells_min: .nan`` is valid and
+    ``run_preflight`` forwards it unchanged.
+    """
+
+    def model(self, **kw):
+        params = {
+            "beta": 50.0,
+            "lateral_viscosity": 0.05**3 * 50.0,
+            "bottom_drag": 0.02 * 50.0,
+        }
+        params.update(kw)
+        return BarotropicQG.create(nx=64, ny=64, Lx=1.0, Ly=1.0, **params)
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_a_non_finite_beta_is_rejected(self, bad):
+        with pytest.raises(AssertionFailedError, match="non-finite planetary"):
+            check_munk_width(None, self.model(beta=bad))
+
+    def test_the_stommel_guard_rejects_it_too(self):
+        with pytest.raises(AssertionFailedError, match="non-finite planetary"):
+            check_stommel_width(None, self.model(beta=float("nan")))
+
+    def test_a_nan_beta_would_otherwise_pass(self):
+        """The ratio is NaN, so both threshold comparisons are false."""
+        assert not (float("nan") < 2.0)
+
+    @pytest.mark.parametrize("name", ["n_cells_min", "n_cells_warn"])
+    def test_a_non_finite_threshold_is_rejected(self, name):
+        with pytest.raises(AssertionFailedError, match=f"{name} is nan"):
+            check_munk_width(None, self.model(), **{name: float("nan")})
+
+    def test_the_stommel_guard_checks_its_thresholds_too(self):
+        with pytest.raises(AssertionFailedError, match="n_cells_min is nan"):
+            check_stommel_width(None, self.model(), n_cells_min=float("nan"))
+
+    def test_an_unresolved_layer_with_a_nan_threshold_no_longer_passes(self):
+        """The failure this prevents, on a grid that really is too coarse."""
+        coarse = BarotropicQG.create(
+            nx=8, ny=8, Lx=1.0, Ly=1.0, beta=50.0, lateral_viscosity=1.0e-9
+        )
+        with pytest.raises(AssertionFailedError):
+            check_munk_width(None, coarse, n_cells_min=float("nan"))
+
+    def test_finite_thresholds_still_work(self):
+        check_munk_width(None, self.model(), n_cells_min=2.0, n_cells_warn=4.0)
+
+    def test_a_finite_negative_beta_is_still_fine(self):
+        """Southern-hemisphere convention, not an error."""
+        check_munk_width(None, self.model(beta=-50.0))

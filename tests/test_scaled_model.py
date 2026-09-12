@@ -452,3 +452,69 @@ class TestLinearShallowWaterHeightIsNotOffset:
         scales = Scales.inertial(L=1.0e6, f0=1.0e-4, H=500.0, rossby=0.01)
         wrapper = ScaledModel.from_scales(inner, scales, NonlinearSW2DState)
         assert float(wrapper.transform.loc.h) == pytest.approx(500.0)
+
+
+class TestTimeScaleMustBeUsable:
+    """A degenerate time scale should say so, not integrate anyway.
+
+    Zero is the quiet one: every tendency is multiplied by it and the
+    inner model is evaluated at ``t = 0`` forever, so the solve returns
+    a frozen trajectory that looks like a physical result.
+    """
+
+    def parts(self):
+        from somax._src.models.qg.barotropic import BarotropicQG, BarotropicQGState
+
+        model = BarotropicQG.create(nx=16, ny=16)
+        transform = StateAffine.from_scales(
+            BarotropicQGState, Scales.advective(L=1.0, U=1.0)
+        )
+        return model, transform
+
+    @pytest.mark.parametrize(
+        "bad", [0.0, -1.0, -2.5, float("nan"), float("inf"), float("-inf")]
+    )
+    def test_a_degenerate_time_scale_is_rejected(self, bad):
+        model, transform = self.parts()
+        with pytest.raises(ValueError, match="time_scale must be"):
+            ScaledModel(inner=model, transform=transform, time_scale=bad)
+
+    def test_a_positive_time_scale_is_accepted(self):
+        model, transform = self.parts()
+        assert ScaledModel(
+            inner=model, transform=transform, time_scale=2.5
+        ).time_scale == pytest.approx(2.5)
+
+    def test_the_default_is_unchanged(self):
+        model, transform = self.parts()
+        wrapper = ScaledModel(inner=model, transform=transform)
+        assert wrapper.time_scale == pytest.approx(1.0)
+
+    def test_the_scales_constructor_still_works(self):
+        from somax._src.models.qg.barotropic import BarotropicQG, BarotropicQGState
+
+        model = BarotropicQG.create(nx=16, ny=16)
+        scales = Scales.advective(L=1.0e6, U=0.1)
+        wrapper = ScaledModel.from_scales(model, scales, BarotropicQGState)
+        assert wrapper.time_scale == pytest.approx(scales.T)
+
+    def test_the_time_scale_actually_scales_the_tendency(self):
+        """So rejecting zero matters: the parameter is a real factor.
+
+        A zero can no longer be constructed to demonstrate the frozen
+        trajectory directly — which is the point of the check — so this
+        pins the linearity that makes zero degenerate.
+        """
+        from somax._src.models.qg.barotropic import BarotropicQGState
+
+        model, transform = self.parts()
+        state = BarotropicQGState(
+            q=jnp.asarray(
+                1.0e-6 * np.random.RandomState(0).randn(model.grid.Ny, model.grid.Nx)
+            )
+        )
+        single = ScaledModel(inner=model, transform=transform, time_scale=1.0)
+        double = ScaledModel(inner=model, transform=transform, time_scale=2.0)
+        one = np.asarray(single.vector_field(0.0, state).q)
+        two = np.asarray(double.vector_field(0.0, state).q)
+        np.testing.assert_allclose(two, 2.0 * one, rtol=1e-4)
