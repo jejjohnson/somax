@@ -901,3 +901,101 @@ class TestArrayBackedSequencesAreAccepted:
                     thickness_ratio=maker([]),
                     delta_M=0.06,
                 )
+
+
+class TestTheModelSharesTheScalesGravity:
+    """``consts.gravity`` must agree with ``Scales.g``.
+
+    Passing ``g_prime`` alone left ``ReparameterizedQG.create`` at its
+    9.81 default, so the model's constants contradicted its own
+    stratification and the scales it was handed back with. Diagnostics
+    that read ``consts.gravity`` — ``geostrophic_imbalance`` among
+    them — then used the wrong coefficient.
+    """
+
+    @staticmethod
+    def build(**kw):
+        return ReparameterizedQG.from_nondimensional(
+            nx=64,
+            ny=64,
+            rossby=0.02,
+            beta_hat=1.0,
+            burger=(1.0, 0.1),
+            thickness_ratio=(1.0, 3.0),
+            delta_M=0.02,
+            delta_S=0.0,
+            check_resolution=False,
+            **kw,
+        )
+
+    def test_they_match(self):
+        model, scales = self.build()
+        assert float(model.swm.consts.gravity) == pytest.approx(scales.g)
+
+    def test_it_is_not_the_default(self):
+        """Otherwise the test above could pass by coincidence."""
+        _, scales = self.build()
+        assert scales.g != pytest.approx(9.81)
+
+    def test_a_forwarded_gravity_is_rejected(self):
+        with pytest.raises(ValueError, match="g"):
+            self.build(g=9.81)
+
+
+class TestTheDefaultWindGivesAUnitSverdrupVelocity:
+    """The default is a Sverdrup-balance choice, and that balances curl.
+
+    ``beta v = curl(tau) / H_1``, but the wind group this factory takes
+    is a *stress*. The underlying SWM profile is ``-cos(2 pi y / Ly)``,
+    whose curl has amplitude ``2 pi / Ly``, so passing ``beta_hat``
+    through unchanged overshot the interior velocity by that factor.
+    """
+
+    @staticmethod
+    def build(**kw):
+        return ReparameterizedQG.from_nondimensional(
+            nx=64,
+            ny=64,
+            rossby=0.01,
+            beta_hat=1.0,
+            burger=(1.0, 0.1),
+            thickness_ratio=(1.0, 3.0),
+            delta_M=0.02,
+            delta_S=0.0,
+            check_resolution=False,
+            **kw,
+        )
+
+    @staticmethod
+    def sverdrup_velocity(model):
+        swm = model.swm
+        tau = np.asarray(swm.wind_stress_x)
+        curl = -np.gradient(tau, float(swm.grid.dy), axis=0)
+        # Trim the ghost ring and its one-sided differences.
+        amplitude = float(np.abs(curl[3:-3]).max())
+        return (
+            amplitude
+            * float(model.params.wind_amplitude)
+            / (float(swm.strat.H[0]) * float(swm.consts.beta))
+        )
+
+    def test_the_double_gyre_default_is_order_one(self):
+        model, _ = self.build()
+        assert self.sverdrup_velocity(model) == pytest.approx(1.0, rel=5e-3)
+
+    def test_the_single_gyre_default_is_too(self):
+        model, _ = self.build(wind_profile="single")
+        assert self.sverdrup_velocity(model) == pytest.approx(1.0, rel=5e-3)
+
+    def test_an_explicit_wind_hat_is_a_stress_and_passes_through(self):
+        """The override is the dimensionless stress group, not a curl."""
+        model, _ = self.build(wind_hat=0.5)
+        assert float(model.params.wind_amplitude) == pytest.approx(0.5 * 1.0)
+
+    def test_the_aspect_ratio_enters_the_default(self):
+        """``Ly = aspect``, and the curl factor is ``2 pi / Ly``."""
+        square, _ = self.build()
+        tall, _ = self.build(aspect=2.0)
+        assert float(tall.params.wind_amplitude) == pytest.approx(
+            2.0 * float(square.params.wind_amplitude)
+        )

@@ -22,7 +22,13 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    as_parameter,
+)
 from somax._src.models._nondim import (
     require_non_negative,
     require_positive,
@@ -187,6 +193,14 @@ class SphericalSWM(SomaxModel):
     wind_stress_y: Float[Array, "Ny Nx"]
     method: str = eqx.field(static=True, default="upwind1")
 
+    def _masked(
+        self, field: Float[Array, "Ny Nx"], location: str
+    ) -> Float[Array, "Ny Nx"]:
+        """``field`` zeroed on land at the given C-grid stagger."""
+        if self.mask is None:
+            return field
+        return field * getattr(self.mask, location)
+
     def vector_field(
         self, t: float, state: PyTree, args: PyTree | None = None
     ) -> SphericalSWMState:
@@ -221,9 +235,12 @@ class SphericalSWM(SomaxModel):
         du_dt = q_on_U * vh_on_U - self.diff.diff_lon_T_to_U(bernoulli)
         dv_dt = -q_on_V * uh_on_V - self.diff.diff_lat_T_to_V(bernoulli)
 
-        # 6. Wind forcing.
-        du_dt = du_dt + tau0 * self.wind_stress_x
-        dv_dt = dv_dt + tau0 * self.wind_stress_y
+        # 6. Wind forcing. Masked at its stagger: every other operator
+        # here is, so an unmasked source would be the one thing giving
+        # dry U/V cells a velocity — and nothing projects it back out,
+        # so it would persist into the saved states.
+        du_dt = du_dt + tau0 * self._masked(self.wind_stress_x, "u")
+        dv_dt = dv_dt + tau0 * self._masked(self.wind_stress_y, "v")
 
         # 7. Lateral diffusion.
         du_dt = du_dt + self.diffusion(u, nu)
@@ -279,6 +296,12 @@ class SphericalSWM(SomaxModel):
 
         # Spherical cell area, not a uniform dx*dy.
         area = spherical_area_weights(self.grid)[interior]
+        # The PV invariants live at X-points, whose dual cells sit half
+        # a latitude step north of the T-cells: their area goes as
+        # cos(lat_T + dlat/2), not cos(lat_T). Reusing the T weights
+        # biases enstrophy and the cubic Casimir, and increasingly so
+        # towards the poles.
+        area_X = _corner_area_weights(self.grid)[interior]
         h_on_X = self.interp.T_to_X(h)
 
         # ``kinetic_energy`` returns the *specific* KE, 0.5(u^2+v^2),
@@ -289,9 +312,9 @@ class SphericalSWM(SomaxModel):
         energy = jnp.sum(
             area * (h[interior] * ke[interior] + 0.5 * g * h[interior] ** 2)
         )
-        enstrophy = 0.5 * jnp.sum(area * q[interior] ** 2 * h_on_X[interior])
+        enstrophy = 0.5 * jnp.sum(area_X * q[interior] ** 2 * h_on_X[interior])
         mass = jnp.sum(area * h[interior])
-        casimir_q3 = jnp.sum(area * q[interior] ** 3 * h_on_X[interior])
+        casimir_q3 = jnp.sum(area_X * q[interior] ** 3 * h_on_X[interior])
 
         return SphericalSWMDiagnostics(
             energy=energy,
@@ -484,9 +507,9 @@ class SphericalSWM(SomaxModel):
         grid = SphericalGrid2D.from_interior(nx, ny, lon_range, lat_range, R=radius)
 
         params = SphericalSWMParams(
-            lateral_viscosity=jnp.asarray(lateral_viscosity),
-            bottom_drag=jnp.asarray(bottom_drag),
-            wind_amplitude=jnp.asarray(wind_amplitude),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
+            wind_amplitude=as_parameter(wind_amplitude),
         )
         consts = SphericalSWMPhysConsts(gravity=g, omega=omega, radius=radius, H0=H0)
 
@@ -524,6 +547,19 @@ class SphericalSWM(SomaxModel):
             wind_stress_y=wind_stress_y,
             method=method,
         )
+
+
+def _corner_area_weights(grid: SphericalGrid2D) -> Float[Array, "Ny Nx"]:
+    """Dual-cell areas at X-points.
+
+    The same construction as ``spherical_area_weights`` but centred on
+    the corner latitudes, half a cell north of the T-points. Near the
+    poles the cosine is taken as zero rather than a tiny (or, in
+    float32, slightly negative) number.
+    """
+    cos_X = jnp.cos(_lat_at_corner(grid))
+    weights = grid.R**2 * grid.dlon * grid.dlat * cos_X
+    return jnp.where(jnp.abs(cos_X) < 1e-12, 0.0, weights)
 
 
 def _lat_at_corner(grid: SphericalGrid2D) -> Float[Array, "Ny Nx"]:

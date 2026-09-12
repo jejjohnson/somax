@@ -95,9 +95,16 @@ class Scales(eqx.Module):
 
         Raises:
             ValueError: If ``L``, ``U``, ``H`` or ``g`` is not strictly
-                positive.
+                positive, or if ``f0`` is not finite.
         """
         _require_positive(L=L, U=U, H=H, g=g)
+        # ``f0`` is the one input this set does not require to be
+        # positive — zero is a non-rotating model and a negative value
+        # is the southern hemisphere — but non-finite is still fatal:
+        # it silently makes ``eta`` and every rotation-dependent group
+        # non-finite, and that object then contaminates any transform
+        # built from it.
+        _require_finite(f0=f0)
         return cls(L=L, U=U, H=H, f0=f0, T=L / U, g=g, kind="advective")
 
     @classmethod
@@ -427,9 +434,20 @@ class Scales(eqx.Module):
         advective set, ``g H / (f0 L)**2`` for the inertial one, and
         four times that for the planetary one, whose ``f0'`` is ``2``.
 
+        The groups preserved are the ones the family actually has.
+        For the advective, inertial and planetary sets that is all of
+        them — :attr:`rossby`, :attr:`burger`, :attr:`froude`,
+        :attr:`lamb` and ``eta/H``. The diffusive set is the exception:
+        it has no imposed velocity and no rotation, its ``U = kappa/L``
+        is bookkeeping rather than a flow speed (see
+        :meth:`diffusive`), and its only dimensionless number — the
+        nondimensional diffusivity — is 1 by construction and stays 1.
+        Its :attr:`rossby` and :attr:`froude` are therefore artefacts
+        of that bookkeeping and are *not* carried across.
+
         Returns:
-            A ``Scales`` of the same ``kind`` with unit scales and the
-            same dimensionless groups.
+            A ``Scales`` of the same ``kind`` with unit scales, and
+            with the dimensionless groups its family has.
         """
         burger = self.burger
         if self.kind == "advective":
@@ -470,13 +488,31 @@ def _unit_components(direction: Sequence[float], n_axes: int) -> tuple[float, ..
         raise ValueError(
             f"dt_from_cfl: direction components must be finite; got {direction!r}."
         )
-    speed = math.sqrt(sum(c * c for c in components))
+    # ``hypot`` rather than ``sqrt(sum(c*c))``: squaring overflows for
+    # components around 1e200 (an infinite speed normalises every
+    # component to zero) and underflows for components around 1e-200
+    # (a zero speed, rejected below as if the vector were zero). The
+    # direction is documented as magnitude-invariant, so a caller
+    # reusing small or large physical component ratios must not hit
+    # either.
+    speed = math.hypot(*components)
     if speed == 0.0:
         raise ValueError(
             "dt_from_cfl: direction must not be the zero vector — there is no "
             "direction to normalise."
         )
     return tuple(c / speed for c in components)
+
+
+def _require_finite(**values: float) -> None:
+    """Raise if any named value is not finite.
+
+    For an input whose sign or zero is meaningful, so
+    :func:`_require_positive` would be too strict.
+    """
+    for name, value in values.items():
+        if not math.isfinite(value):
+            raise ValueError(f"Scales: {name} must be a finite number; got {value!r}.")
 
 
 def _require_positive(**values: float) -> None:
