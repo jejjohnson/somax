@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from collections.abc import Sequence
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -19,8 +20,21 @@ from finitevolx import (
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.transforms import ModalTransform, StratificationProfile
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    as_parameter,
+)
+from somax._src.models._nondim import (
+    burger_to_g_prime,
+    reject_derived_kwargs,
+    require_non_negative,
+    require_positive,
+)
 
 
 class BaroclinicQGState(State):
@@ -246,6 +260,146 @@ class BaroclinicQG(SomaxModel):
             relative_vorticity=zeta,
             rossby_radii=self.modal.rossby_radii,
         )
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        rossby: float,
+        beta_hat: float,
+        burger: Sequence[float],
+        thickness_ratio: Sequence[float],
+        delta_M: float,
+        delta_S: float = 0.0,
+        wind_hat: float | None = None,
+        aspect: float = 1.0,
+        check_resolution: bool = True,
+        **create_kw: Any,
+    ) -> tuple[BaroclinicQG, Scales]:
+        r"""Build the model from dimensionless numbers instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Scale set: **advective** (:meth:`somax.Scales.advective`), with
+        ``L = U = 1`` so that ``T = L/U = 1`` and ``f0 = 1/Ro`` — the
+        same set :meth:`somax.BarotropicQG.from_nondimensional` uses,
+        plus stratification.
+
+        =================  ===============================  ======================
+        Input              Definition                       ``create()`` kwarg
+        =================  ===============================  ======================
+        ``rossby``         :math:`Ro = U/(f_0 L)`           ``f0 = 1/Ro``
+        ``beta_hat``       :math:`\beta L^2/U`               ``beta``
+        ``burger``         :math:`g'_k H_k/(f_0 L)^2`       ``g_prime``
+        ``delta_M``        :math:`(\nu/\beta)^{1/3}/L`       ``lateral_viscosity``
+        ``delta_S``        :math:`\kappa/(\beta L)`           ``bottom_drag``
+        =================  ===============================  ======================
+
+        ``burger`` is the **per-interface** Burger number, which inverts
+        to the stratification one-to-one. It is not the per-mode value:
+        the deformation radius of vertical mode ``m`` is a combination
+        of the interface numbers, and the built model reports the
+        resulting radii as ``model.modal.rossby_radii`` — already in
+        units of ``L``, so directly comparable with ``dx``.
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            rossby: Rossby number. Sets ``f0 = 1/Ro``.
+            beta_hat: Dimensionless planetary vorticity gradient.
+            burger: Per-interface Burger numbers, top to bottom.
+            thickness_ratio: Layer thicknesses relative to the depth
+                scale. Same length as ``burger``.
+            delta_M: Munk-layer width as a fraction of ``L``.
+            delta_S: Stommel-layer width as a fraction of ``L``.
+            wind_hat: Dimensionless wind amplitude
+                :math:`\\tau_0 L^2/(U^2 H_1)`. Defaults to
+                ``beta_hat``, the Sverdrup-balanced value.
+            aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
+            check_resolution: Run the Munk, Stommel and deformation
+                radius guards.
+            **create_kw: Forwarded to :meth:`create`.
+
+        Returns:
+            ``(model, scales)`` with ``scales.kind == "advective"``.
+
+        Raises:
+            ValueError: If an input is out of range.
+            AssertionFailedError: If ``check_resolution`` is set and the
+                grid cannot resolve a boundary layer or the first
+                internal deformation radius.
+        """
+        context = "BaroclinicQG.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "f0",
+                "beta",
+                "n_layers",
+                "H",
+                "g_prime",
+                "stratification",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
+        require_positive(context, rossby=rossby, beta_hat=beta_hat, aspect=aspect)
+        require_non_negative(context, delta_M=delta_M, delta_S=delta_S)
+        if wind_hat is not None:
+            # Only when supplied: the default is beta_hat, already
+            # checked. Left unvalidated, a non-finite value was
+            # copied straight into wind_amplitude and produced
+            # non-finite tendencies on the first step.
+            require_non_negative(context, wind_hat=wind_hat)
+        f0 = 1.0 / rossby
+        g_prime = burger_to_g_prime(context, burger, thickness_ratio, f0=f0, length=1.0)
+        thickness = tuple(float(h) for h in thickness_ratio)
+
+        model = BaroclinicQG.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            f0=f0,
+            beta=beta_hat,
+            n_layers=len(thickness),
+            H=thickness,
+            g_prime=g_prime,
+            lateral_viscosity=delta_M**3 * beta_hat,
+            bottom_drag=delta_S * beta_hat,
+            # The RHS applies the wind as tau0 * F / H[0], so the
+            # dimensionless group tau_hat = tau0 L**2 / (U**2 H_1)
+            # maps to a kwarg carrying the top-layer thickness.
+            wind_amplitude=(beta_hat if wind_hat is None else wind_hat) * thickness[0],
+            **create_kw,
+        )
+        # g is the *first interface's* reduced gravity, not standard
+        # gravity: these scales describe the nondimensional model,
+        # where the surface-mode gravity is g_prime[0]. Leaving it
+        # at 9.81 would make scales.burger disagree with burger[0]
+        # and put the thickness-anomaly scale f0 U L / g out by the
+        # ratio between them.
+        scales = Scales.advective(L=1.0, U=1.0, f0=f0, H=thickness[0], g=g_prime[0])
+
+        if check_resolution:
+            from somax._src.core.resolution import (
+                check_deformation_radius,
+                check_munk_width,
+                check_stommel_width,
+            )
+
+            if delta_M > 0.0:
+                check_munk_width(None, model)
+            if delta_S > 0.0:
+                check_stommel_width(None, model)
+            check_deformation_radius(None, model)
+
+        return model, scales
 
     @staticmethod
     def create(

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import partial
+from typing import Any
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -23,9 +25,16 @@ from finitevolx import (
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.transforms import ModalTransform, StratificationProfile
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
 from somax._src.guards import guard_finite, guard_positive
+from somax._src.models._nondim import (
+    burger_to_g_prime,
+    reject_derived_kwargs,
+    require_non_negative,
+    require_positive,
+)
 
 
 class MultilayerSW2DState(State):
@@ -298,6 +307,115 @@ class MultilayerShallowWater2D(SomaxModel):
             relative_vorticity=zeta,
             kinetic_energy_field=ke,
         )
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        rossby: float,
+        burger: Sequence[float],
+        thickness_ratio: Sequence[float],
+        beta_hat: float = 0.0,
+        ekman: float = 0.0,
+        ekman_lateral: float = 0.0,
+        wind_hat: float = 0.0,
+        aspect: float = 1.0,
+        **create_kw: Any,
+    ) -> tuple[MultilayerShallowWater2D, Scales]:
+        r"""Build the model from dimensionless numbers instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Scale set: **inertial** (:meth:`somax.Scales.inertial`), with
+        ``L = f0 = 1`` and the depth scale set by the first layer, so
+        ``T = 1/f0 = 1`` and ``U = Ro``.
+
+        Stratification comes from one Burger number **per interface**,
+        :math:`Bu_k = g'_k H_k/(f_0 L)^2`, inverted to
+        ``g_prime[k] = Bu_k / thickness_ratio[k]``. That is the
+        interface convention, not the per-mode one: the deformation
+        radii of the vertical modes are a combination of the interface
+        values, and are available on the built model as
+        ``model.modal.rossby_radii`` once the eigenproblem is solved.
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            rossby: Rossby number; sets the velocity scale.
+            burger: Per-interface Burger numbers, top to bottom.
+            thickness_ratio: Layer thicknesses relative to the depth
+                scale, ``H_k / H_1``. Same length as ``burger``.
+            beta_hat: Dimensionless planetary vorticity gradient.
+            ekman: Linear bottom-drag Ekman number.
+            ekman_lateral: Lateral-viscosity Ekman number.
+            wind_hat: Dimensionless wind acceleration.
+            aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
+            **create_kw: Forwarded to :meth:`create`.
+
+        Returns:
+            ``(model, scales)`` with ``scales.kind == "inertial"``.
+
+        Raises:
+            ValueError: If an input is out of range or the sequences
+                disagree in length.
+        """
+        context = "MultilayerShallowWater2D.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "f0",
+                "beta",
+                "n_layers",
+                "H",
+                "g_prime",
+                "stratification",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
+        require_positive(context, rossby=rossby, aspect=aspect)
+        require_non_negative(
+            context,
+            beta_hat=beta_hat,
+            ekman=ekman,
+            ekman_lateral=ekman_lateral,
+            wind_hat=wind_hat,
+        )
+        g_prime = burger_to_g_prime(
+            context, burger, thickness_ratio, f0=1.0, length=1.0
+        )
+        thickness = tuple(float(h) for h in thickness_ratio)
+
+        model = MultilayerShallowWater2D.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            g=g_prime[0],
+            f0=1.0,
+            beta=beta_hat,
+            n_layers=len(thickness),
+            H=thickness,
+            g_prime=g_prime,
+            lateral_viscosity=ekman_lateral,
+            bottom_drag=ekman,
+            # The RHS applies the wind as tau0 * F / H[0], so the
+            # amplitude carries the top-layer thickness; without it
+            # the realised acceleration is wind_hat / H[0] whenever
+            # thickness_ratio[0] is not 1. Same convention as the
+            # layered QG factories.
+            wind_amplitude=wind_hat * rossby * thickness[0],
+            **create_kw,
+        )
+        scales = Scales.inertial(
+            L=1.0, f0=1.0, H=thickness[0], rossby=rossby, g=g_prime[0]
+        )
+        return model, scales
 
     @staticmethod
     def create(
