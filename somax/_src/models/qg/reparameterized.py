@@ -34,6 +34,7 @@ from somax._src.core.transforms import ModalTransform, StratificationProfile
 from somax._src.core.types import Diagnostics
 from somax._src.models._nondim import (
     burger_to_g_prime,
+    reject_derived_kwargs,
     require_non_negative,
     require_positive,
 )
@@ -309,8 +310,13 @@ class ReparameterizedQG(SomaxModel):
             delta_M: Munk-layer width as a fraction of ``L``.
             delta_S: Stommel-layer width as a fraction of ``L``.
             wind_hat: Dimensionless wind amplitude
-                :math:`\\tau_0 L^2/(U^2 H_1)`. Defaults to
-                ``beta_hat``, the Sverdrup-balanced value.
+                :math:`\\tau_0 L/(U^2 H_1)`. One power of ``L``, not two:
+                this model's right-hand side is
+                :class:`MultilayerShallowWater2D`'s *momentum* equation,
+                whose tendency scale is :math:`U^2/L`. The :math:`L^2`
+                group belongs to :class:`BaroclinicQG`, which advances a
+                PV tendency instead. Defaults to ``beta_hat``, the
+                Sverdrup-balanced value.
             aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
             check_resolution: Run the Munk, Stommel and deformation
                 radius guards.
@@ -326,8 +332,31 @@ class ReparameterizedQG(SomaxModel):
                 internal deformation radius.
         """
         context = "ReparameterizedQG.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "f0",
+                "beta",
+                "n_layers",
+                "H",
+                "g_prime",
+                "stratification",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
         require_positive(context, rossby=rossby, beta_hat=beta_hat, aspect=aspect)
         require_non_negative(context, delta_M=delta_M, delta_S=delta_S)
+        if wind_hat is not None:
+            # Only when supplied: the default is beta_hat, already
+            # checked. Left unvalidated, a non-finite value was
+            # copied straight into wind_amplitude and produced
+            # non-finite tendencies on the first step.
+            require_non_negative(context, wind_hat=wind_hat)
         f0 = 1.0 / rossby
         g_prime = burger_to_g_prime(context, burger, thickness_ratio, f0=f0, length=1.0)
         thickness = tuple(float(h) for h in thickness_ratio)
@@ -345,12 +374,20 @@ class ReparameterizedQG(SomaxModel):
             lateral_viscosity=delta_M**3 * beta_hat,
             bottom_drag=delta_S * beta_hat,
             # The RHS applies the wind as tau0 * F / H[0], so the
-            # dimensionless group tau_hat = tau0 L**2 / (U**2 H_1)
-            # maps to a kwarg carrying the top-layer thickness.
+            # dimensionless group tau_hat = tau0 L / (U**2 H_1) maps to
+            # a kwarg carrying the top-layer thickness. (At unit scales
+            # the two spellings of the group coincide; the power of L
+            # matters when converting a dimensional configuration.)
             wind_amplitude=(beta_hat if wind_hat is None else wind_hat) * thickness[0],
             **create_kw,
         )
-        scales = Scales.advective(L=1.0, U=1.0, f0=f0, H=thickness[0])
+        # g is the *first interface's* reduced gravity, not standard
+        # gravity: these scales describe the nondimensional model,
+        # where the surface-mode gravity is g_prime[0]. Leaving it
+        # at 9.81 would make scales.burger disagree with burger[0]
+        # and put the thickness-anomaly scale f0 U L / g out by the
+        # ratio between them.
+        scales = Scales.advective(L=1.0, U=1.0, f0=f0, H=thickness[0], g=g_prime[0])
 
         if check_resolution:
             from somax._src.cli._assertions import (
