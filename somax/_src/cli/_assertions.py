@@ -42,6 +42,7 @@ import numpy as np
 
 from somax._src.core.resolution import (
     AssertionFailedError,
+    _warn,
     check_deformation_radius,
     check_munk_width,
     check_stommel_width,
@@ -155,6 +156,130 @@ def _min_cell_width(grid: Any, check: str) -> float:
         f"{check}: grid {type(grid).__name__!r} exposes neither dx/dy nor a "
         f"spherical metric; cannot determine the cell width."
     )
+
+
+def check_equatorial_deformation_radius(
+    spec: RunSpec | None,
+    model: Any,
+    *,
+    n_cells_min: float = 2.0,
+    n_cells_warn: float = 4.0,
+) -> None:
+    """Pre-flight: the equatorial deformation radius is resolved.
+
+    On a sphere the Coriolis parameter vanishes at the equator, so the
+    mid-latitude radius ``sqrt(gH)/f0`` diverges there and says nothing
+    useful. The finite scale that replaces it is the *equatorial*
+    deformation radius
+
+    ``L_eq = sqrt(c / beta_eq)``,  ``c = sqrt(g H)``,
+    ``beta_eq = 2 Omega / a``,
+
+    which is the trapping width of the equatorial waveguide — Kelvin,
+    Yanai and equatorial Rossby waves all live inside it. A grid that
+    cannot span it does not have an equatorial waveguide at all.
+
+    In terms of the Burger number ``Bu = gH/(2 Omega a)**2`` this is
+    just ``L_eq/a = Bu**(1/4)``, so the check is scale-free and reads
+    the same on a nondimensional sphere as on Earth.
+
+    The comparison uses the *widest* interior cell rather than the
+    narrowest. Zonal cells are widest at the equator, which is exactly
+    where the waveguide sits, so the coarsest cell is the one that has
+    to resolve it.
+
+    Requires a spherical shallow-water-shaped model exposing
+    ``consts.gravity``, ``consts.H0``, ``consts.omega``,
+    ``consts.radius`` and a spherical ``grid``. Raises for models
+    without that structure so a typo'd config doesn't silently skip the
+    check. Barotropic spherical QG is rigid-lid and has no gravity
+    wave, so it is rejected rather than checked.
+
+    Args:
+        spec: The validated RunSpec (unused; present for registry
+            signature symmetry, and ``None`` when called from a
+            ``from_nondimensional`` factory).
+        model: The constructed model instance.
+        n_cells_min: ``L_eq/dx`` below which to FAIL.
+        n_cells_warn: ``L_eq/dx`` below which to WARN.
+
+    Raises:
+        AssertionFailedError: If the model is not a spherical
+            shallow-water model, if a required constant is
+            non-positive, or if the waveguide is unresolved.
+    """
+    del spec
+    consts = getattr(model, "consts", None)
+    grid = getattr(model, "grid", None)
+    if consts is None or grid is None:
+        raise AssertionFailedError(
+            f"equatorial_deformation_radius: model {type(model).__name__!r} "
+            f"lacks consts/grid; this check applies to spherical "
+            f"shallow-water models."
+        )
+    missing = [
+        name
+        for name in ("gravity", "H0", "omega", "radius")
+        if getattr(consts, name, None) is None
+    ]
+    if missing or getattr(grid, "cos_lat_T", None) is None:
+        raise AssertionFailedError(
+            f"equatorial_deformation_radius: model {type(model).__name__!r} "
+            f"does not expose consts.gravity / H0 / omega / radius on a "
+            f"spherical grid (missing {missing or ['grid.cos_lat_T']}); "
+            f"cannot compute L_eq. Barotropic QG is rigid-lid and has no "
+            f"gravity-wave deformation radius — drop this check for it."
+        )
+    g = float(consts.gravity)
+    depth = float(consts.H0)
+    omega = abs(float(consts.omega))
+    radius = float(consts.radius)
+    for name, value in (("gravity", g), ("H0", depth), ("omega", omega)):
+        if value <= 0.0:
+            raise AssertionFailedError(
+                f"equatorial_deformation_radius: consts.{name} is "
+                f"{value:.4g}; L_eq is undefined without a gravity wave and "
+                f"a rotating planet."
+            )
+    wave_speed = np.sqrt(g * depth)
+    beta_eq = 2.0 * omega / radius
+    Leq = float(np.sqrt(wave_speed / beta_eq))
+
+    dx_max = _max_spherical_cell_width(grid)
+    ratio = Leq / dx_max
+    if ratio < n_cells_min:
+        raise AssertionFailedError(
+            f"equatorial_deformation_radius check FAILED: L_eq/dx = "
+            f"{ratio:.2f} < {n_cells_min}\n"
+            f"  L_eq = {Leq:.4g} (= sqrt(c/beta_eq), c={wave_speed:.4g}, "
+            f"beta_eq={beta_eq:.4g})\n"
+            f"  dx   = {dx_max:.4g} (widest interior cell)\n"
+            f"  → the equatorial waveguide is unresolved; refine the grid "
+            f"or raise the equivalent depth."
+        )
+    if ratio < n_cells_warn:
+        _warn(
+            "equatorial deformation radius marginally resolved: "
+            "L_eq/dx = {:.2f} (L_eq={:.4g}, dx={:.4g})",
+            ratio,
+            Leq,
+            dx_max,
+        )
+
+
+def _max_spherical_cell_width(grid: Any) -> float:
+    """Widest interior cell of a spherical grid, in metres.
+
+    Computed here rather than read off ``grid.max_cell_width``: that
+    helper arrives with finitevolX#244 and somax still pins v0.0.41.
+    The cosine is clamped at zero because in float32 ``cos(pi/2)`` is a
+    small *negative* number, which would otherwise flip the sign of a
+    polar cell width.
+    """
+    cos_lat = np.asarray(jnp.asarray(grid.cos_lat_T))[1:-1, 1:-1]
+    dx = float(np.max(np.maximum(cos_lat, 0.0))) * float(grid.R) * float(grid.dlon)
+    dy = float(grid.R) * float(grid.dlat)
+    return max(dx, dy)
 
 
 def check_pv_inversion(
@@ -287,6 +412,7 @@ def check_static_stability(spec: RunSpec, model: Any) -> None:
 PREFLIGHT_ASSERTIONS: dict[str, Callable[..., None]] = {
     "cfl": check_cfl,
     "deformation_radius": check_deformation_radius,
+    "equatorial_deformation_radius": check_equatorial_deformation_radius,
     "munk_width": check_munk_width,
     "pv_inversion": check_pv_inversion,
     "stommel_width": check_stommel_width,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -19,6 +21,7 @@ from finitevolx._src.utils.constants import OMEGA, R_EARTH
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import (
     Diagnostics,
     Params,
@@ -26,6 +29,7 @@ from somax._src.core.types import (
     State,
     as_parameter,
 )
+from somax._src.models._nondim import require_non_negative, require_positive
 from somax._src.models.spherical._geometry import (
     _require_global_longitude,
     _require_open_poles,
@@ -313,6 +317,102 @@ class SphericalQG(SomaxModel):
             streamfunction=psi,
             relative_vorticity=q,
         )
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 128,
+        ny: int = 64,
+        rossby: float,
+        ekman: float = 0.0,
+        ekman_lateral: float = 0.0,
+        wind_hat: float = 0.0,
+        lat_range: tuple[float, float] = (-80.0, 80.0),
+        lon_range: tuple[float, float] = (0.0, 360.0),
+        **create_kw: Any,
+    ) -> tuple[SphericalQG, Scales]:
+        r"""Build the model from dimensionless numbers instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Scale set: **planetary** (:meth:`somax.Scales.planetary`), with
+        ``a = Omega = 1``, so ``T = 1/Omega = 1``, ``f0 = 2 Omega = 2``
+        and ``U = 2 Omega a Ro = 2 Ro``. The vorticity the state
+        carries is then ``O(U/a) = O(2 Ro)``.
+
+        ==================  ==================================  ====================
+        Input               Definition                          ``create()`` kwarg
+        ==================  ==================================  ====================
+        ``rossby``          :math:`Ro = U/(2\Omega a)`           sets ``U``
+        ``ekman``           :math:`\kappa/(2\Omega)`             ``bottom_drag``
+        ``ekman_lateral``   :math:`\nu/(2\Omega a^2)`            ``lateral_viscosity``
+        ``wind_hat``        :math:`a\tau_0/(2\Omega U)`          ``wind_amplitude``
+        ==================  ==================================  ====================
+
+        There is no Burger number here and no ``g``: the barotropic QG
+        model is rigid-lid, so it has no gravity wave and no
+        deformation radius to resolve. The stratification knobs belong
+        to :class:`SphericalSWM`.
+
+        Neither is there a ``beta_hat``. On a sphere the planetary
+        vorticity gradient is fixed by the geometry —
+        ``beta = 2 Omega cos(phi)/a``, which is ``cos(phi)`` in these
+        units — so it is not a free dimensionless number the way it is
+        on a beta plane.
+
+        Args:
+            nx: Interior cells in longitude.
+            ny: Interior cells in latitude.
+            rossby: Rossby number; sets the velocity scale.
+            ekman: Linear bottom-drag Ekman number.
+            ekman_lateral: Lateral-viscosity Ekman number.
+            wind_hat: Dimensionless wind-stress-curl amplitude.
+            lat_range: ``(lat_min, lat_max)`` in degrees.
+            lon_range: ``(lon_min, lon_max)`` in degrees.
+            **create_kw: Forwarded to :meth:`create` (``wind_profile``,
+                ``method``, ``mask``, ``cg_tol``, ``cg_max_steps``).
+
+        Returns:
+            ``(model, scales)`` with ``scales.kind == "planetary"``.
+
+        Raises:
+            ValueError: If a dimensionless input is out of range.
+
+        Example:
+            >>> model, scales = SphericalQG.from_nondimensional(
+            ...     nx=64, ny=32, rossby=0.05, ekman=0.01,
+            ... )
+            >>> scales.kind
+            'planetary'
+        """
+        context = "SphericalQG.from_nondimensional"
+        require_positive(context, rossby=rossby)
+        require_non_negative(
+            context,
+            ekman=ekman,
+            ekman_lateral=ekman_lateral,
+            wind_hat=wind_hat,
+        )
+
+        # Unit scales: a = Omega = 1, so f0 = 2 and U = 2 Ro. The wind
+        # enters as a vorticity tendency, so it carries f0 * U/a rather
+        # than the f0 * U of a momentum forcing.
+        f0 = 2.0
+        vorticity_scale = f0 * rossby  # = U / a
+        model = SphericalQG.create(
+            nx=nx,
+            ny=ny,
+            lon_range=lon_range,
+            lat_range=lat_range,
+            radius=1.0,
+            omega=1.0,
+            lateral_viscosity=f0 * ekman_lateral,
+            bottom_drag=f0 * ekman,
+            wind_amplitude=wind_hat * f0 * vorticity_scale,
+            **create_kw,
+        )
+        scales = Scales.planetary(a=1.0, Omega=1.0, H=1.0, rossby=rossby)
+        return model, scales
 
     @staticmethod
     def create(

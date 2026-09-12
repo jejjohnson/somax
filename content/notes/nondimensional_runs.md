@@ -55,6 +55,66 @@ Because a nondimensional run has no SI units to report,
 `field_units("nondim")` marks every field `-` in the run log, so the
 numbers do not read as unlabelled SI values.
 
+## Spherical models
+
+Spherical models use the **planetary** scale set: the planet radius is
+the length scale and the rotation period the time scale, so
+`a = Omega = H = 1`, `T = 1` and `f0 = 2 Omega = 2`.
+
+That factor of two is the one thing worth remembering. On a sphere
+`f(phi) = 2 Omega sin(phi)`, so `2 Omega` is what plays the role of a
+Cartesian `f0`, and the Rossby number keeps its usual `U/(f0 L)`
+meaning — the conventional spherical `U/(2 Omega a)`. Every rate
+coefficient therefore picks up a `2`: `bottom_drag = 2 * ekman`,
+`lateral_viscosity = 2 * ekman_lateral`.
+
+Stratification can be given as `burger`, `froude` or `lamb`, and
+exactly one of the three. `lamb` is the Lamb parameter
+`eps = 4 Omega^2 a^2 / (gH)`, the inverse Burger number and the usual
+spelling in the spherical literature.
+
+```yaml
+scenario:
+  name: global_ocean
+  grid: {nx: 128, ny: 64, lon_bounds: [0.0, 360.0], lat_bounds: [-80.0, 80.0]}
+  nondim:
+    rossby: 0.05
+    lamb: 10.0      # or burger: 0.1 — the same thing inverted
+    ekman: 0.01
+  forcing: {wind_profile: zonal}
+  initial_condition: {type: at_rest}
+
+model:
+  name: spherical_swm
+```
+
+`spherical_qg` takes no `lamb`/`burger`: barotropic QG is rigid-lid, so
+it has no gravity wave. Neither takes a `beta_hat` — on a sphere the
+planetary vorticity gradient is fixed by the geometry,
+`beta = 2 Omega cos(phi)/a`, rather than being a free number.
+
+The lat/lon bounds stay in degrees. They are a geometric choice, not a
+scale: a nondimensional sphere is still a sphere.
+
+### The equatorial deformation radius
+
+The mid-latitude radius `sqrt(gH)/f0` diverges at the equator, where
+`f` vanishes, so `deformation_radius` says nothing useful about a
+global run. The finite scale that replaces it is the equatorial
+deformation radius
+
+```
+L_eq = sqrt(c / beta_eq),  c = sqrt(gH),  beta_eq = 2 Omega / a
+```
+
+the trapping width of the equatorial waveguide — which in Burger terms
+is simply `L_eq/a = Bu^(1/4)`. `SphericalSWM.from_nondimensional` runs
+the `equatorial_deformation_radius` guard by default and raises if the
+grid cannot span it; pass `check_resolution=False` to build a
+deliberately coarse model. The guard compares against the *widest*
+interior cell, since zonal cells are widest at the equator, which is
+exactly where the waveguide sits.
+
 ## Data assimilation
 
 `state_to_vector` and `make_ensemble` both take an optional

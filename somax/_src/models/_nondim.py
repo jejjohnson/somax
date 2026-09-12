@@ -83,7 +83,7 @@ def resolve_burger(
         )
     if froude is not None:
         require_positive(context, froude=froude)
-        return (rossby / froude) ** 2
+        return float((rossby / froude) ** 2)
     require_positive(context, burger=burger)
     return float(burger)
 
@@ -131,6 +131,53 @@ def burger_to_g_prime(
     return tuple(
         float(bu) * factor / float(h) for bu, h in zip(burger, thickness, strict=True)
     )
+
+
+def resolve_burger_spherical(
+    context: str,
+    burger: float | None,
+    froude: float | None,
+    lamb: float | None,
+    rossby: float,
+) -> float:
+    """Settle the Burger number from ``burger``, ``froude`` or ``lamb``.
+
+    The spherical literature states the stratification as the Lamb
+    parameter ``eps = 4 Omega**2 a**2 / (g H)``, which is exactly the
+    inverse Burger number. Accepting it alongside the two Cartesian
+    spellings keeps spherical configs idiomatic without introducing a
+    second, independent quantity — so exactly one of the three may be
+    given.
+
+    Args:
+        context: Caller name, for error messages.
+        burger: Burger number ``Bu = gH/(f0 a)**2``, or ``None``.
+        froude: Froude number ``U/sqrt(gH)``, or ``None``.
+        lamb: Lamb parameter ``eps = 1/Bu``, or ``None``.
+        rossby: Rossby number, already validated.
+
+    Returns:
+        The Burger number.
+
+    Raises:
+        ValueError: If not exactly one of the three is supplied, or the
+            value is not positive.
+    """
+    given = [
+        name
+        for name, value in (("burger", burger), ("froude", froude), ("lamb", lamb))
+        if value is not None
+    ]
+    if len(given) != 1:
+        raise ValueError(
+            f"{context}: give exactly one of burger, froude or lamb; got "
+            f"{given or 'none'}. They are not independent — Bu = (Ro/Fr)**2 "
+            f"at fixed Ro, and lamb = 1/Bu."
+        )
+    if lamb is not None:
+        require_positive(context, lamb=lamb)
+        return 1.0 / float(lamb)
+    return resolve_burger(context, burger, froude, rossby)
 
 
 def reject_derived_kwargs(
