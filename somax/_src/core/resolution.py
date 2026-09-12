@@ -70,6 +70,31 @@ def _require_finite_positive(check: str, name: str, value: float) -> float:
     return value
 
 
+def _require_finite_thresholds(check: str, **thresholds: float) -> None:
+    """Reject a non-finite resolution threshold.
+
+    These come straight from a config: ``munk_width: {n_cells_min:
+    .nan}`` is valid YAML, ``yaml.safe_load`` produces a NaN, and
+    ``run_preflight`` forwards it unchanged. Every comparison against
+    NaN is false, so the guard would pass a layer resolved by no cells
+    at all.
+
+    Args:
+        check: Caller name, for the error message.
+        **thresholds: Named threshold values.
+
+    Raises:
+        AssertionFailedError: If any threshold is not finite.
+    """
+    for name, value in thresholds.items():
+        if not math.isfinite(float(value)):
+            raise AssertionFailedError(
+                f"{check}: {name} is {float(value)}. A non-finite threshold "
+                f"compares false against every ratio, so the check would "
+                f"always pass."
+            )
+
+
 def _boundary_layer_inputs(model: Any, check: str) -> tuple[Any, float, float]:
     """Shared lookup for the western-boundary-layer guards.
 
@@ -94,7 +119,15 @@ def _boundary_layer_inputs(model: Any, check: str) -> tuple[Any, float, float]:
         )
     # ``abs`` is right for beta, unlike for the dissipative
     # coefficients: its sign is a hemisphere convention, and the layer
-    # width depends only on its magnitude.
+    # width depends only on its magnitude. Finiteness still has to be
+    # tested separately — ``abs(nan)`` is NaN, the zero test below does
+    # not catch it, and both width ratios then compare false against
+    # their thresholds, so every guard would silently pass.
+    if not math.isfinite(float(beta)):
+        raise AssertionFailedError(
+            f"{check}: consts.beta is {float(beta)}; the boundary-layer "
+            f"width is undefined for a non-finite planetary gradient."
+        )
     beta = abs(float(beta))
     if beta == 0.0:
         raise AssertionFailedError(
@@ -140,6 +173,9 @@ def check_munk_width(
             viscosity is zero, or if the layer is unresolved.
     """
     del spec
+    _require_finite_thresholds(
+        "munk_width", n_cells_min=n_cells_min, n_cells_warn=n_cells_warn
+    )
     params, beta, dx = _boundary_layer_inputs(model, "munk_width")
     nu = getattr(params, "lateral_viscosity", None)
     if nu is None:
@@ -201,6 +237,9 @@ def check_stommel_width(
             zero, or if the layer is unresolved.
     """
     del spec
+    _require_finite_thresholds(
+        "stommel_width", n_cells_min=n_cells_min, n_cells_warn=n_cells_warn
+    )
     params, beta, dx = _boundary_layer_inputs(model, "stommel_width")
     kappa = getattr(params, "bottom_drag", None)
     if kappa is None:
