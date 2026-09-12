@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -27,6 +29,11 @@ class NSVorticityState(State):
     """
 
     omega: Array
+
+    # ``omega`` is this family's spelling of vorticity.
+    scale_kinds: ClassVar[dict[str, str]] = {"omega": "vorticity"}
+    # Vorticity is carried at T-points, not the C-grid corner.
+    mask_locations: ClassVar[dict[str, str]] = {"omega": "h"}
 
 
 class NSParams(Params):

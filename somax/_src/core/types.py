@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.nn as jnn
 import jax.numpy as jnp
@@ -14,7 +16,28 @@ class State(eqx.Module):
 
     All model states should subclass this to enable interoperability
     with the somax model contract and JAX transformations.
+
+    Two optional class attributes describe the fields to
+    :class:`~somax._src.core.transforms.StateAffine`. Both are consulted
+    before the name-based fallbacks, and both are per-state because a
+    field name does not determine either answer: ``h`` is a total
+    thickness in the nonlinear shallow-water models but a height
+    anomaly in the linear ones, and ``u`` is a C-grid velocity in the
+    ocean models but a T-point scalar in the pde family.
+
+    Attributes:
+        scale_kinds: Field name to semantic kind — one of
+            ``"velocity"``, ``"thickness"``, ``"height_anomaly"``,
+            ``"vorticity"``, ``"streamfunction"``. Fixes how
+            ``StateAffine.from_scales`` non-dimensionalises the field.
+        mask_locations: Field name to C-grid staggering — one of
+            ``"h"``, ``"u"``, ``"v"``, ``"xy_corner"``, ``"w"``. Picks
+            the mask that ``StateAffine.from_samples`` excludes dry
+            cells with.
     """
+
+    scale_kinds: ClassVar[dict[str, str]] = {}
+    mask_locations: ClassVar[dict[str, str]] = {}
 
 
 class Params(eqx.Module):

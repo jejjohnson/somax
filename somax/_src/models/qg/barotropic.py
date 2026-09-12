@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -29,6 +31,9 @@ class BarotropicQGState(State):
     """
 
     q: Float[Array, "Ny Nx"]
+
+    # QG potential vorticity is a T-point field, not a corner one.
+    mask_locations: ClassVar[dict[str, str]] = {"q": "h"}
 
 
 class BarotropicQGParams(Params):

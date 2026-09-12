@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import Advection1D, CartesianGrid1D, Difference1D, Mask1D
@@ -29,6 +31,9 @@ class Burgers1DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class Burgers1DDiagnostics(Diagnostics):
