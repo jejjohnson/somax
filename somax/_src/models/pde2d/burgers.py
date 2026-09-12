@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -18,7 +18,7 @@ from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 from somax._src.models._nondim import require_positive
 
 
@@ -42,6 +42,9 @@ class Burgers2DState(State):
 
     u: Array
     v: Array
+
+    # Both components are collocated at T-points, not staggered.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h", "v": "h"}
 
 
 class Burgers2DDiagnostics(Diagnostics):
@@ -181,7 +184,7 @@ class Burgers2D(SomaxModel):
             A ``Burgers2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = Burgers2DParams(nu=jnp.array(nu))
+        params = Burgers2DParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         advection = FVXAdvection2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -11,7 +11,7 @@ from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 from somax._src.models._nondim import require_positive
 
 
@@ -33,6 +33,9 @@ class Diffusion2DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class Diffusion2DDiagnostics(Diagnostics):
@@ -145,6 +148,6 @@ class Diffusion2D(SomaxModel):
             A ``Diffusion2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = Diffusion2DParams(nu=jnp.array(nu))
+        params = Diffusion2DParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         return Diffusion2D(params=params, grid=grid, diff=diff, mask=mask)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -19,7 +19,7 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 from somax._src.models._nondim import require_positive
 
 
@@ -31,6 +31,11 @@ class NSVorticityState(State):
     """
 
     omega: Array
+
+    # ``omega`` is this family's spelling of vorticity.
+    scale_kinds: ClassVar[dict[str, str]] = {"omega": "vorticity"}
+    # Vorticity is carried at T-points, not the C-grid corner.
+    mask_locations: ClassVar[dict[str, str]] = {"omega": "h"}
 
 
 class NSParams(Params):
@@ -363,7 +368,7 @@ class IncompressibleNS2D(SomaxModel):
             An ``IncompressibleNS2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = NSParams(nu=jnp.array(nu))
+        params = NSParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)
         advection = FVXAdvection2D(grid=grid, mask=mask)

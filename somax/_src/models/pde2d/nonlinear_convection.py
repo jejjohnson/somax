@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -31,6 +31,9 @@ class NonlinearConvection2DState(State):
 
     u: Array
     v: Array
+
+    # Both components are collocated at T-points, not staggered.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h", "v": "h"}
 
 
 class NonlinearConvection2DDiagnostics(Diagnostics):
