@@ -240,10 +240,13 @@ def _require_matching_coordinates(spec: RunSpec, ds: Any, restart_path: Any) -> 
     in the target model's units. A dimensional ``q ~ U/L`` read as
     dimensionless vorticity is off by the vorticity scale, silently.
 
-    An artifact written before this attr existed carries no marker.
-    That is reported rather than guessed at: continuing would be the
-    same gamble, and the fix — re-export, or state the units — is
-    cheap.
+    An artifact written before this attr existed carries no marker,
+    and is necessarily SI: nondimensional CLI runs arrive with the
+    marker itself, so there is no unmarked nondimensional artifact to
+    confuse it with. An SI target therefore accepts it, which keeps
+    every existing simulation continuable. A nondimensional target
+    still refuses: there the absent marker is the one case that would
+    silently advance dimensional values as dimensionless ones.
 
     Args:
         spec: The target run spec.
@@ -252,16 +255,19 @@ def _require_matching_coordinates(spec: RunSpec, ds: Any, restart_path: Any) -> 
 
     Raises:
         ValueError: If the artifact's coordinates differ from the
-            target's, or are unknown.
+            target's, or are unknown and the target is nondimensional.
     """
     wanted = "nondimensional" if spec.scenario.nondim else "si"
     found = ds.attrs.get("somax_coordinates")
     if found is None:
+        if wanted == "si":
+            return
         raise ValueError(
             f"restart artifact at {restart_path} does not record which "
-            f"coordinate system it is in, and this run is {wanted}. It "
-            f"predates that marker; re-export it from a current run, or "
-            f"set somax_coordinates on the dataset if you know the units."
+            f"coordinate system it is in, and this run is {wanted}. An "
+            f"unmarked artifact predates nondimensional runs, so it is "
+            f"SI; re-export it from a current run, or set "
+            f"somax_coordinates on the dataset if you know the units."
         )
     if found != wanted:
         raise ValueError(

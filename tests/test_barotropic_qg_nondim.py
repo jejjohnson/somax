@@ -632,3 +632,39 @@ class TestGuardsRejectNonFiniteInputs:
     def test_a_finite_negative_beta_is_still_fine(self):
         """Southern-hemisphere convention, not an error."""
         check_munk_width(None, self.model(beta=-50.0))
+
+
+class TestNegativeThresholdsAreRejectedToo:
+    """A negative threshold disables its guard as surely as a NaN.
+
+    A width ratio is never negative, so ``ratio < n_cells_min`` is
+    always false and an assertion the config explicitly asked for
+    silently stops asserting anything. Zero is the warn-only setting
+    and stays allowed.
+    """
+
+    @staticmethod
+    def model(**kw):
+        return BarotropicQG.create(
+            nx=64, ny=64, Lx=1.0, Ly=1.0, beta=50.0, lateral_viscosity=1e-4, **kw
+        )
+
+    @pytest.mark.parametrize("name", ["n_cells_min", "n_cells_warn"])
+    def test_the_munk_guard_rejects_it(self, name):
+        with pytest.raises(AssertionFailedError, match=rf"{name} is -1\.0"):
+            check_munk_width(None, self.model(), **{name: -1.0})
+
+    def test_the_stommel_guard_rejects_it(self):
+        with pytest.raises(AssertionFailedError, match=r"n_cells_min is -1\.0"):
+            check_stommel_width(None, self.model(), n_cells_min=-1.0)
+
+    def test_an_unresolved_layer_with_a_negative_threshold_no_longer_passes(self):
+        coarse = BarotropicQG.create(
+            nx=8, ny=8, Lx=1.0, Ly=1.0, beta=50.0, lateral_viscosity=1.0e-9
+        )
+        with pytest.raises(AssertionFailedError):
+            check_munk_width(None, coarse, n_cells_min=-1.0)
+
+    def test_zero_is_still_allowed(self):
+        """Warn-only: nothing fails, but the warning threshold applies."""
+        check_munk_width(None, self.model(), n_cells_min=0.0, n_cells_warn=0.0)
