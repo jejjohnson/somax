@@ -66,6 +66,24 @@ inertial set puts $L$, $f_0$ and $H$ at unity, which leaves velocity at
 $Ro$. Wrap the model in a `ScaledModel` built from the returned `Scales`
 to work in $O(1)$ state.
 
+With unequal layer depths, give the thickness its own per-layer
+override rather than relying on the returned `Scales` alone. The
+default `h` rule is the single pair `(scales.H, scales.eta)`, which is
+the *top* layer's depth — so a zero normalized thickness would map
+every layer to $H_1$ instead of to its own $H_k$:
+
+```python
+transform = StateAffine.from_scales(
+    MultilayerSW2DState,
+    scales,
+    h={"loc": model.strat.H[:, None, None], "scale": dH},
+)
+scaled = ScaledModel(inner=model, transform=transform, time_scale=scales.T)
+```
+
+`dH` is the interface anomaly scale, per interface where they differ;
+a scalar is fine when one anomaly scale covers the column.
+
 ## Comparing against a dimensional run
 
 A nondimensional run reproduces its dimensional counterpart exactly in
