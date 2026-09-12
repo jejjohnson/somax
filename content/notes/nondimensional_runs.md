@@ -36,10 +36,20 @@ The two blocks are mutually exclusive. They describe the same physics
 in different units, so accepting both would let a config state a pair
 that disagrees; `RunSpec.validate` rejects it and names both sides.
 A model with no `from_nondimensional` entry in the registry is rejected
-too, rather than quietly falling back to the dimensional path.
+too, rather than quietly falling back to the dimensional path. So are
+dimensional knobs that the dimensionless numbers derive —
+`model.params.lateral_viscosity`, `scenario.forcing.wind_amplitude` and
+the like — since the run would not use the values given for them.
+`aspect` comes from `scenario.grid`, and a duplicate in the `nondim`
+block is accepted only if it agrees.
 
-`configs/_authoring/doublegyre_bt_qg_nondim.py` is a worked example, and
-the dimensional companion `doublegyre_bt_qg` is the same run in SI.
+`configs/_authoring/doublegyre_bt_qg_nondim.py` is a worked example.
+`doublegyre_bt_qg` is a *separate* dimensional example, not the same
+run in other units: its basin gives `beta L/f0 = 0.16` where the
+nondimensional config asks for `beta_hat * rossby = 1`, and its
+boundary-layer widths and integration window differ too. Treat them as
+two examples rather than a validation pair — for that, build both from
+the same dimensionless numbers.
 
 Because a nondimensional run has no SI units to report,
 `field_units("nondim")` marks every field `-` in the run log, so the

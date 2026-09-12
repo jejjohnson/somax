@@ -337,8 +337,15 @@ def transform_attrs(transform: Any) -> dict[str, dict[str, Any]]:
         Mapping from variable name to the attrs for that variable.
     """
     out: dict[str, dict[str, Any]] = {}
-    fields = getattr(type(transform.loc), "__dataclass_fields__", {})
-    for name in fields:
+    # ``dataclasses.fields`` excludes the ``ClassVar`` metadata a state
+    # may declare (``scale_kinds``, ``mask_locations``); those are dicts
+    # describing the state, not leaves of it.
+    fields = (
+        dataclasses.fields(type(transform.loc))
+        if dataclasses.is_dataclass(type(transform.loc))
+        else ()
+    )
+    for name in (f.name for f in fields):
         loc = getattr(transform.loc, name)
         scale = getattr(transform.scale, name)
         if jnp.ndim(loc) == 0 and jnp.ndim(scale) == 0:

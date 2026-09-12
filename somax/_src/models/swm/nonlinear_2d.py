@@ -23,8 +23,15 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    as_parameter,
+)
 from somax._src.models._nondim import (
+    reject_derived_kwargs,
     require_non_negative,
     require_positive,
     resolve_burger,
@@ -327,6 +334,21 @@ class NonlinearShallowWater2D(SomaxModel):
                 both of ``burger`` and ``froude`` is given.
         """
         context = "NonlinearShallowWater2D.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "g",
+                "f0",
+                "beta",
+                "H0",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
         require_positive(context, rossby=rossby, aspect=aspect)
         require_non_negative(
             context,
@@ -402,9 +424,9 @@ class NonlinearShallowWater2D(SomaxModel):
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = NonlinearSW2DParams(
-            lateral_viscosity=jnp.array(lateral_viscosity),
-            bottom_drag=jnp.array(bottom_drag),
-            wind_amplitude=jnp.array(wind_amplitude),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
+            wind_amplitude=as_parameter(wind_amplitude),
         )
         consts = NonlinearSW2DPhysConsts(gravity=g, f0=f0, beta=beta, H0=H0)
         diff = Difference2D(grid=grid, mask=mask)

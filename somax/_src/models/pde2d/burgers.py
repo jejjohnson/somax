@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -18,7 +18,7 @@ from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 from somax._src.models._nondim import require_positive
 
 
@@ -42,6 +42,9 @@ class Burgers2DState(State):
 
     u: Array
     v: Array
+
+    # Both components are collocated at T-points, not staggered.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h", "v": "h"}
 
 
 class Burgers2DDiagnostics(Diagnostics):
@@ -133,12 +136,15 @@ class Burgers2D(SomaxModel):
             aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
             reynolds: Reynolds number ``Re = U L / nu``; sets
                 ``nu = 1/Re``.
-            **create_kw: Forwarded to :meth:`create` (``method``,
-                ``mask``).
+            **create_kw: Forwarded to :meth:`create` (``method``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with the
-            cell count to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing. For the diffusive bound
+            add ``mode="diffusive", diffusivity=1/reynolds`` — the
+            scale set cannot know the model's Reynolds number.
 
         Raises:
             ValueError: If an input is not positive.
@@ -181,7 +187,7 @@ class Burgers2D(SomaxModel):
             A ``Burgers2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = Burgers2DParams(nu=jnp.array(nu))
+        params = Burgers2DParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         advection = FVXAdvection2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)

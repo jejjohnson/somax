@@ -490,7 +490,7 @@ Integrate ``inner`` in transformed coordinates.
 ```text
 The wrapped model is a ``SomaxModel`` like any other: it integrates,
 steps, and reports diagnostics through the same interface. Every
-time passed to it — ``t0``, ``t1``, ``dt``, ``save_at`` — is in the
+time passed to it — ``t0``, ``t1``, ``dt``, ``saveat`` — is in the
 *transformed* time unit, related to the inner model's by
 ``t_inner = time_scale * t_outer``.
 
@@ -602,6 +602,16 @@ diffrax, ``jax.grad``, and downstream tools like fourdvarjax.
 Subclasses must implement:
     - ``vector_field``: the right-hand side of the ODE/PDE
     - ``apply_boundary_conditions``: boundary enforcement
+
+Constrained parameters (see :func:`somax.positive`) are unwrapped
+on the way into ``vector_field`` and ``diagnose``, so a constrained
+model behaves exactly like its plain equivalent however it is
+called — through ``integrate``, through ``build_terms``, or by
+evaluating the right-hand side directly, which is what the
+differentiable-model tooling does. Unwrapping happens per call
+rather than once up front so that gradients flow to the *stored*
+unconstrained values, and it is a no-op for a model whose
+parameters are plain arrays.
 ```
 ````
 
@@ -648,6 +658,24 @@ Base class for model state vectors.
 ```text
 All model states should subclass this to enable interoperability
 with the somax model contract and JAX transformations.
+
+Two optional class attributes describe the fields to
+:class:`~somax._src.core.transforms.StateAffine`. Both are consulted
+before the name-based fallbacks, and both are per-state because a
+field name does not determine either answer: ``h`` is a total
+thickness in the nonlinear shallow-water models but a height
+anomaly in the linear ones, and ``u`` is a C-grid velocity in the
+ocean models but a T-point scalar in the pde family.
+
+Attributes:
+    scale_kinds: Field name to semantic kind — one of
+        ``"velocity"``, ``"thickness"``, ``"height_anomaly"``,
+        ``"vorticity"``, ``"streamfunction"``. Fixes how
+        ``StateAffine.from_scales`` non-dimensionalises the field.
+    mask_locations: Field name to C-grid staggering — one of
+        ``"h"``, ``"u"``, ``"v"``, ``"xy_corner"``, ``"w"``. Picks
+        the mask that ``StateAffine.from_samples`` excludes dry
+        cells with.
 ```
 ````
 
@@ -975,6 +1003,35 @@ Args:
 Returns:
     A ``place(zeros, field) -> tendency`` callable, with ``field`` shaped
     ``(len(components), *grid)``.
+```
+````
+
+### `as_parameter`
+
+*function*
+
+```python
+as_parameter(value: 'ArrayLike | Parameterize | NonTrainable') -> 'Any'
+```
+
+Coerce a factory argument into a ``Params`` leaf.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Model factories take plain numbers and convert them with
+``jnp.asarray``, which cannot convert a paramax wrapper — so
+``BarotropicQG.create(lateral_viscosity=positive(100.0))`` would
+fail, and a constrained model could only be built by surgery with
+``eqx.tree_at``. Wrappers are passed through untouched; everything
+else is converted as before.
+
+Args:
+    value: A number, array, or paramax wrapper.
+
+Returns:
+    The wrapper unchanged, or ``jnp.asarray(value)``.
 ```
 ````
 
@@ -1664,6 +1721,40 @@ Returns:
     ``(tiled_spatial, temporal)`` with ``tiled_spatial`` of
     ``m_t * m_s`` columns and a matching
     :class:`GaussianWindowsInTime` gate.
+```
+````
+
+### `trainable_mask`
+
+*function*
+
+```python
+trainable_mask(tree: 'PyTree') -> 'PyTree'
+```
+
+Boolean pytree marking which leaves an optimiser may update.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+``NonTrainable`` removes a leaf from the *backward* pass, so its
+gradient is exact zero — but a zero gradient is not the same as no
+update. A decoupled-weight-decay optimiser such as ``optax.adamw``
+computes its update from the parameter value as well as the
+gradient, so applying one to a whole model still drifts a
+:func:`frozen` constant. Pass this mask to ``optax.masked`` (or use
+it with ``eqx.partition``) to leave those leaves genuinely alone.
+
+Args:
+    tree: Any pytree, typically a model.
+
+Returns:
+    A pytree of the same structure whose leaves are ``True`` for
+    trainable leaves and ``False`` under a ``NonTrainable``.
+
+Example:
+    >>> optimiser = optax.masked(optax.adamw(1e-3), trainable_mask(model))
 ```
 ````
 
@@ -3431,11 +3522,14 @@ xarray / zarr helpers that round-trip model states and snapshots (requires the `
 These symbols live in `somax.io` and require the optional `sim` dependency group (`uv sync --group sim`):
 
 - `somax.io.append_to_dataset`
+- `somax.io.apply_scale_metadata`
 - `somax.io.dataset_to_state`
 - `somax.io.load_dataset`
 - `somax.io.save_dataset`
+- `somax.io.scales_attrs`
 - `somax.io.snapshots_to_dataset`
 - `somax.io.state_to_dataset`
+- `somax.io.transform_attrs`
 
 ## Data Assimilation
 

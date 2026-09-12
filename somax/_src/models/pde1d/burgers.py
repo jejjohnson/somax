@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -11,7 +11,7 @@ from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 from somax._src.models._nondim import require_positive
 
 
@@ -33,6 +33,9 @@ class Burgers1DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class Burgers1DDiagnostics(Diagnostics):
@@ -119,8 +122,10 @@ class Burgers1D(SomaxModel):
                 ``method``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
-            to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit; for the diffusive bound pass
+            ``mode="diffusive", diffusivity=1/reynolds``, since the
+            scale set cannot know the model's Reynolds number.
 
         Raises:
             ValueError: If an input is not positive.
@@ -158,7 +163,7 @@ class Burgers1D(SomaxModel):
             A ``Burgers1D`` model instance.
         """
         grid = CartesianGrid1D.from_interior(nx, Lx)
-        params = Burgers1DParams(nu=jnp.array(nu))
+        params = Burgers1DParams(nu=as_parameter(nu))
         diff = Difference1D(grid=grid, mask=mask)
         advection = Advection1D(grid=grid, mask=mask)
         return Burgers1D(
