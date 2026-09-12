@@ -92,9 +92,16 @@ class Scales(eqx.Module):
 
         Raises:
             ValueError: If ``L``, ``U``, ``H`` or ``g`` is not strictly
-                positive.
+                positive, or if ``f0`` is not finite.
         """
         _require_positive(L=L, U=U, H=H, g=g)
+        # ``f0`` is the one input this set does not require to be
+        # positive — zero is a non-rotating model and a negative value
+        # is the southern hemisphere — but non-finite is still fatal:
+        # it silently makes ``eta`` and every rotation-dependent group
+        # non-finite, and that object then contaminates any transform
+        # built from it.
+        _require_finite(f0=f0)
         return cls(L=L, U=U, H=H, f0=f0, T=L / U, g=g, kind="advective")
 
     @classmethod
@@ -258,6 +265,17 @@ class Scales(eqx.Module):
         return Scales.planetary(
             a=1.0, Omega=1.0, H=1.0, rossby=self.rossby, g=4.0 * burger
         )
+
+
+def _require_finite(**values: float) -> None:
+    """Raise if any named value is not finite.
+
+    For an input whose sign or zero is meaningful, so
+    :func:`_require_positive` would be too strict.
+    """
+    for name, value in values.items():
+        if not math.isfinite(value):
+            raise ValueError(f"Scales: {name} must be a finite number; got {value!r}.")
 
 
 def _require_positive(**values: float) -> None:

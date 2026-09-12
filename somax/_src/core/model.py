@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 #: Contract methods that read model parameters, and so must see them
 #: unwrapped. :meth:`SomaxModel.__init_subclass__` wraps whichever of
 #: these a subclass defines.
-_UNWRAPPED_METHODS = ("vector_field", "diagnose")
+_UNWRAPPED_METHODS = ("vector_field", "diagnose", "apply_boundary_conditions")
 
 
 def _unwrapping(implementation: Callable[..., Any]) -> Callable[..., Any]:

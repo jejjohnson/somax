@@ -223,6 +223,19 @@ def interval(value: ArrayLike, lower: float, upper: float) -> Parameterize:
             f"interval(): upper must exceed lower; got ({lower!r}, {upper!r})."
         )
     array = jnp.asarray(value)
+    # Finite endpoints do not make the *span* representable. With
+    # default float32, ``interval(0.0, -3e38, 3e38)`` passes every
+    # check above, but ``upper - lower`` overflows to infinity in the
+    # calculation below, ``scaled`` collapses to zero, and unwrapping
+    # evaluates ``inf * sigmoid(-inf)`` — NaN. Test the subtraction in
+    # the dtype that will actually perform it.
+    span = jnp.asarray(upper, array.dtype) - jnp.asarray(lower, array.dtype)
+    if not bool(jnp.isfinite(span)):
+        raise ValueError(
+            f"interval(): the span {upper!r} - {lower!r} overflows "
+            f"{array.dtype.name}. Narrow the bounds, or use a wider dtype "
+            f"for the value."
+        )
     # Stated positively so that NaN fails it — see :func:`positive`.
     if not bool(jnp.all(jnp.isfinite(array) & (array > lower) & (array < upper))):
         raise ValueError(
@@ -297,6 +310,11 @@ def trainable_mask(tree: PyTree) -> PyTree:
     def mark(leaf: Any) -> Any:
         if isinstance(leaf, NonTrainable):
             return jtu.tree_map(lambda _: False, leaf)
-        return True
+        # ``False`` for anything an optimiser cannot update, not just
+        # for frozen leaves. A ``Parameterize`` keeps its transform as
+        # an ordinary pytree leaf, so a model that mixes ``positive()``
+        # or ``interval()`` with ``frozen()`` would otherwise hand
+        # ``optax.adamw`` a function to initialise state for.
+        return eqx.is_array(leaf)
 
     return jtu.tree_map(mark, tree, is_leaf=lambda x: isinstance(x, NonTrainable))

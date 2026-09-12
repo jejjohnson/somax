@@ -629,3 +629,104 @@ class TestNonlinearOneDimensionalCoriolisPartner:
         from somax._src.models.swm.nonlinear_1d import NonlinearSW1DState
 
         assert "u" not in NonlinearSW1DState.mask_locations
+
+
+class TestTransportedScalarsKeepTheirAmplitude:
+    """``u`` in the pde family is the transported field, not a velocity.
+
+    Its amplitude comes from the initial condition, so there is no
+    scale for it in ``Scales``; dividing it by ``U`` would make the
+    nondimensional state depend on a velocity that belongs to the
+    equation's coefficient instead.
+    """
+
+    SCALAR_STATES = (
+        "somax._src.models.pde1d.linear_convection.LinearConvection1DState",
+        "somax._src.models.pde1d.diffusion.Diffusion1DState",
+        "somax._src.models.pde2d.linear_convection.LinearConvection2DState",
+        "somax._src.models.pde2d.diffusion.Diffusion2DState",
+    )
+
+    @staticmethod
+    def _load(path):
+        import importlib
+
+        module, name = path.rsplit(".", 1)
+        return getattr(importlib.import_module(module), name)
+
+    @pytest.mark.parametrize("path", SCALAR_STATES)
+    def test_the_scale_is_one_whatever_the_velocity_scale(self, path):
+        state_cls = self._load(path)
+        fast = Scales.advective(L=1e6, U=10.0, f0=1e-4, H=1000.0)
+        slow = Scales.advective(L=1e6, U=0.01, f0=1e-4, H=1000.0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert float(StateAffine.from_scales(state_cls, fast).scale.u) == 1.0
+            assert float(StateAffine.from_scales(state_cls, slow).scale.u) == 1.0
+
+    @pytest.mark.parametrize("path", SCALAR_STATES)
+    def test_it_is_declared_rather_than_unknown(self, path):
+        """An unknown kind would give scale 1 too — but with a warning."""
+        assert self._load(path).scale_kinds == {"u": "tracer"}
+
+    def test_burgers_velocities_are_still_velocities(self):
+        """The contrast: there ``u`` really is the transported velocity."""
+        from somax._src.models.pde2d.burgers import Burgers2DState
+
+        scales = Scales.advective(L=1e6, U=10.0, f0=1e-4, H=1000.0)
+        transform = StateAffine.from_scales(Burgers2DState, scales)
+        assert float(transform.scale.u) == pytest.approx(10.0)
+
+
+class TestScaleOverridesMustBeFinite:
+    """Non-finite is as fatal as zero, and the zero test misses it."""
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_a_scalar_override_is_rejected(self, scales, bad):
+        with pytest.raises(ValueError, match="is not finite"):
+            StateAffine.from_scales(NonlinearSW2DState, scales, h=bad)
+
+    def test_one_bad_entry_in_an_array_is_rejected(self, scales):
+        thickness = jnp.asarray([1.0, float("nan"), 1.0]).reshape(NL, 1, 1)
+        with pytest.raises(ValueError, match="has a non-finite entry"):
+            StateAffine.from_scales(MultilayerSW2DState, scales, h=thickness)
+
+    def test_a_finite_array_is_still_accepted(self, scales):
+        thickness = jnp.asarray([1.0, 2.0, 3.0]).reshape(NL, 1, 1)
+        transform = StateAffine.from_scales(MultilayerSW2DState, scales, h=thickness)
+        np.testing.assert_allclose(
+            np.asarray(transform.scale.h).ravel(), [1.0, 2.0, 3.0]
+        )
+
+
+class TestSampleMomentsSurviveHalfPrecision:
+    """``float16`` saturates at 65504; a modest field overflows the count."""
+
+    def test_the_mean_of_a_large_half_precision_field_is_right(self):
+        samples = jnp.full((4, 256, 256), 2.0, dtype=jnp.float16)
+        state = BarotropicQGState(q=samples)
+        transform = StateAffine.from_samples(state, per_gridpoint=False)
+        # Casting the count to float16 would overflow to inf and drive
+        # the mean to zero.
+        assert float(transform.loc.q) == pytest.approx(2.0, rel=1e-3)
+
+    def test_the_count_really_would_overflow_in_float16(self):
+        """Otherwise the test above would pass for the wrong reason."""
+        with np.errstate(over="ignore"):
+            assert float(np.float16(4 * 256 * 256)) == float("inf")
+
+    def test_a_small_floor_is_returned_as_asked(self):
+        """Flooring the variance as ``eps**2`` would underflow to zero."""
+        state = BarotropicQGState(q=jnp.full((8, 4, 4), 2.0, dtype=jnp.float32))
+        transform = StateAffine.from_samples(state, per_gridpoint=False, eps=1e-30)
+        assert float(transform.scale.q) == pytest.approx(1e-30, rel=1e-6, abs=0.0)
+
+    def test_a_constant_field_has_a_finite_gradient(self):
+        """``sqrt`` has an infinite derivative at zero."""
+
+        def scale_of(samples):
+            state = BarotropicQGState(q=samples)
+            return StateAffine.from_samples(state, per_gridpoint=False).scale.q
+
+        grad = jax.grad(scale_of)(jnp.full((8, 4, 4), 2.0))
+        assert bool(jnp.all(jnp.isfinite(grad)))
