@@ -7,7 +7,9 @@ from somax.core import (
     SomaxModel as SomaxModel,
     State as State,
     StateAffine as StateAffine,
+    as_parameter as as_parameter,
     frozen as frozen,
     interval as interval,
     positive as positive,
+    trainable_mask as trainable_mask,
 )

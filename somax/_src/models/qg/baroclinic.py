@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -18,7 +20,7 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.transforms import ModalTransform, StratificationProfile
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
 
 
 class BaroclinicQGState(State):
@@ -33,6 +35,9 @@ class BaroclinicQGState(State):
     """
 
     q: Float[Array, "nl Ny Nx"]
+
+    # QG potential vorticity is a T-point field, not a corner one.
+    mask_locations: ClassVar[dict[str, str]] = {"q": "h"}
 
 
 class BaroclinicQGParams(Params):
@@ -313,9 +318,9 @@ class BaroclinicQG(SomaxModel):
         helmholtz_lambdas = f0**2 * modal.eigenvalues
 
         params = BaroclinicQGParams(
-            lateral_viscosity=jnp.array(lateral_viscosity),
-            bottom_drag=jnp.array(bottom_drag),
-            wind_amplitude=jnp.array(wind_amplitude),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
+            wind_amplitude=as_parameter(wind_amplitude),
         )
         consts = BaroclinicQGPhysConsts(f0=f0, beta=beta, n_layers=nl)
         diff = Difference2D(grid=grid, mask=mask)
