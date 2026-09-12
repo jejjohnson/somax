@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import CartesianGrid1D, Difference1D, Interpolation1D, Mask1D
@@ -23,6 +25,11 @@ class LinearSW1DState(State):
     h: Array
     u: Array
     v: Array
+
+    # ``h`` is the perturbation, so it is already centred on zero.
+    scale_kinds: ClassVar[dict[str, str]] = {"h": "height_anomaly"}
+    # The 1-D Coriolis partner sits at T-points.
+    mask_locations: ClassVar[dict[str, str]] = {"v": "h"}
 
 
 class LinearSW1DParams(Params):

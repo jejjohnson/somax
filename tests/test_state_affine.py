@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -350,3 +352,169 @@ class TestTransforms:
         t = StateAffine.from_scales(NonlinearSW2DState, scales)
         leaves = jax.tree_util.tree_leaves(t)
         assert len(leaves) == 6  # loc and scale, three fields each
+
+
+class TestFieldNamesAreOnlyAHint:
+    """A field's name does not fix its scaling or its staggering.
+
+    ``h`` is a total thickness in the nonlinear shallow-water models
+    and a height anomaly in the linear ones; ``u`` is a C-grid velocity
+    in the ocean models and a T-point scalar in the pde family. Each
+    state says which it means.
+    """
+
+    def scales(self):
+        return Scales.advective(L=1.0e6, U=0.1, f0=1.0e-4, H=500.0)
+
+    def test_linear_shallow_water_height_is_not_offset(self):
+        """A resting linear state is zero, and must map to zero."""
+        from somax._src.models.swm.linear_2d import LinearSW2DState
+
+        transform = StateAffine.from_scales(LinearSW2DState, self.scales())
+        assert float(transform.loc.h) == 0.0
+
+    def test_nonlinear_shallow_water_height_still_is(self):
+        """The default is unchanged for states that do mean thickness."""
+        transform = StateAffine.from_scales(NonlinearSW2DState, self.scales())
+        assert float(transform.loc.h) == pytest.approx(self.scales().H)
+
+    def test_a_resting_linear_state_maps_to_zero(self):
+        from somax._src.models.swm.linear_2d import LinearSW2DState
+
+        transform = StateAffine.from_scales(LinearSW2DState, self.scales())
+        rest = LinearSW2DState(
+            h=jnp.zeros((4, 4)), u=jnp.zeros((4, 4)), v=jnp.zeros((4, 4))
+        )
+        np.testing.assert_allclose(np.asarray(transform.forward(rest).h), 0.0)
+
+    def test_navier_stokes_vorticity_is_recognised(self):
+        """``omega`` is this family's spelling; it must not warn."""
+        from somax._src.models.pde2d.navier_stokes import NSVorticityState
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            transform = StateAffine.from_scales(NSVorticityState, self.scales())
+        assert float(transform.scale.omega) == pytest.approx(self.scales().vorticity)
+
+    def test_collocated_velocities_use_the_t_point_mask(self):
+        """Burgers keeps u and v at T-points, so mask.u would be wrong."""
+        from somax._src.models.pde2d.burgers import Burgers2DState
+
+        assert Burgers2DState.mask_locations == {"u": "h", "v": "h"}
+
+    def test_qg_potential_vorticity_uses_the_t_point_mask(self):
+        assert BarotropicQGState.mask_locations == {"q": "h"}
+
+    def test_the_declared_mask_is_the_one_actually_used(self):
+        """Not just declared: a dry T-cell must be excluded in practice."""
+        from somax._src.models.pde2d.burgers import Burgers2DState
+
+        wet = np.ones((6, 6), dtype=bool)
+        wet[2:4, 2:4] = False
+        mask = Mask2D.from_mask(jnp.asarray(wet))
+
+        samples = jnp.asarray(np.ones((5, 6, 6)))
+        # Poison the dry cells; with the T-point mask they are excluded
+        # and the wet-cell mean stays exactly 1.
+        samples = samples.at[:, 2:4, 2:4].set(1.0e6)
+        transform = StateAffine.from_samples(
+            Burgers2DState(u=samples, v=samples), mask=mask
+        )
+        assert float(jnp.max(transform.loc.u)) == pytest.approx(1.0, rel=1e-6)
+
+    def test_metadata_does_not_become_a_state_field(self):
+        """The ClassVars are metadata, not leaves."""
+        from somax._src.models.pde2d.burgers import Burgers2DState
+
+        transform = StateAffine.from_scales(Burgers2DState, self.scales())
+        assert not hasattr(transform.loc, "mask_locations_leaf")
+        assert len(jax.tree_util.tree_leaves(transform.loc)) == 2
+
+
+class TestDryCellsInFieldwiseStatistics:
+    """``per_gridpoint=False`` must still leave land alone.
+
+    Reducing to one number per field would otherwise hand every dry
+    cell the wet cells' statistics, moving its land sentinel and
+    counting it in the log determinant.
+    """
+
+    def setup_method(self):
+        wet = np.ones((6, 6), dtype=bool)
+        wet[2:4, 2:4] = False
+        self.wet = wet
+        self.mask = Mask2D.from_mask(jnp.asarray(wet))
+        rng = np.random.RandomState(0)
+        field = rng.randn(5, 6, 6) * 3.0 + 7.0
+        field[:, 2:4, 2:4] = np.nan  # a land sentinel
+        self.samples = NonlinearSW2DState(
+            h=jnp.asarray(field), u=jnp.asarray(field), v=jnp.asarray(field)
+        )
+
+    def transform(self):
+        return StateAffine.from_samples(self.samples, mask=self.mask)
+
+    def test_dry_cells_get_the_identity(self):
+        transform = self.transform()
+        dry = ~self.wet
+        np.testing.assert_allclose(np.asarray(transform.loc.h)[dry], 0.0)
+        np.testing.assert_allclose(np.asarray(transform.scale.h)[dry], 1.0)
+
+    def test_wet_cells_share_one_number(self):
+        """Fieldwise still means fieldwise — one statistic, not per cell."""
+        transform = self.transform()
+        wet_locs = np.asarray(transform.loc.h)[self.wet]
+        assert np.allclose(wet_locs, wet_locs[0])
+
+    def test_a_land_sentinel_is_left_untouched(self):
+        transform = self.transform()
+        sentinel = jnp.asarray(np.where(self.wet, 0.0, -9999.0))
+        state = NonlinearSW2DState(h=sentinel, u=sentinel, v=sentinel)
+        got = np.asarray(transform.forward(state).h)
+        np.testing.assert_allclose(got[~self.wet], -9999.0)
+
+    def test_the_wet_statistics_are_unaffected_by_the_sentinel(self):
+        transform = self.transform()
+        assert np.isfinite(float(np.asarray(transform.loc.h)[self.wet][0]))
+
+    def test_without_a_mask_the_statistics_stay_scalar(self):
+        """No mask, no land: nothing to broadcast over."""
+        clean = jax.tree_util.tree_map(jnp.nan_to_num, self.samples)
+        transform = StateAffine.from_samples(clean)
+        assert jnp.ndim(transform.loc.h) == 0
+
+
+class TestArrayValuedScaleValidation:
+    """A zero anywhere in an array scale divides by zero just the same."""
+
+    def scales(self):
+        return Scales.advective(L=1.0e6, U=0.1, f0=1.0e-4, H=500.0)
+
+    def test_a_zero_entry_in_a_per_layer_scale_is_rejected(self):
+        with pytest.raises(ValueError, match="has a zero entry"):
+            StateAffine.from_scales(
+                MultilayerSW2DState,
+                self.scales(),
+                h=jnp.asarray([[[1.0]], [[0.0]], [[3.0]]]),
+            )
+
+    def test_a_scalar_zero_still_says_it_is_zero(self):
+        with pytest.raises(ValueError, match="is zero"):
+            StateAffine.from_scales(NonlinearSW2DState, self.scales(), h=0.0)
+
+    def test_a_fully_nonzero_array_is_accepted(self):
+        transform = StateAffine.from_scales(
+            MultilayerSW2DState,
+            self.scales(),
+            h=jnp.asarray([[[1.0]], [[2.0]], [[3.0]]]),
+        )
+        assert transform.scale.h.shape == (3, 1, 1)
+
+    def test_a_negative_entry_is_fine(self):
+        """Only zero breaks invertibility; a sign flip is a valid map."""
+        transform = StateAffine.from_scales(
+            MultilayerSW2DState,
+            self.scales(),
+            h=jnp.asarray([[[1.0]], [[-2.0]], [[3.0]]]),
+        )
+        assert float(transform.scale.h[1, 0, 0]) == -2.0
