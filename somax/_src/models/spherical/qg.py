@@ -19,7 +19,13 @@ from finitevolx._src.utils.constants import OMEGA, R_EARTH
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    as_parameter,
+)
 from somax._src.models.spherical._geometry import (
     _require_global_longitude,
     _require_open_poles,
@@ -152,13 +158,27 @@ class SphericalQG(SomaxModel):
     cg_tol: float = eqx.field(static=True, default=1e-6)
     cg_max_steps: int = eqx.field(static=True, default=500)
 
+    def _masked(self, field: Float[Array, "Ny Nx"]) -> Float[Array, "Ny Nx"]:
+        """``field`` zeroed on land at T-points."""
+        if self.mask is None:
+            return field
+        return field * self.mask.h
+
     def _expand(self, interior: Float[Array, "Ny_i Nx_i"]) -> Float[Array, "Ny Nx"]:
         """Place interior unknowns into a full field with its ghost ring.
 
-        Longitude wraps; the polar ghost rows stay zero, which is the
-        Dirichlet condition that makes the elliptic problem well posed.
+        Longitude wraps. The polar ghost rows are filled
+        *antisymmetrically*, ``psi_ghost = -psi_adjacent``: this grid
+        is cell-centred, so the wall lies on the face between the
+        ghost centre and the first interior centre, and it is their
+        average that the boundary condition constrains. Zeroing the
+        ghost centre instead would put ``psi = 0`` half a cell outside
+        the wall, shifting the stencil and leaving the recovered flow
+        free to cross it. It removes the constant null space just the
+        same, so CG is still happy.
         """
         full = jnp.zeros((self.grid.Ny, self.grid.Nx)).at[1:-1, 1:-1].set(interior)
+        full = full.at[0, :].set(-full[1, :]).at[-1, :].set(-full[-2, :])
         return full.at[:, 0].set(full[:, -2]).at[:, -1].set(full[:, 1])
 
     def invert_pv(self, q: Float[Array, "Ny Nx"]) -> Float[Array, "Ny Nx"]:
@@ -250,7 +270,10 @@ class SphericalQG(SomaxModel):
         absolute = q + self.f_field
         dq_dt = self.advection(absolute, u, v, method=self.method)
 
-        dq_dt = dq_dt + tau0 * self.wind_forcing
+        # Masked at T-points, like every other operator here: an
+        # unmasked source would inject vorticity over land, and
+        # nothing projects it back out of the saved state.
+        dq_dt = dq_dt + tau0 * self._masked(self.wind_forcing)
         dq_dt = dq_dt + self.diffusion(q, nu)
         dq_dt = dq_dt - kappa * q
 
@@ -343,9 +366,9 @@ class SphericalQG(SomaxModel):
         grid = SphericalGrid2D.from_interior(nx, ny, lon_range, lat_range, R=radius)
 
         params = SphericalQGParams(
-            lateral_viscosity=jnp.asarray(lateral_viscosity),
-            bottom_drag=jnp.asarray(bottom_drag),
-            wind_amplitude=jnp.asarray(wind_amplitude),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
+            wind_amplitude=as_parameter(wind_amplitude),
         )
         consts = SphericalQGPhysConsts(omega=omega, radius=radius)
 

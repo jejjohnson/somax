@@ -64,7 +64,34 @@ def _at_rest(model: Any) -> Any:
     return SphericalSWMState(h=depth, u=jnp.zeros(shape), v=jnp.zeros(shape))
 
 
-def _forcing_fields(scenario: ScenarioBundle, *names: str) -> dict[str, Any]:
+def _pad_to_ghosted(field: Any, shape: tuple[int, int]) -> Any:
+    """Put a physical-grid forcing field on the model's ghosted grid.
+
+    ``ForcingFields`` are documented on the physical T-grid,
+    ``(geometry.ny, geometry.nx)``, while the model's state carries a
+    one-cell ghost ring. Added to a tendency unpadded, they fail on
+    the shape — so they are padded the way the model's own boundary
+    conditions treat those cells: wrapping in longitude, repeating the
+    edge row in latitude. A field that already arrives ghosted is left
+    alone.
+    """
+    array = np.asarray(field)
+    if array.shape == shape:
+        return jnp.asarray(array)
+    if array.shape != (shape[0] - 2, shape[1] - 2):
+        raise ValueError(
+            f"spherical forcing field has shape {array.shape}; expected the "
+            f"physical grid {(shape[0] - 2, shape[1] - 2)} or the ghosted "
+            f"grid {shape}."
+        )
+    padded = np.pad(array, ((0, 0), (1, 1)), mode="wrap")
+    padded = np.pad(padded, ((1, 1), (0, 0)), mode="edge")
+    return jnp.asarray(padded)
+
+
+def _forcing_fields(
+    scenario: ScenarioBundle, shape: tuple[int, int], *names: str
+) -> dict[str, Any]:
     """Pass a scenario's precomputed forcing fields to the model.
 
     Both spherical entries advertise ``forcing=("tau_x", "tau_y")``, so
@@ -77,8 +104,23 @@ def _forcing_fields(scenario: ScenarioBundle, *names: str) -> dict[str, Any]:
     for model_name, scenario_name in zip(names[::2], names[1::2], strict=True):
         field = getattr(forcing, scenario_name, None)
         if field is not None:
-            out[model_name] = jnp.asarray(field)
+            out[model_name] = _pad_to_ghosted(field, shape)
     return out
+
+
+def _wind_amplitude(forcing_params: dict[str, Any], fields: dict[str, Any]) -> float:
+    """The scalar the model multiplies its stress pattern by.
+
+    ``ScenarioBundle`` allows precomputed forcing fields with an empty
+    ``forcing_params``, and the analytic default of zero would then
+    multiply those supplied fields away and leave the run silently
+    unforced. A supplied field carries its own magnitude, so the
+    default alongside one is unity; an explicit ``wind_amplitude``
+    still wins, for a scenario that wants to scale its own pattern.
+    """
+    if "wind_amplitude" in forcing_params:
+        return float(forcing_params["wind_amplitude"])
+    return 1.0 if fields else 0.0
 
 
 def _numerics(params: dict[str, Any], *keys: str) -> dict[str, Any]:
@@ -110,6 +152,14 @@ def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
     forcing = scenario.forcing_params
     model_params = dict(params.get("params", {}))
     stratification = dict(params.get("stratification", {}))
+    fields = _forcing_fields(
+        scenario,
+        (geometry.ny + 2, geometry.nx + 2),
+        "wind_stress_x",
+        "tau_x",
+        "wind_stress_y",
+        "tau_y",
+    )
 
     model = SphericalSWM.create(
         nx=geometry.nx,
@@ -124,10 +174,10 @@ def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
         H0=float(model_params.get("H0", stratification.get("H0", 1000.0))),
         lateral_viscosity=float(model_params.get("lateral_viscosity", 0.0)),
         bottom_drag=float(model_params.get("bottom_drag", 0.0)),
-        wind_amplitude=float(forcing.get("wind_amplitude", 0.0)),
+        wind_amplitude=_wind_amplitude(forcing, fields),
         wind_profile=str(forcing.get("wind_profile", "zonal")),
         mask=_spherical_mask(scenario),
-        **_forcing_fields(scenario, "wind_stress_x", "tau_x", "wind_stress_y", "tau_y"),
+        **fields,
         **_numerics(params, "method"),
     )
 

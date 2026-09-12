@@ -87,12 +87,38 @@ class TestPVInversion:
         difference = float(jnp.abs(combined[INTERIOR] - separate[INTERIOR]).max())
         assert difference / magnitude < 1e-3
 
-    def test_streamfunction_vanishes_on_the_polar_rows(self):
-        """The Dirichlet condition that makes the problem well posed."""
+    def test_streamfunction_vanishes_on_the_polar_walls(self):
+        """The Dirichlet condition that makes the problem well posed.
+
+        The grid is cell-centred, so the wall lies on the *face*
+        between the ghost centre and the first interior centre — and
+        it is their average that the condition constrains, not the
+        ghost value on its own. Zeroing the ghost centre instead would
+        place ``psi = 0`` half a cell outside the wall.
+        """
         model = build()
-        psi = model.invert_pv(model.laplacian(smooth_streamfunction(model)))
-        np.testing.assert_array_equal(np.asarray(psi)[0, :], 0.0)
-        np.testing.assert_array_equal(np.asarray(psi)[-1, :], 0.0)
+        psi = np.asarray(model.invert_pv(model.laplacian(smooth_streamfunction(model))))
+        magnitude = float(np.abs(psi[INTERIOR]).max())
+        np.testing.assert_allclose(
+            0.5 * (psi[0, :] + psi[1, :]), 0.0, atol=1e-9 * magnitude
+        )
+        np.testing.assert_allclose(
+            0.5 * (psi[-1, :] + psi[-2, :]), 0.0, atol=1e-9 * magnitude
+        )
+
+    def test_the_polar_ghosts_are_antisymmetric(self):
+        """The mechanism behind the wall condition above."""
+        model = build()
+        psi = np.asarray(model.invert_pv(model.laplacian(smooth_streamfunction(model))))
+        np.testing.assert_allclose(psi[0, :], -psi[1, :], rtol=1e-6)
+        np.testing.assert_allclose(psi[-1, :], -psi[-2, :], rtol=1e-6)
+
+    def test_the_ghost_row_is_not_simply_zero(self):
+        """Otherwise the wall test above would pass for the old reason."""
+        model = build()
+        psi = np.asarray(model.invert_pv(model.laplacian(smooth_streamfunction(model))))
+        assert float(np.abs(psi[1, :]).max()) > 0.0
+        assert float(np.abs(psi[0, :]).max()) > 0.0
 
     def test_scales_with_the_planet_radius(self):
         """psi ~ q R^2, so a bigger planet gives a bigger streamfunction."""
@@ -354,3 +380,65 @@ class TestConstrainedRowsStayConstrained:
         final = np.asarray(out.q[-1])
         np.testing.assert_allclose(final[0, :], 0.0, atol=1e-12)
         np.testing.assert_allclose(final[-1, :], 0.0, atol=1e-12)
+
+
+class TestTheWindSourceRespectsTheMask:
+    """An unmasked source injects vorticity over land.
+
+    Nothing projects it back out of the returned state, so it
+    persists into the snapshots and into ``diagnose``.
+    """
+
+    def model(self):
+        from finitevolx import Mask2D
+
+        bare = build()
+        wet = np.ones((bare.grid.Ny, bare.grid.Nx), dtype=bool)
+        wet[8:12, 5:9] = False
+        mask = Mask2D.from_mask(jnp.asarray(wet))
+        return build(mask=mask, wind_amplitude=1.0, wind_profile="zonal"), mask
+
+    def state(self, model):
+        from somax._src.models.spherical import SphericalQGState
+
+        return SphericalQGState(q=jnp.zeros((model.grid.Ny, model.grid.Nx)))
+
+    def test_no_source_on_dry_cells(self):
+        model, mask = self.model()
+        dq = np.asarray(model.vector_field(0.0, self.state(model)).q)
+        dry = ~np.asarray(mask.h).astype(bool)
+        # The polar rows are zeroed by the boundary condition anyway;
+        # look only at the land block in the interior.
+        np.testing.assert_allclose(dq[1:-1][dry[1:-1]], 0.0, atol=0.0)
+
+    def test_the_wet_cells_are_still_forced(self):
+        model, _ = self.model()
+        dq = np.asarray(model.vector_field(0.0, self.state(model)).q)
+        assert float(np.abs(dq).max()) > 0.0
+
+
+class TestSphericalQgFactoryPreservesConstrainedParameters:
+    """``jnp.asarray`` cannot convert a paramax wrapper."""
+
+    def test_a_positive_viscosity_is_accepted(self):
+        import paramax
+
+        from somax._src.core.types import positive
+
+        model = build(lateral_viscosity=positive(1.0e3))
+        assert isinstance(model.params.lateral_viscosity, paramax.Parameterize)
+        assert float(paramax.unwrap(model.params).lateral_viscosity) == pytest.approx(
+            1.0e3, rel=1e-4
+        )
+
+    def test_a_frozen_drag_is_accepted(self):
+        import paramax
+
+        from somax._src.core.types import frozen
+
+        assert isinstance(
+            build(bottom_drag=frozen(1e-7)).params.bottom_drag, paramax.NonTrainable
+        )
+
+    def test_plain_numbers_still_work(self):
+        assert float(build(bottom_drag=1e-7).params.bottom_drag) == pytest.approx(1e-7)

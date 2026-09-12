@@ -447,7 +447,7 @@ class TestCliStubListMatchesTheRegistry:
 
 
 class TestSphericalAdaptersConsumeScenarioForcing:
-    """Both entries advertise ``forcing=("tau_x", "tau_y")``.
+    """A supplied forcing field must actually reach the model.
 
     Reading only the scalar ``forcing_params`` left a scenario that
     supplies its own fields running on the default analytic pattern —
@@ -477,10 +477,16 @@ class TestSphericalAdaptersConsumeScenarioForcing:
             initial_condition=InitialConditionSpec(type="at_rest"),
         )
 
-    def pattern(self, model_shape=(10, 18)):
+    #: The *physical* T-grid, as ``ForcingFields`` is documented. The
+    #: model's state is ghosted, ``(ny + 2, nx + 2)``; handing this
+    #: test the ghosted shape directly would conceal the padding.
+    PHYSICAL = (8, 16)
+    GHOSTED = (10, 18)
+
+    def pattern(self, shape=None):
         import numpy as np
 
-        return jnp.asarray(np.full(model_shape, 0.25))
+        return jnp.asarray(np.full(shape or self.PHYSICAL, 0.25))
 
     def test_the_swm_uses_a_supplied_zonal_stress(self):
         built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.pattern()), {})
@@ -569,3 +575,100 @@ class TestSphericalInitialStateRespectsTheMask:
         assert float(masked.model.diagnose(masked.state0).mass) < float(
             unmasked.model.diagnose(unmasked.state0).mass
         )
+
+
+class TestSphericalForcingIsPutOnTheModelGrid:
+    """``ForcingFields`` are physical; the model's state is ghosted.
+
+    A field passed through unpadded fails on the shape as soon as it
+    is added to a tendency, and a supplied field multiplied by the
+    analytic default amplitude of zero leaves the run unforced.
+    """
+
+    PHYSICAL = (8, 16)
+    GHOSTED = (10, 18)
+
+    def bundle(self, *, tau_x=None, tau_y=None, forcing_params=None):
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        kwargs = {}
+        if forcing_params is not None:
+            kwargs["forcing_params"] = forcing_params
+        return ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+            forcing=ForcingFields(tau_x=tau_x, tau_y=tau_y),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+            **kwargs,
+        )
+
+    def physical(self, value=0.25):
+        return jnp.asarray(np.full(self.PHYSICAL, value))
+
+    def test_a_physical_field_is_padded_to_the_state_shape(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        assert np.asarray(built.model.wind_stress_x).shape == self.GHOSTED
+
+    def test_the_padded_field_keeps_its_values(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_stress_x), 0.25)
+
+    def test_the_padded_forcing_can_be_added_to_a_tendency(self):
+        """The failure this prevents: a shape error on the first step."""
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        tendency = built.model.vector_field(0.0, built.state0)
+        assert np.asarray(tendency.u).shape == self.GHOSTED
+
+    def test_an_already_ghosted_field_is_left_alone(self):
+        ghosted = jnp.asarray(np.full(self.GHOSTED, 0.25))
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=ghosted), {})
+        assert np.asarray(built.model.wind_stress_x).shape == self.GHOSTED
+
+    def test_a_wrongly_shaped_field_is_rejected(self):
+        odd = jnp.asarray(np.zeros((5, 5)))
+        with pytest.raises(ValueError, match="expected the physical grid"):
+            MODELS["spherical_swm"].build(self.bundle(tau_x=odd), {})
+
+    def test_a_supplied_field_is_not_scaled_away(self):
+        """An empty ``forcing_params`` used to mean amplitude zero."""
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        assert float(built.model.params.wind_amplitude) == pytest.approx(1.0)
+
+    def test_an_explicit_amplitude_still_wins(self):
+        built = MODELS["spherical_swm"].build(
+            self.bundle(tau_x=self.physical(), forcing_params={"wind_amplitude": 3.0}),
+            {},
+        )
+        assert float(built.model.params.wind_amplitude) == pytest.approx(3.0)
+
+    def test_the_analytic_default_is_still_zero_without_fields(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert float(built.model.params.wind_amplitude) == pytest.approx(0.0)
+
+    def test_the_qg_curl_is_padded_too(self):
+        built = MODELS["spherical_qg"].build(self.bundle(tau_x=self.physical()), {})
+        assert np.asarray(built.model.wind_forcing).shape == self.GHOSTED
+
+    def test_the_qg_rejects_a_meridional_stress(self):
+        """It advances a vorticity tendency; there is no second slot."""
+        with pytest.raises(ValueError, match="no use for 'tau_y'"):
+            MODELS["spherical_qg"].build(self.bundle(tau_y=self.physical()), {})
+
+    def test_the_qg_no_longer_advertises_tau_y(self):
+        assert MODELS["spherical_qg"].supports.forcing == ("tau_x",)
+
+    def test_the_swm_still_advertises_both(self):
+        assert MODELS["spherical_swm"].supports.forcing == ("tau_x", "tau_y")

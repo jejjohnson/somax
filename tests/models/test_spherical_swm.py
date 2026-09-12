@@ -447,3 +447,132 @@ class TestConstrainedRowsStayConstrained:
         tendency = model.vector_field(0.0, self.sheared(model))
         assert np.isfinite(np.asarray(tendency.h)).all()
         assert np.isfinite(np.asarray(tendency.u)).all()
+
+
+def _land_mask(model, rows=slice(8, 12), cols=slice(5, 9)):
+    from finitevolx import Mask2D
+
+    wet = np.ones((model.grid.Ny, model.grid.Nx), dtype=bool)
+    wet[rows, cols] = False
+    return Mask2D.from_mask(jnp.asarray(wet))
+
+
+class TestWindSourcesRespectTheMask:
+    """Every other operator here is masked; the source was not.
+
+    Nothing projects land cells back out of the returned state, so an
+    unmasked source gives dry U/V cells a velocity that then persists
+    into the snapshots.
+    """
+
+    def model(self):
+        bare = build()
+        mask = _land_mask(bare)
+        return build(mask=mask, wind_amplitude=1.0, wind_profile="zonal"), mask
+
+    def test_no_tendency_on_dry_zonal_cells(self):
+        model, mask = self.model()
+        du = np.asarray(model.vector_field(0.0, at_rest(model)).u)
+        dry = ~np.asarray(mask.u).astype(bool)
+        np.testing.assert_allclose(du[dry], 0.0, atol=0.0)
+
+    def test_no_tendency_on_dry_meridional_cells(self):
+        model, mask = self.model()
+        dv = np.asarray(model.vector_field(0.0, at_rest(model)).v)
+        dry = ~np.asarray(mask.v).astype(bool)
+        np.testing.assert_allclose(dv[dry], 0.0, atol=0.0)
+
+    def test_the_wet_cells_are_still_forced(self):
+        """Otherwise masking everything would pass the tests above."""
+        model, mask = self.model()
+        du = np.asarray(model.vector_field(0.0, at_rest(model)).u)
+        wet = np.asarray(mask.u).astype(bool)
+        assert float(np.abs(du[wet]).max()) > 0.0
+
+    def test_an_unmasked_model_is_unaffected(self):
+        model = build(wind_amplitude=1.0, wind_profile="zonal")
+        du = np.asarray(model.vector_field(0.0, at_rest(model)).u)
+        assert float(np.abs(du).max()) > 0.0
+
+
+class TestCornerInvariantsUseCornerAreas:
+    """PV lives at X-points, half a latitude step north of the T-cells.
+
+    Their dual-cell area goes as ``cos(lat_T + dlat/2)``, so reusing
+    the T-cell weights biases enstrophy and the cubic Casimir, and
+    increasingly so towards the poles.
+    """
+
+    def test_the_corner_weights_differ_from_the_t_weights(self):
+        from finitevolx import spherical_area_weights
+
+        from somax._src.models.spherical.swm import _corner_area_weights
+
+        model = build()
+        t_area = np.asarray(spherical_area_weights(model.grid))
+        x_area = np.asarray(_corner_area_weights(model.grid))
+        assert not np.allclose(t_area, x_area)
+
+    def test_the_bias_grows_towards_the_poles(self):
+        from finitevolx import spherical_area_weights
+
+        from somax._src.models.spherical.swm import _corner_area_weights
+
+        model = build()
+        ratio = np.asarray(_corner_area_weights(model.grid)) / np.asarray(
+            spherical_area_weights(model.grid)
+        )
+        interior = ratio[1:-1, 1:-1]
+        mid = interior.shape[0] // 2
+        assert abs(interior[1, 0] - 1.0) > abs(interior[mid, 0] - 1.0)
+
+    def test_the_corner_weights_are_non_negative(self):
+        from somax._src.models.spherical.swm import _corner_area_weights
+
+        assert float(np.asarray(_corner_area_weights(build().grid)).min()) >= 0.0
+
+    def test_enstrophy_is_still_positive_and_finite(self):
+        model = build()
+        rng = np.random.RandomState(0)
+        shape = (model.grid.Ny, model.grid.Nx)
+        state = SphericalSWMState(
+            h=jnp.full(shape, DEPTH),
+            u=jnp.asarray(0.1 * rng.randn(*shape)),
+            v=jnp.asarray(0.1 * rng.randn(*shape)),
+        )
+        enstrophy = float(model.diagnose(state).enstrophy)
+        assert np.isfinite(enstrophy) and enstrophy > 0.0
+
+
+class TestSphericalFactoriesPreserveConstrainedParameters:
+    """``jnp.asarray`` cannot convert a paramax wrapper."""
+
+    def test_a_positive_viscosity_is_accepted(self):
+        import paramax
+
+        from somax._src.core.types import positive
+
+        model = build(lateral_viscosity=positive(100.0))
+        assert isinstance(model.params.lateral_viscosity, paramax.Parameterize)
+        assert float(paramax.unwrap(model.params).lateral_viscosity) == pytest.approx(
+            100.0, rel=1e-5
+        )
+
+    def test_a_frozen_drag_is_accepted(self):
+        import paramax
+
+        from somax._src.core.types import frozen
+
+        model = build(bottom_drag=frozen(1e-7))
+        assert isinstance(model.params.bottom_drag, paramax.NonTrainable)
+
+    def test_a_constrained_wind_amplitude_is_accepted(self):
+        from somax._src.core.types import positive
+
+        model = build(wind_amplitude=positive(0.1), wind_profile="zonal")
+        tendency = model.vector_field(0.0, at_rest(model))
+        assert bool(jnp.all(jnp.isfinite(tendency.u)))
+
+    def test_plain_numbers_still_work(self):
+        model = build(lateral_viscosity=100.0)
+        assert float(model.params.lateral_viscosity) == pytest.approx(100.0)
