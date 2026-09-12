@@ -11,6 +11,7 @@ geostrophic manifold.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -346,6 +347,10 @@ class ReparameterizedQG(SomaxModel):
                 "lateral_viscosity",
                 "bottom_drag",
                 "wind_amplitude",
+                # Derived from burger via g_prime[0]; a forwarded value
+                # would contradict the stratification and the returned
+                # scales.
+                "g",
             ),
             **create_kw,
         )
@@ -360,6 +365,21 @@ class ReparameterizedQG(SomaxModel):
         f0 = 1.0 / rossby
         g_prime = burger_to_g_prime(context, burger, thickness_ratio, f0=f0, length=1.0)
         thickness = tuple(float(h) for h in thickness_ratio)
+
+        # The wind group is a *stress* here, but the default is chosen
+        # for a unit Sverdrup interior velocity, which balances the
+        # stress *curl*: beta v = curl(tau) / H_1. The underlying SWM
+        # profile is tau_x = -cos(2 pi y / Ly) (or -cos(pi y / Ly)),
+        # whose curl has amplitude 2 pi / Ly (or pi / Ly), so passing
+        # beta_hat straight through overshot by that factor.
+        # ``BaroclinicQG`` needs no such division: its stored forcing
+        # is already a curl.
+        if wind_hat is None:
+            profile = create_kw.get("wind_profile", "doublegyre")
+            wavenumber = math.pi if profile == "single" else 2.0 * math.pi
+            stress_hat = beta_hat * aspect / wavenumber
+        else:
+            stress_hat = wind_hat
 
         model = ReparameterizedQG.create(
             nx=nx,
@@ -378,7 +398,14 @@ class ReparameterizedQG(SomaxModel):
             # a kwarg carrying the top-layer thickness. (At unit scales
             # the two spellings of the group coincide; the power of L
             # matters when converting a dimensional configuration.)
-            wind_amplitude=(beta_hat if wind_hat is None else wind_hat) * thickness[0],
+            wind_amplitude=stress_hat * thickness[0],
+            # g is the first interface's reduced gravity here, as in
+            # the returned scales. Left at the 9.81 default, the model
+            # constants would disagree with its own stratification and
+            # any diagnostic reading consts.gravity — the geostrophic
+            # imbalance metric among them — would use the wrong
+            # coefficient.
+            g=g_prime[0],
             **create_kw,
         )
         # g is the *first interface's* reduced gravity, not standard
