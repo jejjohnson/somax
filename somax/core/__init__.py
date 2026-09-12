@@ -68,9 +68,11 @@ from somax._src.core.types import (
     Params,
     PhysConsts,
     State,
+    as_parameter,
     frozen,
     interval,
     positive,
+    trainable_mask,
 )
 
 
@@ -114,6 +116,7 @@ __all__ = [
     "VectorSpatialBasis",
     "add_to",
     "add_vector_to",
+    "as_parameter",
     "build_diffrax_terms",
     "control_filter",
     "explicit",
@@ -136,4 +139,5 @@ __all__ = [
     "sss_coastal",
     "sst_frontal",
     "tile_in_time",
+    "trainable_mask",
 ]

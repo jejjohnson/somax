@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -11,7 +11,7 @@ from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class Diffusion1DParams(Params):
@@ -32,6 +32,9 @@ class Diffusion1DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class Diffusion1DDiagnostics(Diagnostics):
@@ -108,12 +111,11 @@ class Diffusion1D(SomaxModel):
 
         Args:
             nx: Interior grid cells.
-            **create_kw: Forwarded to :meth:`create` (``periodic``,
-                ``method``, ``mask``).
+            **create_kw: Forwarded to :meth:`create` (``periodic``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
-            to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit.
         """
         model = Diffusion1D.create(
             nx=nx,
@@ -144,7 +146,7 @@ class Diffusion1D(SomaxModel):
             A ``Diffusion1D`` model instance.
         """
         grid = CartesianGrid1D.from_interior(nx, Lx)
-        params = Diffusion1DParams(nu=jnp.array(nu))
+        params = Diffusion1DParams(nu=as_parameter(nu))
         diff = Difference1D(grid=grid, mask=mask)
         return Diffusion1D(
             params=params,

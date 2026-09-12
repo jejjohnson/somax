@@ -175,3 +175,34 @@ def resolve_burger_spherical(
         require_positive(context, lamb=lamb)
         return 1.0 / float(lamb)
     return resolve_burger(context, burger, froude, rossby)
+
+
+def reject_derived_kwargs(
+    context: str, derived: Sequence[str], **create_kw: object
+) -> None:
+    """Refuse forwarded arguments the factory derives for itself.
+
+    ``**create_kw`` is a convenience for the knobs a dimensionless
+    description says nothing about — ``bc``, ``method``, ``mask``,
+    ``wind_profile``. Letting a stratification or a Coriolis parameter
+    through it would silently win over the values derived from the
+    dimensionless inputs, while the returned ``Scales`` still described
+    the derived ones: the model and its scales would then be different
+    systems.
+
+    Args:
+        context: Caller name, for error messages.
+        derived: Argument names the factory sets itself.
+        **create_kw: The forwarded arguments to check.
+
+    Raises:
+        ValueError: If any forwarded name is one the factory derives.
+    """
+    clash = sorted(set(create_kw) & set(derived))
+    if clash:
+        raise ValueError(
+            f"{context}: {clash} is derived from the dimensionless inputs and "
+            f"cannot be passed through to create(). Passing it would leave the "
+            f"model and the returned Scales describing different systems; drop "
+            f"it, or use create() directly for a dimensional build."
+        )

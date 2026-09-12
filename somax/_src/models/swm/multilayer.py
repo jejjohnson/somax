@@ -27,10 +27,11 @@ from jaxtyping import Array, Float, PyTree
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
 from somax._src.core.transforms import ModalTransform, StratificationProfile
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
 from somax._src.guards import guard_finite, guard_positive
 from somax._src.models._nondim import (
     burger_to_g_prime,
+    reject_derived_kwargs,
     require_non_negative,
     require_positive,
 )
@@ -360,6 +361,23 @@ class MultilayerShallowWater2D(SomaxModel):
                 disagree in length.
         """
         context = "MultilayerShallowWater2D.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "f0",
+                "beta",
+                "n_layers",
+                "H",
+                "g_prime",
+                "stratification",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
         require_positive(context, rossby=rossby, aspect=aspect)
         require_non_negative(
             context,
@@ -386,7 +404,12 @@ class MultilayerShallowWater2D(SomaxModel):
             g_prime=g_prime,
             lateral_viscosity=ekman_lateral,
             bottom_drag=ekman,
-            wind_amplitude=wind_hat * rossby,
+            # The RHS applies the wind as tau0 * F / H[0], so the
+            # amplitude carries the top-layer thickness; without it
+            # the realised acceleration is wind_hat / H[0] whenever
+            # thickness_ratio[0] is not 1. Same convention as the
+            # layered QG factories.
+            wind_amplitude=wind_hat * rossby * thickness[0],
             **create_kw,
         )
         scales = Scales.inertial(
@@ -471,9 +494,9 @@ class MultilayerShallowWater2D(SomaxModel):
         modal = ModalTransform.from_stratification(strat, f0)
 
         params = MultilayerSW2DParams(
-            lateral_viscosity=jnp.array(lateral_viscosity),
-            bottom_drag=jnp.array(bottom_drag),
-            wind_amplitude=jnp.array(wind_amplitude),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
+            wind_amplitude=as_parameter(wind_amplitude),
         )
         consts = MultilayerSW2DPhysConsts(gravity=g, f0=f0, beta=beta, n_layers=nl)
         diff = Difference2D(grid=grid, mask=mask)

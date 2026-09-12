@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import importlib.util
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import paramax
 import pytest
 from jax.flatten_util import ravel_pytree
 
@@ -238,3 +240,97 @@ class TestPackaging:
         pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
         config = tomllib.loads(pyproject.read_text())
         assert not any("flowjax" in dep for dep in config["project"]["dependencies"])
+
+
+class TestTheAffineIsNotTrainable:
+    """The scaling must survive training the flow on top of it.
+
+    ``loc`` and ``scale`` are arrays whenever they come from
+    ``from_samples`` or an array-valued override. Left as ordinary
+    fields they are trainable leaves, so fitting the ``Transformed``
+    distribution would drift the physical normalisation along with the
+    learned flow — silently changing what the prior means.
+    """
+
+    def bijection(self):
+        from somax._src.core.flows import to_flowjax
+
+        rng = np.random.RandomState(0)
+        shape = (4, 4)
+        samples = NonlinearSW2DState(
+            h=jnp.asarray(100.0 + rng.randn(6, *shape)),
+            u=jnp.asarray(rng.randn(6, *shape)),
+            v=jnp.asarray(rng.randn(6, *shape)),
+        )
+        transform = StateAffine.from_samples(samples, per_gridpoint=True)
+        example = jax.tree_util.tree_map(lambda leaf: leaf[0], samples)
+        return to_flowjax(transform, example)
+
+    def test_the_statistics_really_are_arrays(self):
+        """Otherwise there would be nothing for an optimiser to move."""
+        bijection = self.bijection()
+        loc = paramax.unwrap(bijection.state_transform).loc
+        assert jnp.ndim(loc.h) > 0
+
+    def test_every_statistic_leaf_is_wrapped_non_trainable(self):
+        """``paramax.non_trainable`` wraps the leaves, not the module."""
+        leaves = jax.tree_util.tree_leaves(
+            self.bijection().state_transform,
+            is_leaf=lambda x: isinstance(x, paramax.NonTrainable),
+        )
+        assert leaves
+        assert all(isinstance(leaf, paramax.NonTrainable) for leaf in leaves)
+
+    def test_its_gradients_are_exactly_zero(self):
+        bijection = self.bijection()
+
+        def loss(bij):
+            bij = paramax.unwrap(bij)
+            return jnp.sum(bij.transform_and_log_det(jnp.ones(bij.shape))[0] ** 2)
+
+        grads = eqx.filter_grad(loss)(bijection)
+        leaves = jax.tree_util.tree_leaves(eqx.filter(grads, eqx.is_inexact_array))
+        assert leaves
+        assert all(float(jnp.abs(leaf).max()) == 0.0 for leaf in leaves)
+
+    def test_the_map_still_works(self):
+        """Wrapping must not change what the bijection computes."""
+        bijection = self.bijection()
+        x = jnp.linspace(-1.0, 1.0, bijection.shape[0])
+        y, _ = bijection.transform_and_log_det(x)
+        back, _ = bijection.inverse_and_log_det(y)
+        np.testing.assert_allclose(np.asarray(back), np.asarray(x), atol=1e-4)
+
+    def test_the_log_determinant_is_unchanged(self):
+        bijection = self.bijection()
+        x = jnp.zeros(bijection.shape)
+        _, forward = bijection.transform_and_log_det(x)
+        y, _ = bijection.transform_and_log_det(x)
+        _, inverse = bijection.inverse_and_log_det(y)
+        assert float(forward) == pytest.approx(-float(inverse), rel=1e-5)
+
+
+class TestOptionalExtraIsExercisedInCi:
+    """These tests must actually run somewhere.
+
+    The module-level marker skips every one of them when flowjax is
+    absent, so a CI job that does not install the extra would stay
+    green while the bridge rots.
+    """
+
+    def workflows(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        return [root / "ci.yml", root / "full-tests.yml"]
+
+    def test_the_workflows_exist(self):
+        for path in self.workflows():
+            assert path.exists(), path
+
+    def test_every_test_job_installs_the_flows_extra(self):
+        for path in self.workflows():
+            text = path.read_text()
+            for line in text.splitlines():
+                if "uv sync" in line and "--group dev" in line:
+                    assert "--extra flows" in line, f"{path.name}: {line.strip()}"

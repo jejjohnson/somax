@@ -21,6 +21,7 @@ Monitor                      Severity
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from typing import Any
 
@@ -34,10 +35,11 @@ from somax._src.monitor.protocol import ChunkInfo, MonitorVerdict
 def _state_field_arrays(state: Any) -> dict[str, np.ndarray]:
     """Best-effort map of state field name -> numpy array (eqx.Module)."""
     out: dict[str, np.ndarray] = {}
-    fields = getattr(state, "__dataclass_fields__", None)
-    if not fields:
+    if not dataclasses.is_dataclass(type(state)):
         return out
-    for name in fields:
+    # Not ``__dataclass_fields__``: it also lists the ``ClassVar``
+    # metadata a state declares, which are dicts rather than arrays.
+    for name in (f.name for f in dataclasses.fields(type(state))):
         try:
             value = getattr(state, name)
             arr = np.asarray(value)

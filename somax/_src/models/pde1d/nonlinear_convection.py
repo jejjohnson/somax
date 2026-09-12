@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -22,6 +22,9 @@ class NonlinearConvection1DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class NonlinearConvection1DDiagnostics(Diagnostics):
@@ -100,8 +103,8 @@ class NonlinearConvection1D(SomaxModel):
                 ``method``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
-            to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit.
         """
         model = NonlinearConvection1D.create(
             nx=nx,

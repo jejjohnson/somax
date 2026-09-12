@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -19,7 +19,7 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 from somax._src.models._nondim import require_positive
 
 
@@ -31,6 +31,11 @@ class NSVorticityState(State):
     """
 
     omega: Array
+
+    # ``omega`` is this family's spelling of vorticity.
+    scale_kinds: ClassVar[dict[str, str]] = {"omega": "vorticity"}
+    # Vorticity is carried at T-points, not the C-grid corner.
+    mask_locations: ClassVar[dict[str, str]] = {"omega": "h"}
 
 
 class NSParams(Params):
@@ -309,12 +314,16 @@ class IncompressibleNS2D(SomaxModel):
             aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
             reynolds: Reynolds number ``Re = U L / nu``; sets
                 ``nu = 1/Re``.
-            **create_kw: Forwarded to :meth:`create` (``method``,
-                ``mask``).
+            **create_kw: Forwarded to :meth:`create` (``problem``,
+                ``u_lid``, ``body_force``, ``method``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with the
-            cell count to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing. For the diffusive bound
+            add ``mode="diffusive", diffusivity=1/reynolds`` — the
+            scale set cannot know the model's Reynolds number.
 
         Raises:
             ValueError: If an input is not positive.
@@ -363,7 +372,7 @@ class IncompressibleNS2D(SomaxModel):
             An ``IncompressibleNS2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = NSParams(nu=jnp.array(nu))
+        params = NSParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)
         advection = FVXAdvection2D(grid=grid, mask=mask)

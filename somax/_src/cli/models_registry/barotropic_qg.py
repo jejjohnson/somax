@@ -86,6 +86,7 @@ def _build_nondimensional(
 
     kwargs = {_NONDIM_KEYS[key]: value for key, value in nondim.items()}
     geometry = scenario.geometry
+    kwargs["aspect"] = _resolve_aspect(geometry, kwargs.get("aspect"))
     model, _ = BarotropicQG.from_nondimensional(
         nx=geometry.nx,
         ny=geometry.ny,
@@ -112,3 +113,38 @@ BAROTROPIC_QG = ModelEntry(
     build=_build,
     from_nondimensional=_build_nondimensional,
 )
+
+
+def _resolve_aspect(geometry: Any, requested: float | None) -> float:
+    """The basin shape, from the scenario geometry unless stated.
+
+    ``aspect`` was left at the factory default of 1, so a scenario with
+    ``Lx=1, Ly=0.5`` silently built a square basin; and a value given
+    in ``scenario.nondim`` could contradict the geometry with nothing
+    to catch it. The geometry is the authority — it is where the rest
+    of the grid comes from — and a duplicate is accepted only when it
+    agrees.
+
+    Args:
+        geometry: The scenario geometry, whose ``Lx``/``Ly`` may be None.
+        requested: ``aspect`` from the nondim block, if given.
+
+    Returns:
+        The aspect ratio to build with.
+
+    Raises:
+        ValueError: If an explicit ``aspect`` contradicts the geometry.
+    """
+    derived = None
+    if geometry.Lx and geometry.Ly:
+        derived = float(geometry.Ly) / float(geometry.Lx)
+    if requested is None:
+        return 1.0 if derived is None else derived
+    requested = float(requested)
+    if derived is not None and abs(requested - derived) > 1e-9 * max(1.0, derived):
+        raise ValueError(
+            f"barotropic_qg: scenario.nondim.aspect={requested!r} contradicts "
+            f"the scenario geometry (Ly/Lx = {derived!r}). Give one or the "
+            f"other, not both."
+        )
+    return requested

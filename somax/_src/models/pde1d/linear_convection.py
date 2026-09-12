@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import math
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -11,7 +12,7 @@ from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.scales import Scales
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class LinearConvection1DParams(Params):
@@ -32,6 +33,9 @@ class LinearConvection1DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class LinearConvection1DDiagnostics(Diagnostics):
@@ -98,6 +102,7 @@ class LinearConvection1D(SomaxModel):
     def from_nondimensional(
         *,
         nx: int = 100,
+        direction: float = 1.0,
         **create_kw: Any,
     ) -> tuple[LinearConvection1D, Scales]:
         r"""Build the model at unit scales instead of SI coefficients.
@@ -106,25 +111,38 @@ class LinearConvection1D(SomaxModel):
         --------------------
         Advective scale set (:meth:`somax.Scales.advective`) with
         ``L = 1`` and the wave speed as the velocity scale, so ``T = 1``
-        and the equation reads ``d_t u + grad u = 0``. Scaling out the
-        speed leaves no free dimensionless number; the Courant number
-        is a time-step choice, not a property of the problem, so use
-        ``scales.dt_from_cfl``.
+        and the equation reads ``d_t u + c d_x u = 0`` with ``|c| = 1``.
+
+        Scaling out the *speed* leaves no free dimensionless number,
+        but it does not remove the sign: left-going and right-going
+        propagation are different problems, and only the magnitude is
+        a unit choice. The Courant number is a time-step choice rather
+        than a property of the problem, so use ``scales.dt_from_cfl``.
 
 
         Args:
             nx: Interior grid cells.
+            direction: Propagation direction; normalised to unit speed,
+                so any positive value means rightward and any negative
+                value leftward.
             **create_kw: Forwarded to :meth:`create` (``periodic``,
-                ``method``, ``mask``).
+                ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
-            to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit.
         """
+        context = "LinearConvection1D.from_nondimensional"
+        if not math.isfinite(direction) or direction == 0.0:
+            raise ValueError(
+                f"{context}: direction must be a finite non-zero number; got "
+                f"{direction!r}. Zero has no direction to normalise, and the "
+                f"equation would be trivial."
+            )
         model = LinearConvection1D.create(
             nx=nx,
             Lx=1.0,
-            c=1.0,
+            c=math.copysign(1.0, direction),
             **create_kw,
         )
         return model, Scales.advective(L=1.0, U=1.0)
@@ -150,7 +168,7 @@ class LinearConvection1D(SomaxModel):
             A ``LinearConvection1D`` model instance.
         """
         grid = CartesianGrid1D.from_interior(nx, Lx)
-        params = LinearConvection1DParams(c=jnp.array(c))
+        params = LinearConvection1DParams(c=as_parameter(c))
         diff = Difference1D(grid=grid, mask=mask)
         interp = Interpolation1D(grid=grid, mask=mask)
         return LinearConvection1D(

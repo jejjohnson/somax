@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 
+import jax.numpy as jnp
 import pytest
 
 from somax._src.cli.models_registry import (
@@ -325,3 +326,120 @@ class TestBuildSignatureIsUniform:
         assert len(sig.parameters) == 2, (
             f"{name!r}.build should take (bundle, params) — two args"
         )
+
+
+class TestSphericalAdaptersHonourTheConfig:
+    """The spherical entries dropped several configured values."""
+
+    def bundle(self, *, mask=None, g=9.81):
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        return ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+                mask=mask,
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11, g=g),
+            forcing=ForcingFields(),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+        )
+
+    def test_scenario_gravity_reaches_the_model(self):
+        built = MODELS["spherical_swm"].build(self.bundle(g=3.71), {})
+        assert float(built.model.consts.gravity) == pytest.approx(3.71)
+
+    def test_the_default_gravity_is_unchanged(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert float(built.model.consts.gravity) == pytest.approx(9.81)
+
+    def test_depth_comes_from_model_params(self):
+        """``ModelSpec.stratification`` is empty for a single layer."""
+        built = MODELS["spherical_swm"].build(self.bundle(), {"params": {"H0": 250.0}})
+        assert float(built.model.consts.H0) == pytest.approx(250.0)
+
+    def test_the_initial_state_uses_that_depth(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {"params": {"H0": 250.0}})
+        assert float(jnp.max(built.state0.h)) == pytest.approx(250.0)
+
+    def test_a_stratification_block_still_works(self):
+        built = MODELS["spherical_swm"].build(
+            self.bundle(), {"stratification": {"H0": 400.0}}
+        )
+        assert float(built.model.consts.H0) == pytest.approx(400.0)
+
+    def test_the_advection_method_is_forwarded(self):
+        built = MODELS["spherical_swm"].build(
+            self.bundle(), {"params": {"method": "upwind3"}}
+        )
+        assert built.model.method == "upwind3"
+
+    @pytest.mark.parametrize(
+        ("key", "value"), [("cg_tol", 1e-8), ("cg_max_steps", 123)]
+    )
+    def test_the_qg_solver_knobs_are_forwarded(self, key, value):
+        built = MODELS["spherical_qg"].build(self.bundle(), {"params": {key: value}})
+        assert getattr(built.model, key) == value
+
+    def test_a_raw_scenario_mask_is_converted(self):
+        """``Geometry.mask`` is a bare array; the operators want Mask2D."""
+        import numpy as np
+        from finitevolx import Mask2D
+
+        wet = np.ones((8, 16), dtype=float)
+        wet[2:4, 3:6] = 0.0
+        built = MODELS["spherical_swm"].build(self.bundle(mask=jnp.asarray(wet)), {})
+        assert isinstance(built.model.mask, Mask2D)
+
+    def test_the_converted_mask_is_ghost_padded(self):
+        import numpy as np
+
+        wet = np.ones((8, 16), dtype=float)
+        wet[2:4, 3:6] = 0.0
+        built = MODELS["spherical_swm"].build(self.bundle(mask=jnp.asarray(wet)), {})
+        assert built.model.mask.h.shape == (
+            built.model.grid.Ny,
+            built.model.grid.Nx,
+        )
+
+    def test_a_masked_model_still_evaluates(self):
+        """The failure the conversion prevents: operators read mask.u/.v."""
+        import numpy as np
+
+        from somax.models import SphericalSWMState
+
+        wet = np.ones((8, 16), dtype=float)
+        wet[2:4, 3:6] = 0.0
+        built = MODELS["spherical_swm"].build(self.bundle(mask=jnp.asarray(wet)), {})
+        model = built.model
+        tendency = model.vector_field(0.0, built.state0)
+        assert isinstance(tendency, SphericalSWMState)
+        assert np.isfinite(np.asarray(tendency.h)).all()
+
+    def test_no_mask_is_still_allowed(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert built.model.mask is None
+
+
+class TestCliStubListMatchesTheRegistry:
+    """``list-models`` has its own stub set; it must not go stale."""
+
+    def test_nothing_is_tagged_stub_any_more(self):
+        from somax._src.cli.app import _STUB_MODELS as cli_stubs
+
+        assert cli_stubs == frozenset()
+
+    def test_the_two_lists_agree(self):
+        from somax._src.cli.app import _STUB_MODELS as cli_stubs
+
+        assert set(cli_stubs) == _STUB_MODELS
