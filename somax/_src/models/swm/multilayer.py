@@ -31,6 +31,7 @@ from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_par
 from somax._src.guards import guard_finite, guard_positive
 from somax._src.models._nondim import (
     burger_to_g_prime,
+    reject_derived_kwargs,
     require_non_negative,
     require_positive,
 )
@@ -360,6 +361,23 @@ class MultilayerShallowWater2D(SomaxModel):
                 disagree in length.
         """
         context = "MultilayerShallowWater2D.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "f0",
+                "beta",
+                "n_layers",
+                "H",
+                "g_prime",
+                "stratification",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
         require_positive(context, rossby=rossby, aspect=aspect)
         require_non_negative(
             context,
@@ -386,7 +404,12 @@ class MultilayerShallowWater2D(SomaxModel):
             g_prime=g_prime,
             lateral_viscosity=ekman_lateral,
             bottom_drag=ekman,
-            wind_amplitude=wind_hat * rossby,
+            # The RHS applies the wind as tau0 * F / H[0], so the
+            # amplitude carries the top-layer thickness; without it
+            # the realised acceleration is wind_hat / H[0] whenever
+            # thickness_ratio[0] is not 1. Same convention as the
+            # layered QG factories.
+            wind_amplitude=wind_hat * rossby * thickness[0],
             **create_kw,
         )
         scales = Scales.inertial(

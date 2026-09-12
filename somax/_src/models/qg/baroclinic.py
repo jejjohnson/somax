@@ -31,6 +31,7 @@ from somax._src.core.types import (
 )
 from somax._src.models._nondim import (
     burger_to_g_prime,
+    reject_derived_kwargs,
     require_non_negative,
     require_positive,
 )
@@ -330,8 +331,31 @@ class BaroclinicQG(SomaxModel):
                 internal deformation radius.
         """
         context = "BaroclinicQG.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "f0",
+                "beta",
+                "n_layers",
+                "H",
+                "g_prime",
+                "stratification",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
         require_positive(context, rossby=rossby, beta_hat=beta_hat, aspect=aspect)
         require_non_negative(context, delta_M=delta_M, delta_S=delta_S)
+        if wind_hat is not None:
+            # Only when supplied: the default is beta_hat, already
+            # checked. Left unvalidated, a non-finite value was
+            # copied straight into wind_amplitude and produced
+            # non-finite tendencies on the first step.
+            require_non_negative(context, wind_hat=wind_hat)
         f0 = 1.0 / rossby
         g_prime = burger_to_g_prime(context, burger, thickness_ratio, f0=f0, length=1.0)
         thickness = tuple(float(h) for h in thickness_ratio)
@@ -354,7 +378,13 @@ class BaroclinicQG(SomaxModel):
             wind_amplitude=(beta_hat if wind_hat is None else wind_hat) * thickness[0],
             **create_kw,
         )
-        scales = Scales.advective(L=1.0, U=1.0, f0=f0, H=thickness[0])
+        # g is the *first interface's* reduced gravity, not standard
+        # gravity: these scales describe the nondimensional model,
+        # where the surface-mode gravity is g_prime[0]. Leaving it
+        # at 9.81 would make scales.burger disagree with burger[0]
+        # and put the thickness-anomaly scale f0 U L / g out by the
+        # ratio between them.
+        scales = Scales.advective(L=1.0, U=1.0, f0=f0, H=thickness[0], g=g_prime[0])
 
         if check_resolution:
             from somax._src.cli._assertions import (

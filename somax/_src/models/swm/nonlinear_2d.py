@@ -31,6 +31,7 @@ from somax._src.core.types import (
     as_parameter,
 )
 from somax._src.models._nondim import (
+    reject_derived_kwargs,
     require_non_negative,
     require_positive,
     resolve_burger,
@@ -333,6 +334,21 @@ class NonlinearShallowWater2D(SomaxModel):
                 both of ``burger`` and ``froude`` is given.
         """
         context = "NonlinearShallowWater2D.from_nondimensional"
+        reject_derived_kwargs(
+            context,
+            (
+                "Lx",
+                "Ly",
+                "g",
+                "f0",
+                "beta",
+                "H0",
+                "lateral_viscosity",
+                "bottom_drag",
+                "wind_amplitude",
+            ),
+            **create_kw,
+        )
         require_positive(context, rossby=rossby, aspect=aspect)
         require_non_negative(
             context,

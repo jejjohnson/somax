@@ -134,6 +134,9 @@ def check_deformation_radius(
     ``L_d/dx < n_cells_min``; WARN when ``n_cells_min <= L_d/dx <
     n_cells_warn``.
 
+    ``dx`` here is the coarser of the two spacings, since a deformation
+    radius is isotropic and must be spanned in both directions.
+
     Requires a stratified model exposing ``model.strat.g_prime`` /
     ``model.strat.H`` and ``model.consts.f0`` (multilayer SWM, baroclinic /
     reparameterized QG). Raises for models without that structure so a typo'd
@@ -198,7 +201,12 @@ def check_deformation_radius(
         internal = radii[1:] if radii.shape[0] > 1 else radii
         Ld = float(np.min(internal))
         source = "sqrt(g'H)/f0 estimate"
-    dx_min = float(min(grid.dx, grid.dy))
+    # The *coarser* spacing: a deformation radius is an isotropic
+    # length, so it has to be resolved in both directions, and taking
+    # the finer one would pass an anisotropic grid that resolves it
+    # along only one axis. (The Munk and Stommel guards take dx
+    # instead — those layers are normal to the western wall.)
+    dx_min = float(max(grid.dx, grid.dy))
     ratio = Ld / dx_min
     if ratio < n_cells_min:
         raise AssertionFailedError(
