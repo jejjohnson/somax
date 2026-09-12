@@ -219,11 +219,58 @@ def _attrs_for(spec: RunSpec, *, mode: str) -> dict[str, Any]:
         "somax_sim_mode": mode,
         "scenario_name": spec.scenario.name,
         "model_name": spec.model.name,
+        # Which coordinates the state is in. The state *class* is the
+        # same either way, so without this a restart cannot tell a
+        # dimensional q ~ U/L from a dimensionless one and would
+        # advance the raw values in the wrong units.
+        "somax_coordinates": "nondimensional" if spec.scenario.nondim else "si",
         "t0": float(spec.timestepping.t0),
         "t1": float(spec.timestepping.t1),
         "dt": float(spec.timestepping.dt),
         "save_interval": float(spec.timestepping.save_interval),
     }
+
+
+def _require_matching_coordinates(spec: RunSpec, ds: Any, restart_path: Any) -> None:
+    """Refuse a restart that crosses dimensional coordinate systems.
+
+    The state class is the same on both sides — a nondimensional
+    ``barotropic_qg`` run still produces a ``BarotropicQGState`` — so
+    the class check above passes and the raw values are then advanced
+    in the target model's units. A dimensional ``q ~ U/L`` read as
+    dimensionless vorticity is off by the vorticity scale, silently.
+
+    An artifact written before this attr existed carries no marker.
+    That is reported rather than guessed at: continuing would be the
+    same gamble, and the fix — re-export, or state the units — is
+    cheap.
+
+    Args:
+        spec: The target run spec.
+        ds: The restart artifact's dataset.
+        restart_path: For the error message.
+
+    Raises:
+        ValueError: If the artifact's coordinates differ from the
+            target's, or are unknown.
+    """
+    wanted = "nondimensional" if spec.scenario.nondim else "si"
+    found = ds.attrs.get("somax_coordinates")
+    if found is None:
+        raise ValueError(
+            f"restart artifact at {restart_path} does not record which "
+            f"coordinate system it is in, and this run is {wanted}. It "
+            f"predates that marker; re-export it from a current run, or "
+            f"set somax_coordinates on the dataset if you know the units."
+        )
+    if found != wanted:
+        raise ValueError(
+            f"restart artifact at {restart_path} holds {found} state but "
+            f"this run is {wanted}. The state class is the same either "
+            f"way, so the values would be advanced in the wrong units "
+            f"rather than failing. Restart from a matching artifact, or "
+            f"convert it with a StateAffine built from the run's Scales."
+        )
 
 
 # ----------------------------------------------------------------------
@@ -708,6 +755,7 @@ class _ChunkStep(StatefulOperator):
         checkpoint_label: str | None,
         monitors: list[Monitor],
         units: dict[str, str] | None = None,
+        coordinates: str = "si",
     ) -> None:
         self.model = model
         self.state_class = state_class
@@ -723,6 +771,7 @@ class _ChunkStep(StatefulOperator):
         self.checkpoint_label = checkpoint_label
         self.monitors = monitors
         self.units = units
+        self.coordinates = coordinates
 
     def _apply(self, state: Any, carry: _ChunkCarry) -> tuple[Any, _ChunkCarry]:
         log = self.run_log.log
@@ -835,6 +884,10 @@ class _ChunkStep(StatefulOperator):
                 ckpt_attrs: dict[str, Any] = {
                     "somax_sim_t": float(chunk_t1),
                     "somax_snapshot_ordinal": int(snapshot_ordinal),
+                    # Same marker the final-state artifacts carry: a
+                    # checkpoint is a restart source too, and the state
+                    # class alone cannot say which units it is in.
+                    "somax_coordinates": self.coordinates,
                 }
                 if self.checkpoint_label:
                     ckpt_attrs["somax_checkpoint_of"] = str(self.checkpoint_label)
@@ -966,6 +1019,7 @@ def _chunked_integrate_with_diagnostics(
         checkpoint_label=checkpoint_label,
         monitors=active_monitors,
         units=units,
+        coordinates="nondimensional" if spec.scenario.nondim else "si",
     )
     carry0 = _ChunkCarry(
         index=0,
@@ -1353,6 +1407,7 @@ def restart(
             f"a final_state.zarr written by a compatible run."
         )
 
+    _require_matching_coordinates(spec, ds, restart_path)
     spec = _maybe_override_t0_from_checkpoint(spec, ds)
 
     return _integrate_and_write(

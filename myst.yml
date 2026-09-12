@@ -18,6 +18,7 @@ project:
         - file: content/notes/basin_data_sources
         - file: content/notes/ecosystem_refactor_plan
         - file: content/notes/forcing_basis
+        - file: content/notes/nondimensional_runs
     - title: "Foundations (Phase 0)"
       children:
         - file: content/tutorials/arakawa_cgrid.ipynb

@@ -699,3 +699,158 @@ class TestDaAdaptersConsumeTransformedVectors:
         )
         out = forward.step(flat, 0.5)
         np.testing.assert_allclose(np.asarray(out), np.asarray(flat), atol=1e-5)
+
+
+class TestRestartsCannotCrossCoordinateSystems:
+    """The state class is the same in both, so it cannot tell them apart.
+
+    A nondimensional ``barotropic_qg`` run produces a
+    ``BarotropicQGState`` exactly as the dimensional one does, so the
+    existing class check passes and the raw ``q`` values are advanced
+    in the target model's units — a dimensional ``q ~ U/L`` read as
+    dimensionless vorticity, silently.
+    """
+
+    def spec(self, nondim):
+        from somax._src.cli.spec import RunSpec
+
+        scenario = {
+            "name": "double_gyre",
+            "grid": {"nx": 64, "ny": 64, "Lx": 1.0, "Ly": 1.0},
+            "forcing": {},
+            "initial_condition": {"type": "at_rest"},
+        }
+        if nondim:
+            scenario["nondim"] = {
+                "rossby": 0.02,
+                "beta_hat": 50.0,
+                "munk": 0.05,
+            }
+        else:
+            scenario["grid"] = {"nx": 64, "ny": 64, "Lx": 1e6, "Ly": 1e6}
+            scenario["consts"] = {"f0": 1e-4, "beta": 1.6e-11}
+        return RunSpec.from_dict(
+            {
+                "scenario": scenario,
+                "model": {"name": "barotropic_qg"},
+                "timestepping": {
+                    "t0": 0.0,
+                    "t1": 1.0,
+                    "dt": 1e-3,
+                    "save_interval": 1.0,
+                },
+            }
+        )
+
+    def dataset(self, coordinates):
+        import xarray as xr
+
+        ds = xr.Dataset(
+            {"q": (("y", "x"), np.zeros((4, 4)))},
+            attrs={
+                "state_class": "BarotropicQGState",
+                "state_module": "somax._src.models.qg.barotropic",
+            },
+        )
+        if coordinates is not None:
+            ds.attrs["somax_coordinates"] = coordinates
+        return ds
+
+    def check(self, spec_nondim, artifact_coordinates):
+        from somax._src.cli._run import _require_matching_coordinates
+
+        _require_matching_coordinates(
+            self.spec(spec_nondim), self.dataset(artifact_coordinates), "x.zarr"
+        )
+
+    def test_a_dimensional_artifact_into_a_nondimensional_run_is_rejected(self):
+        with pytest.raises(ValueError, match="holds si state"):
+            self.check(spec_nondim=True, artifact_coordinates="si")
+
+    def test_a_nondimensional_artifact_into_a_dimensional_run_is_rejected(self):
+        with pytest.raises(ValueError, match="holds nondimensional state"):
+            self.check(spec_nondim=False, artifact_coordinates="nondimensional")
+
+    def test_an_unmarked_artifact_is_rejected_rather_than_guessed(self):
+        with pytest.raises(ValueError, match="does not record"):
+            self.check(spec_nondim=False, artifact_coordinates=None)
+
+    def test_matching_coordinates_are_accepted(self):
+        self.check(spec_nondim=False, artifact_coordinates="si")
+        self.check(spec_nondim=True, artifact_coordinates="nondimensional")
+
+    def test_the_marker_is_written_for_a_dimensional_run(self):
+        from somax._src.cli._run import _attrs_for
+
+        attrs = _attrs_for(self.spec(nondim=False), mode="run")
+        assert attrs["somax_coordinates"] == "si"
+
+    def test_the_marker_is_written_for_a_nondimensional_run(self):
+        from somax._src.cli._run import _attrs_for
+
+        attrs = _attrs_for(self.spec(nondim=True), mode="run")
+        assert attrs["somax_coordinates"] == "nondimensional"
+
+
+class TestGeneratedConfigIsTracked:
+    """DVC only checks declared outputs.
+
+    An undeclared generated file can drift or be deleted without
+    invalidating the stage, so ``dvc repro build-configs`` skips the
+    command instead of restoring it.
+    """
+
+    def stage_outputs(self):
+        from pathlib import Path
+
+        import yaml
+
+        root = Path(__file__).resolve().parents[1]
+        dvc = yaml.safe_load((root / "dvc.yaml").read_text())
+        outs = dvc["stages"]["build-configs"]["outs"]
+        names = []
+        for entry in outs:
+            names.extend(entry if isinstance(entry, str) else entry.keys())
+        return names
+
+    def test_the_nondimensional_config_is_declared(self):
+        assert "configs/simulation/doublegyre_bt_qg_nondim.yaml" in self.stage_outputs()
+
+    def test_every_generated_config_is_declared(self):
+        from pathlib import Path
+
+        import scripts.build_configs as build
+
+        declared = set(self.stage_outputs())
+        root = Path(__file__).resolve().parents[1]
+        for name in build.CONFIGS:
+            path = f"configs/simulation/{name}.yaml"
+            assert path in declared, f"{path} is generated but not a DVC output"
+            assert (root / path).exists()
+
+
+class TestTheGuideIsInTheTableOfContents:
+    """It is the only page describing the CLI, DA and export workflow."""
+
+    def toc_files(self):
+        from pathlib import Path
+
+        import yaml
+
+        root = Path(__file__).resolve().parents[1]
+        myst = yaml.safe_load((root / "myst.yml").read_text())
+
+        found = []
+
+        def walk(entries):
+            for entry in entries:
+                if "file" in entry:
+                    found.append(entry["file"])
+                for child in entry.get("children", []):
+                    walk([child])
+
+        walk(myst["project"]["toc"])
+        return found
+
+    def test_the_nondimensional_guide_is_listed(self):
+        assert "content/notes/nondimensional_runs" in self.toc_files()
