@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import CartesianGrid1D, Difference1D, Interpolation1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class LinearConvection1DParams(Params):
@@ -29,6 +31,9 @@ class LinearConvection1DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class LinearConvection1DDiagnostics(Diagnostics):
@@ -112,7 +117,7 @@ class LinearConvection1D(SomaxModel):
             A ``LinearConvection1D`` model instance.
         """
         grid = CartesianGrid1D.from_interior(nx, Lx)
-        params = LinearConvection1DParams(c=jnp.array(c))
+        params = LinearConvection1DParams(c=as_parameter(c))
         diff = Difference1D(grid=grid, mask=mask)
         interp = Interpolation1D(grid=grid, mask=mask)
         return LinearConvection1D(

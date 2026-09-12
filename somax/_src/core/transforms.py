@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import warnings
 from collections.abc import Callable
 from typing import Any
 
 import equinox as eqx
+import jax
+import jax.core
 import jax.numpy as jnp
 import jax.tree_util as jtu
+import numpy as np
 from finitevolx import build_coupling_matrix, decompose_vertical_modes
 from jaxtyping import Array, Float, PyTree
 
@@ -236,29 +240,60 @@ class ModalTransform(eqx.Module):
 # Affine state transforms (non-dimensionalisation and standardisation)
 # ----------------------------------------------------------------------
 
-#: Per-field ``(loc, scale)`` rules used by :meth:`StateAffine.from_scales`,
-#: keyed by ``State`` field name. Each entry maps a ``Scales`` to the pair
-#: that non-dimensionalises that field. Models may extend this mapping for
-#: state fields of their own.
-FIELD_SCALE_RULES: dict[str, Callable[[Scales], tuple[float, float]]] = {
-    "u": lambda s: (0.0, s.U),
-    "v": lambda s: (0.0, s.U),
-    "w": lambda s: (0.0, s.U),
-    "h": lambda s: (s.H, s.eta),
-    "eta": lambda s: (0.0, s.eta),
-    "q": lambda s: (0.0, s.vorticity),
-    "psi": lambda s: (0.0, s.streamfunction),
-    "zeta": lambda s: (0.0, s.vorticity),
+#: ``(loc, scale)`` rule per *semantic kind* of field. A kind says what
+#: a field means physically — which is what fixes its scaling — rather
+#: than what it happens to be called.
+SCALE_KIND_RULES: dict[str, Callable[[Scales], tuple[float, float]]] = {
+    "velocity": lambda s: (0.0, s.U),
+    "thickness": lambda s: (s.H, s.eta),
+    "height_anomaly": lambda s: (0.0, s.eta),
+    "vorticity": lambda s: (0.0, s.vorticity),
+    "streamfunction": lambda s: (0.0, s.streamfunction),
 }
 
-#: Staggering location of each known state field, used to pick the right
-#: C-grid mask in :meth:`StateAffine.from_samples`.
-FIELD_MASK_LOCATION: dict[str, str] = {
+#: Fallback kind per field *name*, for a state that declares nothing.
+#: A name is only a hint: ``h`` is a total thickness in the nonlinear
+#: shallow-water models but a height anomaly in the linear ones, and
+#: ``u`` is a C-grid velocity in the ocean models but a T-point scalar
+#: in the pde family. A state whose fields depart from these defaults
+#: says so with :attr:`~somax._src.core.types.State.scale_kinds`, which
+#: is consulted first.
+DEFAULT_FIELD_KINDS: dict[str, str] = {
+    "u": "velocity",
+    "v": "velocity",
+    "w": "velocity",
+    "h": "thickness",
+    "eta": "height_anomaly",
+    "q": "vorticity",
+    "zeta": "vorticity",
+    "omega": "vorticity",
+    "psi": "streamfunction",
+}
+
+#: Fallback C-grid staggering per field *name*, same caveat as above;
+#: :attr:`~somax._src.core.types.State.mask_locations` wins.
+DEFAULT_FIELD_MASK_LOCATION: dict[str, str] = {
     "u": "u",
     "v": "v",
     "q": "xy_corner",
     "zeta": "xy_corner",
 }
+
+
+def _field_kind(state_cls: type, name: str) -> str | None:
+    """Semantic kind of ``state_cls.name``, or ``None`` if unknown."""
+    declared = getattr(state_cls, "scale_kinds", {})
+    if name in declared:
+        return declared[name]
+    return DEFAULT_FIELD_KINDS.get(name)
+
+
+def _mask_location(state_cls: type | None, name: str) -> str:
+    """C-grid location of ``state_cls.name``; T-points if unknown."""
+    declared = getattr(state_cls, "mask_locations", {}) if state_cls else {}
+    if name in declared:
+        return declared[name]
+    return DEFAULT_FIELD_MASK_LOCATION.get(name, "h")
 
 
 class StateAffine(eqx.Module):
@@ -371,11 +406,12 @@ class StateAffine(eqx.Module):
     ) -> StateAffine:
         """Build the physical non-dimensionalising transform for a state type.
 
-        Each field of ``state_cls`` is looked up in
-        :data:`FIELD_SCALE_RULES`; a field with no rule gets the
-        identity ``(0, 1)`` and a warning, since silently leaving a
-        field dimensional is the kind of thing that produces a
-        plausible-looking wrong answer.
+        Each field of ``state_cls`` is resolved to a semantic kind —
+        ``state_cls.scale_kinds`` first, then :data:`DEFAULT_FIELD_KINDS`
+        — and scaled by the matching entry of :data:`SCALE_KIND_RULES`.
+        A field with no kind gets the identity ``(0, 1)`` and a
+        warning, since silently leaving a field dimensional is the kind
+        of thing that produces a plausible-looking wrong answer.
 
         Args:
             state_cls: The ``State`` subclass to build the transform
@@ -413,8 +449,8 @@ class StateAffine(eqx.Module):
         for name in fields:
             if name in per_field:
                 loc, scale = _parse_override(name, per_field[name])
-            elif name in FIELD_SCALE_RULES:
-                loc, scale = FIELD_SCALE_RULES[name](scales)
+            elif (kind := _field_kind(state_cls, name)) in SCALE_KIND_RULES:
+                loc, scale = SCALE_KIND_RULES[kind](scales)
             else:
                 loc, scale = 0.0, 1.0
                 undescribed.append(name)
@@ -426,7 +462,7 @@ class StateAffine(eqx.Module):
                 f"StateAffine.from_scales: no scale rule for field(s) "
                 f"{sorted(undescribed)} of {state_cls.__name__}; they are left "
                 "dimensional (loc=0, scale=1). Pass an explicit override, or "
-                "register a rule in FIELD_SCALE_RULES.",
+                "declare its kind in the state's scale_kinds.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -459,8 +495,14 @@ class StateAffine(eqx.Module):
                 are excluded from the statistics and are given the
                 identity ``(0, 1)``, so masked fields round-trip
                 unchanged and land sentinels cannot contaminate wet
-                cells. The C-grid location is chosen per field via
-                :data:`FIELD_MASK_LOCATION`.
+                cells. The C-grid location is taken from the state's
+                :attr:`~somax._src.core.types.State.mask_locations`,
+                falling back to :data:`DEFAULT_FIELD_MASK_LOCATION`.
+
+                With ``per_gridpoint=False`` the wet-cell statistics
+                are still a single number per field, but they are
+                broadcast back over the grid so that dry cells keep
+                the identity ``(0, 1)``.
 
         Returns:
             A ``StateAffine`` whose ``loc``/``scale`` share the state's
@@ -468,11 +510,24 @@ class StateAffine(eqx.Module):
         """
         names = _leaf_field_names(states)
 
+        state_cls = type(states)
+
         def moments(name: str, samples: Array) -> tuple[Array, Array]:
-            wet = _field_mask(mask, name, samples, per_gridpoint=per_gridpoint)
+            wet = _field_mask(mask, name, samples, state_cls=state_cls)
             axis: int | tuple[int, ...]
             axis = 0 if per_gridpoint else tuple(range(jnp.ndim(samples)))
-            return _masked_moments(samples, wet, axis=axis, eps=eps)
+            mean, std = _masked_moments(samples, wet, axis=axis, eps=eps)
+            if wet is None or per_gridpoint:
+                return mean, std
+            # Fieldwise reduction collapses to a scalar, which would
+            # hand a dry cell the wet cells' statistics and so move its
+            # land sentinel and count it in the log-determinant.
+            # Broadcast back over the grid, identity on land.
+            dry_safe = wet[0] if jnp.ndim(wet) == jnp.ndim(samples) else wet
+            return (
+                jnp.where(dry_safe, mean, 0.0),
+                jnp.where(dry_safe, std, 1.0),
+            )
 
         pairs = _tree_map_with_names(moments, states, names)
         return cls(
@@ -510,14 +565,19 @@ class StateAffine(eqx.Module):
 
 
 def _state_field_names(state_cls: type) -> tuple[str, ...]:
-    """Dataclass field names of an equinox ``Module`` subclass."""
-    fields = getattr(state_cls, "__dataclass_fields__", None)
-    if not fields:
+    """Dataclass field names of an equinox ``Module`` subclass.
+
+    ``dataclasses.fields`` rather than ``__dataclass_fields__``: the
+    latter also lists ``ClassVar`` pseudo-fields, which is how a state
+    declares its ``scale_kinds`` and ``mask_locations``, and those are
+    metadata about the state rather than part of it.
+    """
+    if not getattr(state_cls, "__dataclass_fields__", None):
         raise TypeError(
             f"StateAffine.from_scales: {state_cls!r} is not an equinox Module "
             "with dataclass fields."
         )
-    return tuple(fields)
+    return tuple(field.name for field in dataclasses.fields(state_cls))
 
 
 def _leaf_field_names(state: PyTree) -> list[str]:
@@ -526,11 +586,10 @@ def _leaf_field_names(state: PyTree) -> list[str]:
     Falls back to empty names for pytrees that are not modules, which
     simply means no mask location is inferred for those leaves.
     """
-    fields = getattr(type(state), "__dataclass_fields__", None)
-    if not fields:
+    if not getattr(type(state), "__dataclass_fields__", None):
         return [""] * len(jtu.tree_leaves(state))
     names = []
-    for name in fields:
+    for name in _state_field_names(type(state)):
         value = getattr(state, name)
         names.extend([name] * len(jtu.tree_leaves(value)))
     return names
@@ -572,11 +631,26 @@ def _parse_override(
 
 
 def _check_nonzero_scales(scales: dict[str, Any]) -> None:
-    """Reject a zero scale, which would make the transform non-invertible."""
+    """Reject a zero scale, which would make the transform non-invertible.
+
+    Every entry is checked, not just scalars: the per-layer
+    ``(nl, 1, 1)`` and per-gridpoint overrides are the whole point of
+    allowing arrays here, and one zero among them divides by zero in
+    :meth:`StateAffine.forward` and sends the log-determinant to
+    infinity just as surely as a scalar zero would.
+
+    Traced values are skipped — there is nothing to test at trace time,
+    and raising on a tracer would make the constructor unusable inside
+    ``jit``.
+    """
     for name, value in scales.items():
-        if jnp.ndim(value) == 0 and float(value) == 0.0:
+        array = jnp.asarray(value)
+        if isinstance(array, jax.core.Tracer):  # pragma: no cover - jit only
+            continue
+        if bool(np.any(np.asarray(array) == 0.0)):
+            where = "is zero" if array.ndim == 0 else "has a zero entry"
             raise ValueError(
-                f"StateAffine.from_scales: scale for {name!r} is zero, so the "
+                f"StateAffine.from_scales: scale for {name!r} {where}, so the "
                 "transform would not be invertible."
             )
 
@@ -586,13 +660,12 @@ def _field_mask(
     name: str,
     samples: Array,
     *,
-    per_gridpoint: bool,
+    state_cls: type | None = None,
 ) -> Array | None:
     """Boolean wet-cell array for one field, broadcast against ``samples``."""
-    del per_gridpoint
     if mask is None:
         return None
-    location = FIELD_MASK_LOCATION.get(name, "h")
+    location = _mask_location(state_cls, name)
     wet = getattr(mask, location, None)
     if wet is None:  # pragma: no cover - defensive, masks carry these fields
         wet = mask.h
