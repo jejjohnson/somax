@@ -352,9 +352,12 @@ class TestCflAccountsForEveryAxis:
             scales.dt_from_cfl(0.5, 100) / 2
         )
 
-    def test_the_advective_bound_uses_the_smallest_spacing(self):
+    def test_the_advective_bound_is_dominated_by_the_smallest_spacing(self):
+        """But not equal to it — every axis contributes to the sum."""
         scales = Scales.advective(L=1.0, U=1.0)
-        assert scales.dt_from_cfl(0.5, (10, 100)) == pytest.approx(0.5 / 100)
+        got = scales.dt_from_cfl(0.5, (10, 100))
+        assert got == pytest.approx(0.5 / np.sqrt(10.0**2 + 100.0**2))
+        assert got < 0.5 / 100
 
     def test_extent_must_match_the_axes(self):
         scales = Scales.advective(L=1.0, U=1.0)
@@ -507,3 +510,85 @@ class TestDocumentedKwargsAreAccepted:
             f"{name} advertises {sorted(documented - accepted)}, which "
             f"create() does not accept"
         )
+
+
+class TestAdvectiveBoundAccountsForDirection:
+    """Courant is ``dt * sum_i |c_i|/dx_i``, not ``dt * |c|/min(dx)``.
+
+    On a square grid the default diagonal convection direction has
+    ``cx = cy = 1/sqrt(2)``, so a step taken from the minimum spacing
+    alone overshoots the requested Courant number by ``sqrt(2)``.
+    """
+
+    def scales(self):
+        return Scales.advective(L=1.0, U=1.0)
+
+    def courant(self, dt, spacings, components):
+        return dt * sum(abs(c) / s for c, s in zip(components, spacings, strict=True))
+
+    def test_the_default_diagonal_no_longer_overshoots(self):
+        dt = self.scales().dt_from_cfl(0.5, (100, 100))
+        unit = 1.0 / np.sqrt(2.0)
+        got = self.courant(dt, (0.01, 0.01), (unit, unit))
+        assert got == pytest.approx(0.5, rel=1e-6)
+
+    def test_the_old_formula_really_did_overshoot(self):
+        """Otherwise the test above would pass for the wrong reason."""
+        unit = 1.0 / np.sqrt(2.0)
+        naive_dt = 0.5 * 0.01  # C * min(dx) / |c|, with |c| = 1
+        got = self.courant(naive_dt, (0.01, 0.01), (unit, unit))
+        assert got == pytest.approx(0.5 * np.sqrt(2.0), rel=1e-6)
+
+    def test_an_axis_aligned_direction_gets_the_exact_bound(self):
+        dt = self.scales().dt_from_cfl(0.5, (100, 100), direction=(1.0, 0.0))
+        assert dt == pytest.approx(0.5 / 100)
+        assert self.courant(dt, (0.01, 0.01), (1.0, 0.0)) == pytest.approx(0.5)
+
+    def test_a_known_direction_is_never_more_restrictive_than_the_default(self):
+        scales = self.scales()
+        default = scales.dt_from_cfl(0.5, (100, 100))
+        for direction in ((1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (3.0, 4.0)):
+            assert scales.dt_from_cfl(0.5, (100, 100), direction=direction) >= default
+
+    def test_the_direction_magnitude_does_not_matter(self):
+        scales = self.scales()
+        one = scales.dt_from_cfl(0.5, (100, 100), direction=(1.0, 2.0))
+        ten = scales.dt_from_cfl(0.5, (100, 100), direction=(10.0, 20.0))
+        assert one == pytest.approx(ten)
+
+    def test_a_negative_component_behaves_like_its_magnitude(self):
+        scales = self.scales()
+        assert scales.dt_from_cfl(
+            0.5, (100, 100), direction=(-1.0, 0.0)
+        ) == pytest.approx(scales.dt_from_cfl(0.5, (100, 100), direction=(1.0, 0.0)))
+
+    def test_the_one_dimensional_bound_is_unchanged(self):
+        assert self.scales().dt_from_cfl(0.5, 100) == pytest.approx(0.5 / 100)
+
+    def test_a_mismatched_direction_is_rejected(self):
+        with pytest.raises(ValueError, match="direction names"):
+            self.scales().dt_from_cfl(0.5, (10, 10), direction=(1.0,))
+
+    def test_the_zero_vector_is_rejected(self):
+        with pytest.raises(ValueError, match="zero vector"):
+            self.scales().dt_from_cfl(0.5, (10, 10), direction=(0.0, 0.0))
+
+    def test_a_non_finite_direction_is_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            self.scales().dt_from_cfl(0.5, (10, 10), direction=(float("nan"), 1.0))
+
+    def test_the_diffusive_bound_ignores_direction(self):
+        """Diffusion is isotropic, so a direction says nothing about it."""
+        scales = Scales.diffusive(L=1.0, kappa=1.0)
+        assert scales.dt_from_cfl(0.5, (50, 50)) == pytest.approx(
+            scales.dt_from_cfl(0.5, (50, 50), direction=(1.0, 0.0))
+        )
+
+    def test_the_convection_factory_direction_can_be_reused(self):
+        """The factory and the step helper speak the same language."""
+        model, scales = LinearConvection2D.from_nondimensional(
+            nx=64, ny=64, direction=(1.0, 0.0)
+        )
+        dt = scales.dt_from_cfl(0.4, (64, 64), direction=(1.0, 0.0))
+        assert dt == pytest.approx(0.4 / 64)
+        assert float(model.params.cy) == pytest.approx(0.0)

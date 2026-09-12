@@ -290,9 +290,19 @@ class TestNonFiniteInitialValues:
             with pytest.raises(ValueError, match="strictly positive"):
                 positive(bad)
 
-    def test_infinity_has_no_usable_pre_image(self):
-        """+inf passes ``> 0`` but its softplus pre-image is not finite."""
-        assert not np.isfinite(float(positive(jnp.inf).args[0]))
+    def test_infinity_is_rejected(self):
+        """+inf passes ``> 0``, but its softplus pre-image is not finite.
+
+        Storing it would unwrap back to ``inf`` — an overflowed
+        calibration value reaching the integration rather than the
+        error the docstring promises.
+        """
+        with pytest.raises(ValueError, match="finite"):
+            positive(jnp.inf)
+
+    def test_infinity_in_an_array_is_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            positive(jnp.asarray([1.0, jnp.inf]))
 
     def test_interval_rejects_nan(self):
         with pytest.raises(ValueError, match="strictly inside"):
@@ -520,3 +530,105 @@ class TestTrainableMask:
         state = masked.init(params)
         updates, _ = masked.update(grads, state, params)
         assert float(updates.params.bottom_drag.tree) == 0.0
+
+
+class TestIntervalBoundsMustBeFinite:
+    """A semi-infinite interval has no logit.
+
+    ``interval(0.5, 0.0, inf)`` passes the ordering test, but ``scaled``
+    collapses to zero, the stored raw value becomes ``-inf``, and
+    unwrapping evaluates ``inf * sigmoid(-inf)`` — NaN.
+    """
+
+    @pytest.mark.parametrize(
+        ("lower", "upper"),
+        [(0.0, float("inf")), (float("-inf"), 1.0), (float("-inf"), float("inf"))],
+    )
+    def test_an_infinite_bound_is_rejected(self, lower, upper):
+        with pytest.raises(ValueError, match="bounds must be finite"):
+            interval(0.5, lower, upper)
+
+    def test_a_nan_bound_is_rejected(self):
+        with pytest.raises(ValueError, match="bounds must be finite"):
+            interval(0.5, 0.0, float("nan"))
+
+    def test_finite_bounds_still_work(self):
+        assert float(paramax.unwrap(interval(0.5, 0.0, 1.0))) == pytest.approx(0.5)
+
+    def test_the_error_points_at_positive(self):
+        """A one-sided lower bound is what ``positive`` is for."""
+        with pytest.raises(ValueError, match="positive"):
+            interval(0.5, 0.0, float("inf"))
+
+
+class TestTermModelFactoriesAcceptConstrainedValues:
+    """The term-model factories were missed by the earlier fix.
+
+    They convert with ``jnp.asarray`` outside a ``Params``
+    construction, so a repo-wide search for ``*Params(`` did not reach
+    them and they still raised on a wrapper.
+    """
+
+    def test_burgers_term_model_create(self):
+        from somax._src.models.pde2d.burgers_terms import Burgers2DTermModel
+
+        model = Burgers2DTermModel.create(nx=16, ny=16, nu=positive(0.05))
+        assert model is not None
+
+    def test_burgers_term_model_from_model(self):
+        from somax._src.models.pde2d.burgers import Burgers2D
+        from somax._src.models.pde2d.burgers_terms import Burgers2DTermModel
+
+        plain = Burgers2D.create(nx=16, ny=16, nu=positive(0.05))
+        assert Burgers2DTermModel.from_model(plain) is not None
+
+    def test_the_imex_split_survives_a_wrapper(self):
+        import diffrax as dfx
+
+        from somax._src.models.pde2d.burgers_terms import Burgers2DTermModel
+
+        model = Burgers2DTermModel.create(nx=16, ny=16, nu=positive(0.05), imex=True)
+        assert isinstance(model.build_terms(), dfx.MultiTerm)
+
+    def test_linear_swm_term_model_from_model(self):
+        from somax._src.models.swm.linear_2d import LinearShallowWater2D
+        from somax._src.models.swm.linear_swm_terms import LinearSWM2DTermModel
+
+        plain = LinearShallowWater2D.create(
+            nx=16, ny=16, lateral_viscosity=positive(10.0)
+        )
+        assert LinearSWM2DTermModel.from_model(plain) is not None
+
+    def test_the_wrapped_model_evaluates(self):
+        from somax._src.models.pde2d.burgers import Burgers2DState
+        from somax._src.models.pde2d.burgers_terms import Burgers2DTermModel
+
+        model = Burgers2DTermModel.create(nx=16, ny=16, nu=positive(0.05))
+        shape = (model.grid.Ny, model.grid.Nx)
+        rng = np.random.RandomState(0)
+        state = Burgers2DState(
+            u=jnp.asarray(rng.randn(*shape)), v=jnp.asarray(rng.randn(*shape))
+        )
+        out = model.build_terms().vector_field(0.0, state, None)
+        assert np.isfinite(np.asarray(out.u)).all()
+
+    def test_it_matches_the_plain_equivalent(self):
+        from somax._src.models.pde2d.burgers import Burgers2DState
+        from somax._src.models.pde2d.burgers_terms import Burgers2DTermModel
+
+        outs = []
+        for nu in (0.05, positive(0.05)):
+            model = Burgers2DTermModel.create(nx=16, ny=16, nu=nu)
+            shape = (model.grid.Ny, model.grid.Nx)
+            rng = np.random.RandomState(0)
+            state = Burgers2DState(
+                u=jnp.asarray(rng.randn(*shape)), v=jnp.asarray(rng.randn(*shape))
+            )
+            outs.append(
+                np.asarray(model.build_terms().vector_field(0.0, state, None).u)
+            )
+        # Against the field magnitude, not pointwise: ``positive(0.05)``
+        # stores an inverse-softplus and unwraps back through softplus,
+        # which round-trips to ~1e-8 relative in float32 — enough to
+        # read as 1e-5 in a cell where the tendency nearly cancels.
+        assert np.abs(outs[0] - outs[1]).max() < 1e-5 * np.abs(outs[0]).max()

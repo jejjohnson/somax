@@ -39,10 +39,10 @@ from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 import numpy as np
-from loguru import logger
 
 from somax._src.core.resolution import (
     AssertionFailedError,
+    check_deformation_radius,
     check_munk_width,
     check_stommel_width,
 )
@@ -155,115 +155,6 @@ def _min_cell_width(grid: Any, check: str) -> float:
         f"{check}: grid {type(grid).__name__!r} exposes neither dx/dy nor a "
         f"spherical metric; cannot determine the cell width."
     )
-
-
-def check_deformation_radius(
-    spec: RunSpec,
-    model: Any,
-    *,
-    n_cells_min: float = 2.0,
-    n_cells_warn: float = 4.0,
-) -> None:
-    """Pre-flight: the first baroclinic deformation radius is resolved.
-
-    Resolving the first internal deformation radius ``L_d = sqrt(g'H)/f0``
-    with at least ``n_cells_min`` grid cells is necessary for baroclinic
-    instability and mesoscale eddies (Hallberg 2013). FAIL when
-    ``L_d/dx < n_cells_min``; WARN when ``n_cells_min <= L_d/dx <
-    n_cells_warn``.
-
-    ``dx`` here is the coarser of the two spacings, since a deformation
-    radius is isotropic and must be spanned in both directions.
-
-    Requires a stratified model exposing ``model.strat.g_prime`` /
-    ``model.strat.H`` and ``model.consts.f0`` (multilayer SWM, baroclinic /
-    reparameterized QG). Raises for models without that structure so a typo'd
-    config doesn't silently skip the check.
-
-    Args:
-        spec: The validated RunSpec (unused; present for signature symmetry).
-        model: The constructed model instance.
-        n_cells_min: Minimum ``L_d/dx`` below which to FAIL. Defaults to 2.0.
-        n_cells_warn: ``L_d/dx`` below which to WARN. Defaults to 4.0.
-
-    Raises:
-        AssertionFailedError: If the model lacks stratification/Coriolis, or
-            if ``L_d/dx < n_cells_min``.
-    """
-    strat = getattr(model, "strat", None)
-    consts = getattr(model, "consts", None)
-    grid = getattr(model, "grid", None)
-    if strat is None or grid is None or consts is None:
-        raise AssertionFailedError(
-            f"deformation_radius: model {type(model).__name__!r} lacks "
-            f"strat/consts/grid; this check applies to stratified models "
-            f"(multilayer SWM, baroclinic/reparameterized QG)."
-        )
-    g_prime = getattr(strat, "g_prime", None)
-    H = getattr(strat, "H", None)
-    f0 = getattr(consts, "f0", None)
-    if g_prime is None or H is None or f0 is None:
-        raise AssertionFailedError(
-            f"deformation_radius: model {type(model).__name__!r} does not "
-            f"expose strat.g_prime / strat.H / consts.f0; cannot compute L_d."
-        )
-    f0_abs = abs(float(f0))
-    if f0_abs == 0.0:
-        raise AssertionFailedError(
-            "deformation_radius: consts.f0 is zero; L_d is undefined on an "
-            "f-plane with no rotation."
-        )
-    # Prefer the model's vertical-mode deformation radii when available: the
-    # first internal radius comes from the vertical-mode eigenproblem, not
-    # just one interface's sqrt(g'_k H_k)/f0 (which can substantially
-    # overestimate the baroclinic radius for a thin upper layer). Fall back to
-    # the per-interface estimate only when the modal transform is absent.
-    modal = getattr(model, "modal", None)
-    modal_radii = getattr(modal, "rossby_radii", None) if modal is not None else None
-    if modal_radii is not None:
-        radii = np.asarray(jnp.asarray(modal_radii))
-        # The barotropic mode is infinite; keep only the finite internal modes.
-        finite = radii[np.isfinite(radii)]
-        if finite.size == 0:
-            raise AssertionFailedError(
-                "deformation_radius: model exposes no finite internal "
-                "deformation radius (modal.rossby_radii are all non-finite)."
-            )
-        Ld = float(np.min(finite))
-        source = "modal.rossby_radii"
-    else:
-        # Per-interface estimate sqrt(g'_k H_k)/f0; smallest internal mode.
-        g_prime_arr = np.asarray(jnp.asarray(g_prime))
-        H_arr = np.asarray(jnp.asarray(H))
-        radii = np.sqrt(g_prime_arr * H_arr) / f0_abs
-        internal = radii[1:] if radii.shape[0] > 1 else radii
-        Ld = float(np.min(internal))
-        source = "sqrt(g'H)/f0 estimate"
-    # The *coarser* spacing: a deformation radius is an isotropic
-    # length, so it has to be resolved in both directions, and taking
-    # the finer one would pass an anisotropic grid that resolves it
-    # along only one axis. (The Munk and Stommel guards take dx
-    # instead — those layers are normal to the western wall.)
-    dx_min = float(max(grid.dx, grid.dy))
-    ratio = Ld / dx_min
-    if ratio < n_cells_min:
-        raise AssertionFailedError(
-            f"deformation_radius check FAILED: L_d/dx = {ratio:.2f} < "
-            f"{n_cells_min}\n"
-            f"  L_d   = {Ld:.4g} (smallest internal deformation radius, "
-            f"from {source})\n"
-            f"  dx    = {dx_min:.4g}\n"
-            f"  → eddies will be suppressed; refine the grid or pick an "
-            f"eddy-permitting configuration."
-        )
-    if ratio < n_cells_warn:
-        logger.warning(
-            "deformation radius marginally resolved: L_d/dx = {:.2f} "
-            "(L_d={:.4g}, dx={:.4g})",
-            ratio,
-            Ld,
-            dx_min,
-        )
 
 
 def check_pv_inversion(

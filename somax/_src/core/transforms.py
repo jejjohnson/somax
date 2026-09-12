@@ -488,9 +488,10 @@ class StateAffine(eqx.Module):
                 giving one ``(loc, scale)`` per gridpoint. If ``False``
                 (default), reduce over every axis, giving one number per
                 field.
-            eps: Lower bound on the returned scale. A field the dynamics
-                never touch has exactly zero sample variance, and
-                dividing by it would produce inf/NaN.
+            eps: Lower bound on the returned scale, strictly positive.
+                A field the dynamics never touch has exactly zero
+                sample variance, and dividing by it would produce
+                inf/NaN.
             mask: Optional finitevolx ``Mask2D``/``Mask3D``. Dry cells
                 are excluded from the statistics and are given the
                 identity ``(0, 1)``, so masked fields round-trip
@@ -507,7 +508,17 @@ class StateAffine(eqx.Module):
         Returns:
             A ``StateAffine`` whose ``loc``/``scale`` share the state's
             structure.
+
+        Raises:
+            ValueError: If ``eps`` is not finite and strictly positive.
         """
+        if not math.isfinite(eps) or eps <= 0.0:
+            raise ValueError(
+                f"StateAffine.from_samples: eps must be a finite positive "
+                f"number; got {eps!r}. It is the floor on the returned "
+                f"scale, so zero leaves a constant field with a scale of "
+                f"zero and a transform that cannot be inverted."
+            )
         names = _leaf_field_names(states)
 
         state_cls = type(states)
@@ -518,21 +529,21 @@ class StateAffine(eqx.Module):
             axis = 0 if per_gridpoint else tuple(range(jnp.ndim(samples)))
             mean, std = _masked_moments(samples, wet, axis=axis, eps=eps)
             if wet is None or per_gridpoint:
-                return mean, std
+                return _Moments(mean, std)
             # Fieldwise reduction collapses to a scalar, which would
             # hand a dry cell the wet cells' statistics and so move its
             # land sentinel and count it in the log-determinant.
             # Broadcast back over the grid, identity on land.
             dry_safe = wet[0] if jnp.ndim(wet) == jnp.ndim(samples) else wet
-            return (
+            return _Moments(
                 jnp.where(dry_safe, mean, 0.0),
                 jnp.where(dry_safe, std, 1.0),
             )
 
         pairs = _tree_map_with_names(moments, states, names)
         return cls(
-            loc=jtu.tree_map(lambda p: p[0], pairs, is_leaf=_is_pair),
-            scale=jtu.tree_map(lambda p: p[1], pairs, is_leaf=_is_pair),
+            loc=jtu.tree_map(lambda p: p.mean, pairs),
+            scale=jtu.tree_map(lambda p: p.std, pairs),
         )
 
     # ------------------------------------------------------------------
@@ -604,8 +615,21 @@ def _tree_map_with_names(
     return jtu.tree_unflatten(treedef, mapped)
 
 
-def _is_pair(x: Any) -> bool:
-    return isinstance(x, tuple) and len(x) == 2
+@dataclasses.dataclass(frozen=True)
+class _Moments:
+    """A ``(mean, std)`` pair produced by :meth:`StateAffine.from_samples`.
+
+    A plain 2-tuple would be ambiguous: ``from_samples`` accepts any
+    pytree, and a state that *is* a two-element tuple — or that holds
+    one — would have its own structural node mistaken for a generated
+    pair, splitting one child's statistics into ``loc`` and the
+    other's into ``scale``. This type is not a registered pytree node,
+    so ``tree_map`` treats it as an opaque leaf and only these pairs
+    can be unpacked.
+    """
+
+    mean: Any
+    std: Any
 
 
 def _parse_override(
