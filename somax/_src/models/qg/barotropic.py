@@ -18,7 +18,18 @@ from finitevolx import (
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
+from somax._src.core.scales import Scales
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    as_parameter,
+)
+from somax._src.models._nondim import (
+    require_non_negative,
+    require_positive,
+)
 
 
 class BarotropicQGState(State):
@@ -202,6 +213,152 @@ class BarotropicQG(SomaxModel):
             enstrophy=enstrophy,
             relative_vorticity=zeta,
         )
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        rossby: float,
+        beta_hat: float,
+        delta_M: float,
+        delta_S: float = 0.0,
+        delta_I: float | None = None,
+        aspect: float = 1.0,
+        wind_profile: str = "doublegyre",
+        mask: Mask2D | None = None,
+        check_resolution: bool = True,
+    ) -> tuple[BarotropicQG, Scales]:
+        r"""Build the model from dimensionless numbers instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Scale set: **advective** (:meth:`somax.Scales.advective`), with
+        ``L = U = H = 1`` so that ``T = L/U = 1`` and ``f0 = 1/Ro``.
+        In these units the barotropic QG equation reads
+
+        .. math::
+
+            \partial_t q + J(\psi,\, q + \hat\beta y)
+                = \delta_M^3 \hat\beta\, \nabla^2 q
+                - \delta_S \hat\beta\, \nabla^2 \psi
+                + \hat\tau\, \mathrm{curl}\,\tau .
+
+        The dimensionless numbers and what each sets:
+
+        ==============  ==========================  =========================
+        Input           Definition                  ``create()`` kwarg
+        ==============  ==========================  =========================
+        ``rossby``      :math:`Ro = U/(f_0 L)`      ``f0 = 1/Ro``
+        ``beta_hat``    :math:`\hat\beta = \beta L^2/U`  ``beta``
+        ``delta_M``     :math:`(\nu/\beta)^{1/3}/L`   ``lateral_viscosity``
+        ``delta_S``     :math:`\kappa/(\beta L)`      ``bottom_drag``
+        ``delta_I``     :math:`(U/\beta)^{1/2}/L`     ``wind_amplitude``
+        ==============  ==========================  =========================
+
+        Choosing ``delta_M`` and ``delta_S`` rather than ``nu`` and
+        ``kappa`` is the point of this factory: the western-boundary-layer
+        widths are what has to be resolved, and picking them directly
+        replaces tuning two coefficients until a run is both stable and
+        resolved.
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            rossby: Rossby number ``Ro = U / (f0 L)``. Sets ``f0 = 1/Ro``.
+            beta_hat: Planetary vorticity gradient ``beta L^2 / U``.
+            delta_M: Munk-layer width as a fraction of ``L``.
+            delta_S: Stommel-layer width as a fraction of ``L``. Zero
+                (the default) means no bottom drag.
+            delta_I: Inertial-layer width as a fraction of ``L``. This
+                fixes the wind amplitude through the Sverdrup balance
+                ``tau0 = delta_I**2 * beta_hat**2``. Left at ``None``,
+                the wind is set to ``beta_hat``, the amplitude whose
+                Sverdrup interior velocity is exactly the velocity scale
+                ``U`` — equivalent to ``delta_I = beta_hat**-0.5``.
+            aspect: ``Ly / Lx``. The domain is ``Lx = 1`` by construction.
+            wind_profile: Passed through to :meth:`create`.
+            mask: Passed through to :meth:`create`.
+            check_resolution: Run the Munk and Stommel resolution guards
+                and raise if the boundary layers are unresolved. Set
+                ``False`` only to build a deliberately coarse model (a
+                unit test, say).
+
+        Returns:
+            ``(model, scales)``. The ``Scales`` records the unit scale
+            set the model *runs in* — ``L = U = H = 1``.
+
+            It is therefore not enough on its own to convert a
+            dimensional state: with ``L = U = 1`` the vorticity scale
+            is 1 and the time scale is 1, so
+            :meth:`somax.StateAffine.from_scales` built from it leaves
+            a dimensional ``q`` unchanged. Converting needs the
+            *physical* scale set as well — the
+            ``Scales.advective(L=..., U=...)`` describing the run being
+            reproduced — with this one as the target:
+
+            >>> physical = Scales.advective(L=1.0e6, U=0.05, f0=1.0e-4)
+            >>> to_units = StateAffine.from_scales(  # doctest: +SKIP
+            ...     BarotropicQGState, physical
+            ... )
+
+            Keep both; this return value is the second of the pair.
+
+        Raises:
+            ValueError: If a dimensionless input is out of range.
+            AssertionFailedError: If ``check_resolution`` is set and a
+                boundary layer is unresolved on this grid.
+
+        Example:
+            >>> model, scales = BarotropicQG.from_nondimensional(
+            ...     nx=128, ny=128, rossby=0.02, beta_hat=50.0,
+            ...     delta_M=0.03, delta_S=0.01,
+            ... )
+            >>> scales.kind
+            'advective'
+        """
+        # Every check is stated as "must be finite and in range" rather
+        # than as a one-sided comparison: every comparison with NaN is
+        # false, and +inf passes a bare ``> 0``, so the one-sided form
+        # lets both through. A NaN delta_M then makes a NaN viscosity,
+        # and the resolution guard below falls through too because its
+        # ratio compares false against both thresholds — handing back a
+        # model that will quietly corrupt a simulation.
+        context = "from_nondimensional"
+        require_positive(context, rossby=rossby, beta_hat=beta_hat, aspect=aspect)
+        require_non_negative(context, delta_M=delta_M, delta_S=delta_S)
+        if delta_I is not None:
+            require_positive(context, delta_I=delta_I)
+
+        # Unit scales: L = U = H = 1, so f0 = 1/Ro and every coefficient
+        # below is already the nondimensional group itself.
+        wind_amplitude = beta_hat if delta_I is None else delta_I**2 * beta_hat**2
+        model = BarotropicQG.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            f0=1.0 / rossby,
+            beta=beta_hat,
+            lateral_viscosity=delta_M**3 * beta_hat,
+            bottom_drag=delta_S * beta_hat,
+            wind_amplitude=wind_amplitude,
+            wind_profile=wind_profile,
+            mask=mask,
+        )
+        scales = Scales.advective(L=1.0, U=1.0, f0=1.0 / rossby, H=1.0)
+
+        if check_resolution:
+            from somax._src.cli._assertions import (
+                check_munk_width,
+                check_stommel_width,
+            )
+
+            check_munk_width(None, model)
+            if delta_S > 0.0:
+                check_stommel_width(None, model)
+
+        return model, scales
 
     @staticmethod
     def create(

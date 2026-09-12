@@ -41,6 +41,12 @@ import jax.numpy as jnp
 import numpy as np
 from loguru import logger
 
+from somax._src.core.resolution import (
+    AssertionFailedError,
+    check_munk_width,
+    check_stommel_width,
+)
+
 
 if TYPE_CHECKING:
     from somax._src.cli.spec import RunSpec
@@ -49,10 +55,6 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------
 # Exception
 # ----------------------------------------------------------------------
-
-
-class AssertionFailedError(RuntimeError):
-    """Raised when an opt-in preflight or postflight assertion fails."""
 
 
 # ----------------------------------------------------------------------
@@ -338,7 +340,9 @@ def check_static_stability(spec: RunSpec, model: Any) -> None:
 PREFLIGHT_ASSERTIONS: dict[str, Callable[..., None]] = {
     "cfl": check_cfl,
     "deformation_radius": check_deformation_radius,
+    "munk_width": check_munk_width,
     "pv_inversion": check_pv_inversion,
+    "stommel_width": check_stommel_width,
     "static_stability": check_static_stability,
 }
 
