@@ -349,7 +349,7 @@ class BarotropicQG(SomaxModel):
         scales = Scales.advective(L=1.0, U=1.0, f0=1.0 / rossby, H=1.0)
 
         if check_resolution:
-            from somax._src.cli._assertions import (
+            from somax._src.core.resolution import (
                 check_munk_width,
                 check_stommel_width,
             )

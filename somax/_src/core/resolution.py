@@ -17,6 +17,7 @@ import warnings
 from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
+import numpy as np
 import paramax
 
 
@@ -70,6 +71,31 @@ def _require_finite_positive(check: str, name: str, value: float) -> float:
     return value
 
 
+def _require_finite_thresholds(check: str, **thresholds: float) -> None:
+    """Reject a non-finite resolution threshold.
+
+    These come straight from a config: ``munk_width: {n_cells_min:
+    .nan}`` is valid YAML, ``yaml.safe_load`` produces a NaN, and
+    ``run_preflight`` forwards it unchanged. Every comparison against
+    NaN is false, so the guard would pass a layer resolved by no cells
+    at all.
+
+    Args:
+        check: Caller name, for the error message.
+        **thresholds: Named threshold values.
+
+    Raises:
+        AssertionFailedError: If any threshold is not finite.
+    """
+    for name, value in thresholds.items():
+        if not math.isfinite(float(value)):
+            raise AssertionFailedError(
+                f"{check}: {name} is {float(value)}. A non-finite threshold "
+                f"compares false against every ratio, so the check would "
+                f"always pass."
+            )
+
+
 def _boundary_layer_inputs(model: Any, check: str) -> tuple[Any, float, float]:
     """Shared lookup for the western-boundary-layer guards.
 
@@ -94,7 +120,15 @@ def _boundary_layer_inputs(model: Any, check: str) -> tuple[Any, float, float]:
         )
     # ``abs`` is right for beta, unlike for the dissipative
     # coefficients: its sign is a hemisphere convention, and the layer
-    # width depends only on its magnitude.
+    # width depends only on its magnitude. Finiteness still has to be
+    # tested separately — ``abs(nan)`` is NaN, the zero test below does
+    # not catch it, and both width ratios then compare false against
+    # their thresholds, so every guard would silently pass.
+    if not math.isfinite(float(beta)):
+        raise AssertionFailedError(
+            f"{check}: consts.beta is {float(beta)}; the boundary-layer "
+            f"width is undefined for a non-finite planetary gradient."
+        )
     beta = abs(float(beta))
     if beta == 0.0:
         raise AssertionFailedError(
@@ -140,6 +174,9 @@ def check_munk_width(
             viscosity is zero, or if the layer is unresolved.
     """
     del spec
+    _require_finite_thresholds(
+        "munk_width", n_cells_min=n_cells_min, n_cells_warn=n_cells_warn
+    )
     params, beta, dx = _boundary_layer_inputs(model, "munk_width")
     nu = getattr(params, "lateral_viscosity", None)
     if nu is None:
@@ -201,6 +238,9 @@ def check_stommel_width(
             zero, or if the layer is unresolved.
     """
     del spec
+    _require_finite_thresholds(
+        "stommel_width", n_cells_min=n_cells_min, n_cells_warn=n_cells_warn
+    )
     params, beta, dx = _boundary_layer_inputs(model, "stommel_width")
     kappa = getattr(params, "bottom_drag", None)
     if kappa is None:
@@ -234,4 +274,113 @@ def check_stommel_width(
             ratio,
             delta_s,
             dx,
+        )
+
+
+def check_deformation_radius(
+    spec: RunSpec,
+    model: Any,
+    *,
+    n_cells_min: float = 2.0,
+    n_cells_warn: float = 4.0,
+) -> None:
+    """Pre-flight: the first baroclinic deformation radius is resolved.
+
+    Resolving the first internal deformation radius ``L_d = sqrt(g'H)/f0``
+    with at least ``n_cells_min`` grid cells is necessary for baroclinic
+    instability and mesoscale eddies (Hallberg 2013). FAIL when
+    ``L_d/dx < n_cells_min``; WARN when ``n_cells_min <= L_d/dx <
+    n_cells_warn``.
+
+    ``dx`` here is the coarser of the two spacings, since a deformation
+    radius is isotropic and must be spanned in both directions.
+
+    Requires a stratified model exposing ``model.strat.g_prime`` /
+    ``model.strat.H`` and ``model.consts.f0`` (multilayer SWM, baroclinic /
+    reparameterized QG). Raises for models without that structure so a typo'd
+    config doesn't silently skip the check.
+
+    Args:
+        spec: The validated RunSpec (unused; present for signature symmetry).
+        model: The constructed model instance.
+        n_cells_min: Minimum ``L_d/dx`` below which to FAIL. Defaults to 2.0.
+        n_cells_warn: ``L_d/dx`` below which to WARN. Defaults to 4.0.
+
+    Raises:
+        AssertionFailedError: If the model lacks stratification/Coriolis, or
+            if ``L_d/dx < n_cells_min``.
+    """
+    strat = getattr(model, "strat", None)
+    consts = getattr(model, "consts", None)
+    grid = getattr(model, "grid", None)
+    if strat is None or grid is None or consts is None:
+        raise AssertionFailedError(
+            f"deformation_radius: model {type(model).__name__!r} lacks "
+            f"strat/consts/grid; this check applies to stratified models "
+            f"(multilayer SWM, baroclinic/reparameterized QG)."
+        )
+    g_prime = getattr(strat, "g_prime", None)
+    H = getattr(strat, "H", None)
+    f0 = getattr(consts, "f0", None)
+    if g_prime is None or H is None or f0 is None:
+        raise AssertionFailedError(
+            f"deformation_radius: model {type(model).__name__!r} does not "
+            f"expose strat.g_prime / strat.H / consts.f0; cannot compute L_d."
+        )
+    f0_abs = abs(float(f0))
+    if f0_abs == 0.0:
+        raise AssertionFailedError(
+            "deformation_radius: consts.f0 is zero; L_d is undefined on an "
+            "f-plane with no rotation."
+        )
+    # Prefer the model's vertical-mode deformation radii when available: the
+    # first internal radius comes from the vertical-mode eigenproblem, not
+    # just one interface's sqrt(g'_k H_k)/f0 (which can substantially
+    # overestimate the baroclinic radius for a thin upper layer). Fall back to
+    # the per-interface estimate only when the modal transform is absent.
+    modal = getattr(model, "modal", None)
+    modal_radii = getattr(modal, "rossby_radii", None) if modal is not None else None
+    if modal_radii is not None:
+        radii = np.asarray(jnp.asarray(modal_radii))
+        # The barotropic mode is infinite; keep only the finite internal modes.
+        finite = radii[np.isfinite(radii)]
+        if finite.size == 0:
+            raise AssertionFailedError(
+                "deformation_radius: model exposes no finite internal "
+                "deformation radius (modal.rossby_radii are all non-finite)."
+            )
+        Ld = float(np.min(finite))
+        source = "modal.rossby_radii"
+    else:
+        # Per-interface estimate sqrt(g'_k H_k)/f0; smallest internal mode.
+        g_prime_arr = np.asarray(jnp.asarray(g_prime))
+        H_arr = np.asarray(jnp.asarray(H))
+        radii = np.sqrt(g_prime_arr * H_arr) / f0_abs
+        internal = radii[1:] if radii.shape[0] > 1 else radii
+        Ld = float(np.min(internal))
+        source = "sqrt(g'H)/f0 estimate"
+    # The *coarser* spacing: a deformation radius is an isotropic
+    # length, so it has to be resolved in both directions, and taking
+    # the finer one would pass an anisotropic grid that resolves it
+    # along only one axis. (The Munk and Stommel guards take dx
+    # instead — those layers are normal to the western wall.)
+    dx_min = float(max(grid.dx, grid.dy))
+    ratio = Ld / dx_min
+    if ratio < n_cells_min:
+        raise AssertionFailedError(
+            f"deformation_radius check FAILED: L_d/dx = {ratio:.2f} < "
+            f"{n_cells_min}\n"
+            f"  L_d   = {Ld:.4g} (smallest internal deformation radius, "
+            f"from {source})\n"
+            f"  dx    = {dx_min:.4g}\n"
+            f"  → eddies will be suppressed; refine the grid or pick an "
+            f"eddy-permitting configuration."
+        )
+    if ratio < n_cells_warn:
+        _warn(
+            "deformation radius marginally resolved: L_d/dx = {:.2f} "
+            "(L_d={:.4g}, dx={:.4g})",
+            ratio,
+            Ld,
+            dx_min,
         )
