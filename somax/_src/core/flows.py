@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import Any
 
 import jax.numpy as jnp
+import paramax
 from jax.flatten_util import ravel_pytree
 from jaxtyping import Array, PyTree
 
@@ -53,7 +54,12 @@ class StateAffineBijection(AbstractBijection):
     The map is fixed, not trainable: ``loc`` and ``scale`` come from
     physical scales or sample statistics, and a flow composed on top
     learns the departure from that scaling rather than relearning the
-    scaling itself.
+    scaling itself. That is enforced rather than merely intended — the
+    transform is held in a ``paramax.NonTrainable``, so when ``loc``
+    and ``scale`` are arrays (which they are for
+    :meth:`StateAffine.from_samples`, and for any array-valued field
+    override) flowjax's training path cannot drift the normalisation
+    along with the flow.
 
     Attributes:
         state_transform: The underlying pytree affine map. Named so
@@ -78,10 +84,15 @@ class StateAffineBijection(AbstractBijection):
                 bijection will act on. Only its layout is used.
         """
         flat, unravel = ravel_pytree(state_example)
-        self.state_transform = transform
+        self.state_transform = paramax.non_trainable(transform)
         self.shape = (flat.size,)
         self.cond_shape = None
         self.unravel = unravel
+
+    @property
+    def _map(self) -> StateAffine:
+        """The affine map, with its non-trainable wrapper removed."""
+        return paramax.unwrap(self.state_transform)
 
     def transform_and_log_det(
         self, x: Array, condition: Array | None = None
@@ -89,7 +100,7 @@ class StateAffineBijection(AbstractBijection):
         """Forward map on a flat vector, with the constant log-determinant."""
         del condition
         state = self.unravel(x)
-        transformed, log_det = self.state_transform.transform_and_log_det(state)
+        transformed, log_det = self._map.transform_and_log_det(state)
         flat, _ = ravel_pytree(transformed)
         return flat, jnp.asarray(log_det)
 
@@ -99,7 +110,7 @@ class StateAffineBijection(AbstractBijection):
         """Inverse map on a flat vector, with the negated log-determinant."""
         del condition
         state = self.unravel(y)
-        inverted, log_det = self.state_transform.inverse_and_log_det(state)
+        inverted, log_det = self._map.inverse_and_log_det(state)
         flat, _ = ravel_pytree(inverted)
         return flat, jnp.asarray(log_det)
 
