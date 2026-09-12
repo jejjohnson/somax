@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from somax._src.cli._assertions import (
+    PREFLIGHT_ASSERTIONS,
     AssertionFailedError,
     check_munk_width,
     check_stommel_width,
@@ -377,3 +378,201 @@ class TestAssertionRegistry:
 
         assert PREFLIGHT_ASSERTIONS["munk_width"] is check_munk_width
         assert PREFLIGHT_ASSERTIONS["stommel_width"] is check_stommel_width
+
+
+class TestGuardsUseTheZonalSpacing:
+    """Both layers are normal to the western wall, so ``dx`` spans them.
+
+    On an anisotropic grid the finer direction is irrelevant: taking
+    ``min(dx, dy)`` inflates the ratio and can pass a western boundary
+    current that is not resolved zonally at all.
+    """
+
+    def model(self, nx, ny, aspect=1.0):
+        return BarotropicQG.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            beta=50.0,
+            lateral_viscosity=0.05**3 * 50.0,
+            bottom_drag=0.02 * 50.0,
+        )
+
+    def test_a_tall_thin_grid_no_longer_passes(self):
+        """dy << dx: resolved meridionally, unresolved zonally."""
+        model = self.model(nx=8, ny=256)
+        with pytest.raises(AssertionFailedError, match="delta_M/dx"):
+            check_munk_width(None, model)
+
+    def test_the_same_zonal_spacing_passes_when_square(self):
+        """So the failure above is about dx, not about nx being small."""
+        check_munk_width(None, self.model(nx=128, ny=128))
+
+    def test_refining_only_y_does_not_help(self):
+        coarse = self.model(nx=8, ny=8)
+        refined = self.model(nx=8, ny=512)
+        for model in (coarse, refined):
+            with pytest.raises(AssertionFailedError):
+                check_munk_width(None, model)
+
+    def test_the_reported_dx_is_the_zonal_one(self):
+        model = self.model(nx=8, ny=256)
+        with pytest.raises(AssertionFailedError) as excinfo:
+            check_munk_width(None, model)
+        assert f"{model.grid.dx:.4g}" in str(excinfo.value)
+
+    def test_stommel_uses_it_too(self):
+        model = self.model(nx=8, ny=256)
+        with pytest.raises(AssertionFailedError, match="delta_S/dx"):
+            check_stommel_width(None, model)
+
+
+class TestGuardsRejectAntiDissipativeCoefficients:
+    """A negative coefficient has no boundary layer to resolve.
+
+    Taking ``abs`` invented one and could report an anti-diffusive
+    model as resolved. Plain values reach ``create`` directly, so this
+    is reachable.
+    """
+
+    def model(self, **params):
+        return BarotropicQG.create(nx=64, ny=64, Lx=1.0, Ly=1.0, beta=50.0, **params)
+
+    def test_negative_viscosity_is_rejected(self):
+        model = self.model(lateral_viscosity=-(0.05**3) * 50.0)
+        with pytest.raises(AssertionFailedError, match="anti-diffusive"):
+            check_munk_width(None, model)
+
+    def test_negative_drag_is_rejected(self):
+        model = self.model(bottom_drag=-1.0)
+        with pytest.raises(AssertionFailedError, match="anti-diffusive"):
+            check_stommel_width(None, model)
+
+    def test_a_non_finite_viscosity_is_rejected(self):
+        model = self.model(lateral_viscosity=float("nan"))
+        with pytest.raises(AssertionFailedError, match="non-finite"):
+            check_munk_width(None, model)
+
+    def test_a_positive_coefficient_is_unaffected(self):
+        check_munk_width(None, self.model(lateral_viscosity=0.05**3 * 50.0))
+
+    def test_beta_keeps_its_sign_tolerance(self):
+        """Southern-hemisphere beta is negative by convention, not by error."""
+        model = BarotropicQG.create(
+            nx=64,
+            ny=64,
+            Lx=1.0,
+            Ly=1.0,
+            beta=-50.0,
+            lateral_viscosity=0.05**3 * 50.0,
+        )
+        check_munk_width(None, model)
+
+
+class TestNonFiniteDimensionlessInputs:
+    """NaN and +inf must not reach the model.
+
+    NaN compares false against every threshold, so a one-sided range
+    check lets it through *and* so does the resolution guard's ratio —
+    the factory would hand back a model that silently produces NaN.
+    """
+
+    def base(self):
+        return dict(
+            nx=64, ny=64, rossby=0.02, beta_hat=50.0, delta_M=0.05, delta_S=0.02
+        )
+
+    @pytest.mark.parametrize("name", ["rossby", "beta_hat", "aspect"])
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_positive_inputs_must_be_finite(self, name, bad):
+        with pytest.raises(ValueError, match="finite positive"):
+            BarotropicQG.from_nondimensional(**{**self.base(), name: bad})
+
+    @pytest.mark.parametrize("name", ["delta_M", "delta_S"])
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_non_negative_inputs_must_be_finite(self, name, bad):
+        with pytest.raises(ValueError, match="finite non-negative"):
+            BarotropicQG.from_nondimensional(**{**self.base(), name: bad})
+
+    def test_delta_i_must_be_finite(self):
+        with pytest.raises(ValueError, match="finite positive"):
+            BarotropicQG.from_nondimensional(**self.base(), delta_I=float("nan"))
+
+    def test_a_nan_no_longer_slips_past_the_resolution_guard(self):
+        """The second half of the failure: the guard's ratio is NaN too."""
+        with pytest.raises(ValueError):
+            BarotropicQG.from_nondimensional(**{**self.base(), "delta_M": float("nan")})
+
+    def test_valid_inputs_still_build(self):
+        model, scales = BarotropicQG.from_nondimensional(**self.base())
+        assert scales.kind == "advective"
+        assert model.grid.Nx == 66
+
+
+class TestGuardsAreImportableWithoutTheCliExtras:
+    """A base install must be able to call ``from_nondimensional``.
+
+    The factory runs the guards by default, so if they live behind an
+    optional CLI dependency an ordinary library user cannot use the
+    public API without installing unrelated packages.
+    """
+
+    def test_the_guards_live_outside_the_cli_package(self):
+        from somax._src.core import resolution
+
+        assert resolution.check_munk_width.__module__ == "somax._src.core.resolution"
+
+    def test_the_cli_registry_uses_the_same_objects(self):
+        from somax._src.core import resolution
+
+        assert PREFLIGHT_ASSERTIONS["munk_width"] is resolution.check_munk_width
+        assert PREFLIGHT_ASSERTIONS["stommel_width"] is resolution.check_stommel_width
+
+    def test_the_module_imports_with_loguru_hidden(self):
+        """The one non-base import the guards used to require."""
+        import subprocess
+        import sys
+        import textwrap
+
+        script = textwrap.dedent("""
+            import sys
+            sys.modules["loguru"] = None  # make `from loguru import ...` fail
+            import importlib
+            for name in list(sys.modules):
+                if name.startswith("somax"):
+                    del sys.modules[name]
+            import builtins
+            real_import = builtins.__import__
+            def guarded(name, *args, **kw):
+                if name == "loguru":
+                    raise ModuleNotFoundError("No module named 'loguru'")
+                return real_import(name, *args, **kw)
+            builtins.__import__ = guarded
+            from somax._src.core.resolution import check_munk_width
+            print("ok")
+        """)
+        out = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        assert out.stdout.strip() == "ok", out.stderr
+
+    def test_a_marginal_layer_still_warns_without_loguru(self):
+        """The warning must not simply vanish on a base install."""
+        from somax._src.core import resolution
+
+        model = BarotropicQG.create(
+            nx=64,
+            ny=64,
+            Lx=1.0,
+            Ly=1.0,
+            beta=50.0,
+            lateral_viscosity=0.05**3 * 50.0,
+        )
+        saved = resolution._logger
+        try:
+            resolution._logger = None
+            with pytest.warns(UserWarning, match="marginally resolved"):
+                resolution.check_munk_width(None, model, n_cells_warn=1e9)
+        finally:
+            resolution._logger = saved

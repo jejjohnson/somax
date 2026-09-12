@@ -26,6 +26,10 @@ from somax._src.core.types import (
     State,
     as_parameter,
 )
+from somax._src.models._nondim import (
+    require_non_negative,
+    require_positive,
+)
 
 
 class BarotropicQGState(State):
@@ -282,9 +286,23 @@ class BarotropicQG(SomaxModel):
 
         Returns:
             ``(model, scales)``. The ``Scales`` records the unit scale
-            set the model runs in, and is what
-            :meth:`somax.StateAffine.from_scales` needs to map a
-            dimensional state into these coordinates.
+            set the model *runs in* — ``L = U = H = 1``.
+
+            It is therefore not enough on its own to convert a
+            dimensional state: with ``L = U = 1`` the vorticity scale
+            is 1 and the time scale is 1, so
+            :meth:`somax.StateAffine.from_scales` built from it leaves
+            a dimensional ``q`` unchanged. Converting needs the
+            *physical* scale set as well — the
+            ``Scales.advective(L=..., U=...)`` describing the run being
+            reproduced — with this one as the target:
+
+            >>> physical = Scales.advective(L=1.0e6, U=0.05, f0=1.0e-4)
+            >>> to_units = StateAffine.from_scales(  # doctest: +SKIP
+            ...     BarotropicQGState, physical
+            ... )
+
+            Keep both; this return value is the second of the pair.
 
         Raises:
             ValueError: If a dimensionless input is out of range.
@@ -299,27 +317,18 @@ class BarotropicQG(SomaxModel):
             >>> scales.kind
             'advective'
         """
-        if rossby <= 0.0:
-            raise ValueError(
-                f"from_nondimensional: rossby must be > 0; got {rossby!r}."
-            )
-        if beta_hat <= 0.0:
-            raise ValueError(
-                f"from_nondimensional: beta_hat must be > 0; got {beta_hat!r}."
-            )
-        if delta_M < 0.0 or delta_S < 0.0:
-            raise ValueError(
-                "from_nondimensional: delta_M and delta_S must be >= 0; got "
-                f"delta_M={delta_M!r}, delta_S={delta_S!r}."
-            )
-        if delta_I is not None and delta_I <= 0.0:
-            raise ValueError(
-                f"from_nondimensional: delta_I must be > 0; got {delta_I!r}."
-            )
-        if aspect <= 0.0:
-            raise ValueError(
-                f"from_nondimensional: aspect must be > 0; got {aspect!r}."
-            )
+        # Every check is stated as "must be finite and in range" rather
+        # than as a one-sided comparison: every comparison with NaN is
+        # false, and +inf passes a bare ``> 0``, so the one-sided form
+        # lets both through. A NaN delta_M then makes a NaN viscosity,
+        # and the resolution guard below falls through too because its
+        # ratio compares false against both thresholds — handing back a
+        # model that will quietly corrupt a simulation.
+        context = "from_nondimensional"
+        require_positive(context, rossby=rossby, beta_hat=beta_hat, aspect=aspect)
+        require_non_negative(context, delta_M=delta_M, delta_S=delta_S)
+        if delta_I is not None:
+            require_positive(context, delta_I=delta_I)
 
         # Unit scales: L = U = H = 1, so f0 = 1/Ro and every coefficient
         # below is already the nondimensional group itself.

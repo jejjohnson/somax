@@ -64,17 +64,25 @@ model, so they apply to dimensional runs too:
 
 ```yaml
 assertions:
-  preflight:
-    munk_width: {n_cells_min: 2.0}
-    stommel_width: {n_cells_min: 1.0}
+  munk_width: {n_cells_min: 2.0}
+  stommel_width: {n_cells_min: 1.0}
 ```
+
+`assertions` is a flat `{name: params}` mapping — there is no
+`preflight:` level. Which phase a check runs in comes from the registry
+it is in, not from the config, and `run_preflight` treats every
+top-level key as an assertion name.
 
 The wind amplitude follows the Sverdrup balance. Left unspecified it is
 $\hat\tau = \hat\beta$, the amplitude whose Sverdrup interior velocity is
 exactly the velocity scale $U$; passing `delta_I` instead sets
 $\hat\tau = \delta_I^2 \hat\beta^2$.
 
-The returned `Scales` is the unit scale set the model runs in. Pair it
-with `StateAffine.from_scales` to move a dimensional state into these
-coordinates, and remember that times passed to the nondimensional model
-are in units of $T = L/U$.
+The returned `Scales` is the unit scale set the model runs in — $L = U
+= H = 1$ — so it is not by itself enough to convert a dimensional
+state: with $L = U = 1$ the vorticity scale is 1 and a
+`StateAffine.from_scales` built from it would leave a dimensional $q$
+untouched. Keep the *physical* scale set alongside it, the
+`Scales.advective(L=..., U=...)` describing the run being reproduced,
+and build the transform from that one. Times passed to the
+nondimensional model are in units of $T = L/U$.
