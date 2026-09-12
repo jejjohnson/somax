@@ -249,6 +249,10 @@ SCALE_KIND_RULES: dict[str, Callable[[Scales], tuple[float, float]]] = {
     "height_anomaly": lambda s: (0.0, s.eta),
     "vorticity": lambda s: (0.0, s.vorticity),
     "streamfunction": lambda s: (0.0, s.streamfunction),
+    # A transported scalar has no scale in ``Scales`` — its amplitude
+    # is set by the initial condition, not by the flow — so it is left
+    # alone. Declared rather than left unknown so it does not warn.
+    "tracer": lambda s: (0.0, 1.0),
 }
 
 #: Fallback kind per field *name*, for a state that declares nothing.
@@ -671,8 +675,19 @@ def _check_nonzero_scales(scales: dict[str, Any]) -> None:
         array = jnp.asarray(value)
         if isinstance(array, jax.core.Tracer):  # pragma: no cover - jit only
             continue
-        if bool(np.any(np.asarray(array) == 0.0)):
+        values = np.asarray(array)
+        if bool(np.any(values == 0.0)):
             where = "is zero" if array.ndim == 0 else "has a zero entry"
+            raise ValueError(
+                f"StateAffine.from_scales: scale for {name!r} {where}, so the "
+                "transform would not be invertible."
+            )
+        # Non-finite is as fatal as zero, and the zero test misses it:
+        # NaN contaminates every result, and an infinite scale maps a
+        # finite value to zero with no way back. The log-determinant is
+        # non-finite either way.
+        if not bool(np.all(np.isfinite(values))):
+            where = "is not finite" if array.ndim == 0 else "has a non-finite entry"
             raise ValueError(
                 f"StateAffine.from_scales: scale for {name!r} {where}, so the "
                 "transform would not be invertible."
@@ -712,18 +727,23 @@ def _masked_moments(
     infinite derivative at zero, so flooring afterwards would return a
     NaN gradient for a constant field.
     """
+    # At least float32, whatever the samples are. ``float16`` saturates
+    # at 65504, so a count over a 256x256 field overflows to infinity
+    # and every mean it divides collapses silently to zero; the same
+    # overflow corrupts the variance denominator.
+    dtype = jnp.promote_types(jnp.asarray(samples).dtype, jnp.float32)
     if wet is None:
         count = jnp.asarray(
             math.prod(
                 jnp.shape(samples)[a]
                 for a in (axis if isinstance(axis, tuple) else (axis,))
             ),
-            dtype=samples.dtype,
+            dtype=dtype,
         )
-        safe = samples
+        safe = jnp.asarray(samples, dtype=dtype)
     else:
-        safe = jnp.where(wet, samples, 0.0)
-        count = jnp.sum(wet.astype(samples.dtype), axis=axis)
+        safe = jnp.where(wet, samples, 0.0).astype(dtype)
+        count = jnp.sum(wet.astype(dtype), axis=axis)
 
     empty = count == 0
     mean = jnp.where(
@@ -734,6 +754,17 @@ def _masked_moments(
     if wet is not None:
         dev = jnp.where(wet, dev, 0.0)
     var = jnp.sum(dev**2, axis=axis) / jnp.where(empty, 1.0, count)
-    std = jnp.sqrt(jnp.maximum(jnp.where(empty, 0.0, var), eps**2))
+
+    # The doubled ``where`` keeps the zero away from ``sqrt`` on the
+    # backward pass — its derivative there is infinite, and a constant
+    # field is exactly what ``eps`` exists for — while the outer one
+    # restores the exact value on the forward pass. The floor then goes
+    # on the standard deviation itself, not on the variance as
+    # ``eps**2``: squaring underflows for a small floor (``1e-30``
+    # squares to ``1e-60``, which is zero in float32), putting back the
+    # zero scale the floor is there to prevent.
+    positive = var > 0.0
+    std = jnp.where(positive, jnp.sqrt(jnp.where(positive, var, 1.0)), 0.0)
+    std = jnp.maximum(std, eps)
 
     return jnp.where(empty, 0.0, mean), jnp.where(empty, 1.0, std)

@@ -222,3 +222,23 @@ class TestGravityValidation:
     def test_planetary_rejects_it(self, bad):
         with pytest.raises(ValueError, match="g must be"):
             Scales.planetary(a=1.0, Omega=1.0, H=1.0, rossby=0.1, g=bad)
+
+
+class TestAdvectiveCoriolisValidation:
+    """``f0`` may be zero or negative here, but never non-finite.
+
+    Zero is a non-rotating model and a negative value is the southern
+    hemisphere, so :func:`_require_positive` would be too strict. NaN
+    and infinity are still fatal: they make ``eta`` and every
+    rotation-dependent group non-finite, and the object looks valid
+    until something downstream divides by it.
+    """
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_it_rejects_a_non_finite_f0(self, bad):
+        with pytest.raises(ValueError, match="f0 must be"):
+            Scales.advective(L=1.0, U=1.0, f0=bad)
+
+    @pytest.mark.parametrize("allowed", [0.0, -1e-4])
+    def test_it_still_accepts_zero_and_negative(self, allowed):
+        assert Scales.advective(L=1.0, U=1.0, f0=allowed).f0 == allowed
