@@ -8,6 +8,9 @@ by a gradient step.
 
 from __future__ import annotations
 
+import dataclasses
+import math
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -632,3 +635,181 @@ class TestTermModelFactoriesAcceptConstrainedValues:
         # which round-trips to ~1e-8 relative in float32 — enough to
         # read as 1e-5 in a cell where the tendency nearly cancels.
         assert np.abs(outs[0] - outs[1]).max() < 1e-5 * np.abs(outs[0]).max()
+
+
+class TestTrainableMaskCoversOnlyArrays:
+    """A ``Parameterize`` keeps its transform as an ordinary leaf.
+
+    Marking that leaf ``True`` hands the optimiser a Python function to
+    initialise state for, which it cannot do — so a model that mixes a
+    constrained parameter with a frozen one was unusable with the very
+    mask the docstring recommends.
+    """
+
+    @staticmethod
+    def _mixed_model():
+        model = BarotropicQG.create(nx=8, ny=8)
+        return eqx.tree_at(
+            lambda m: (m.params.lateral_viscosity, m.params.bottom_drag),
+            model,
+            (positive(100.0), frozen(1e-7)),
+        )
+
+    def test_the_transform_leaf_is_not_marked_trainable(self):
+        mask = trainable_mask(self._mixed_model())
+        flat = jax.tree_util.tree_leaves(mask)
+        assert all(isinstance(m, bool) for m in flat)
+        # The softplus leaf is in there; it must not be True.
+        assert not all(flat)
+
+    def test_adamw_initialises_on_the_mixed_model(self):
+        optax = pytest.importorskip("optax")
+        model = self._mixed_model()
+        optimiser = optax.masked(optax.adamw(1e-3), trainable_mask(model))
+        # Without the fix this raises while building the AdamW state
+        # for the function leaf.
+        optimiser.init(model)
+
+    def test_the_frozen_leaf_is_still_masked_out(self):
+        mask = trainable_mask(self._mixed_model())
+        assert mask.params.bottom_drag.tree is False
+
+    def test_a_plain_array_parameter_is_still_trainable(self):
+        mask = trainable_mask(BarotropicQG.create(nx=8, ny=8))
+        assert mask.params.lateral_viscosity is True
+
+
+class TestIntervalSpansMustBeRepresentable:
+    """Finite endpoints do not make their difference finite."""
+
+    def test_a_span_that_overflows_float32_is_rejected(self):
+        with pytest.raises(ValueError, match="overflows float32"):
+            interval(0.0, -3e38, 3e38)
+
+    def test_the_span_really_would_overflow(self):
+        """Otherwise the test above would pass for the wrong reason."""
+        assert math.isfinite(3e38 - -3e38)
+        assert not bool(
+            jnp.isfinite(
+                jnp.asarray(3e38, jnp.float32) - jnp.asarray(-3e38, jnp.float32)
+            )
+        )
+
+    def test_the_same_span_is_fine_in_float64(self):
+        jax.config.update("jax_enable_x64", True)
+        try:
+            wrapped = interval(jnp.asarray(0.0, jnp.float64), -3e38, 3e38)
+            assert bool(jnp.isfinite(paramax.unwrap(wrapped)))
+        finally:
+            jax.config.update("jax_enable_x64", False)
+
+    def test_an_ordinary_interval_is_unaffected(self):
+        assert float(paramax.unwrap(interval(0.5, 0.0, 1.0))) == pytest.approx(0.5)
+
+
+class TestConstrainedModelsRoundTripThroughACheckpoint:
+    """Orbax has no handler for the transform callable in ``Parameterize``."""
+
+    @staticmethod
+    def _constrained_model():
+        model = BarotropicQG.create(nx=8, ny=8)
+        return eqx.tree_at(lambda m: m.params.lateral_viscosity, model, positive(100.0))
+
+    def test_it_saves_and_restores(self, tmp_path):
+        from somax._src.core.checkpoint import SimulationCheckpointer
+
+        model = self._constrained_model()
+        state = BarotropicQGState(q=jnp.zeros((10, 10)))
+        ckpt = SimulationCheckpointer(
+            checkpoint_dir=str(tmp_path), checkpoint_interval=1
+        )
+        ckpt.save(1, state, model)
+        _, params, step = ckpt.restore(1, state, model)
+
+        assert step == 1
+        assert float(paramax.unwrap(params).lateral_viscosity) == pytest.approx(
+            100.0, rel=1e-5
+        )
+
+    def test_the_restored_parameter_is_still_a_wrapper(self, tmp_path):
+        from somax._src.core.checkpoint import SimulationCheckpointer
+
+        model = self._constrained_model()
+        state = BarotropicQGState(q=jnp.zeros((10, 10)))
+        ckpt = SimulationCheckpointer(
+            checkpoint_dir=str(tmp_path), checkpoint_interval=1
+        )
+        ckpt.save(1, state, model)
+        _, params, _ = ckpt.restore(1, state, model)
+        assert isinstance(params.lateral_viscosity, paramax.Parameterize)
+
+    def test_a_plain_model_still_round_trips(self, tmp_path):
+        from somax._src.core.checkpoint import SimulationCheckpointer
+
+        model = BarotropicQG.create(nx=8, ny=8)
+        state = BarotropicQGState(q=jnp.zeros((10, 10)))
+        ckpt = SimulationCheckpointer(
+            checkpoint_dir=str(tmp_path), checkpoint_interval=1
+        )
+        ckpt.save(2, state, model)
+        _, params, step = ckpt.restore(2, state, model)
+        assert step == 2
+        np.testing.assert_allclose(
+            np.asarray(params.lateral_viscosity),
+            np.asarray(model.params.lateral_viscosity),
+        )
+
+
+class _DragBoundaryQG(BarotropicQG):
+    """A model whose boundary condition reads a parameter directly.
+
+    The arithmetic against ``bottom_drag`` is what raises if the
+    wrapper has not been unwrapped by the time this is called.
+    """
+
+    def apply_boundary_conditions(self, state):
+        return BarotropicQGState(q=state.q + 0.0 * self.params.bottom_drag)
+
+
+class TestBoundaryConditionsSeeUnwrappedParameters:
+    """``integrate()`` applies them once before the solve begins.
+
+    That first call bypassed the RHS's unwrapping, so a boundary
+    condition that reads a constrained parameter raised on arithmetic
+    against the wrapper.
+    """
+
+    @staticmethod
+    def _retype(base):
+        """Rebuild ``base`` as the subclass, field for field."""
+        return _DragBoundaryQG(
+            **{f.name: getattr(base, f.name) for f in dataclasses.fields(base)}
+        )
+
+    @classmethod
+    def _constrained(cls):
+        model = cls._retype(BarotropicQG.create(nx=8, ny=8))
+        return eqx.tree_at(lambda m: m.params.bottom_drag, model, positive(1e-7))
+
+    def test_the_method_is_in_the_unwrapped_list(self):
+        from somax._src.core.model import _UNWRAPPED_METHODS
+
+        assert "apply_boundary_conditions" in _UNWRAPPED_METHODS
+
+    def test_it_runs_against_a_constrained_parameter(self):
+        model = self._constrained()
+        state = BarotropicQGState(q=jnp.ones((10, 10)))
+        out = model.apply_boundary_conditions(state)
+        np.testing.assert_allclose(np.asarray(out.q), np.asarray(state.q))
+
+    def test_the_wrapper_really_is_still_in_the_model(self):
+        """Otherwise the test above would pass for the wrong reason."""
+        assert isinstance(self._constrained().params.bottom_drag, paramax.Parameterize)
+
+    def test_a_plain_model_is_unaffected(self):
+        model = self._retype(BarotropicQG.create(nx=8, ny=8))
+        state = BarotropicQGState(q=jnp.ones((10, 10)))
+        np.testing.assert_allclose(
+            np.asarray(model.apply_boundary_conditions(state).q),
+            np.asarray(state.q),
+        )

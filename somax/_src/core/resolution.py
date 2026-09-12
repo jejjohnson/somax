@@ -71,7 +71,7 @@ def _require_finite_positive(check: str, name: str, value: float) -> float:
 
 
 def _require_finite_thresholds(check: str, **thresholds: float) -> None:
-    """Reject a non-finite resolution threshold.
+    """Reject a resolution threshold that would disable its guard.
 
     These come straight from a config: ``munk_width: {n_cells_min:
     .nan}`` is valid YAML, ``yaml.safe_load`` produces a NaN, and
@@ -79,19 +79,32 @@ def _require_finite_thresholds(check: str, **thresholds: float) -> None:
     NaN is false, so the guard would pass a layer resolved by no cells
     at all.
 
+    A negative threshold has the same effect by a different route: a
+    width ratio is never negative, so ``ratio < n_cells_min`` is
+    always false and an explicitly configured assertion silently stops
+    asserting anything. Zero is allowed — it is the warn-only setting.
+
     Args:
         check: Caller name, for the error message.
         **thresholds: Named threshold values.
 
     Raises:
-        AssertionFailedError: If any threshold is not finite.
+        AssertionFailedError: If any threshold is not finite, or is
+            negative.
     """
     for name, value in thresholds.items():
-        if not math.isfinite(float(value)):
+        number = float(value)
+        if not math.isfinite(number):
             raise AssertionFailedError(
-                f"{check}: {name} is {float(value)}. A non-finite threshold "
+                f"{check}: {name} is {number}. A non-finite threshold "
                 f"compares false against every ratio, so the check would "
                 f"always pass."
+            )
+        if number < 0.0:
+            raise AssertionFailedError(
+                f"{check}: {name} is {number}. A width ratio is never "
+                f"negative, so a negative threshold would disable the "
+                f"check entirely; use 0 to warn only."
             )
 
 
