@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -10,7 +10,9 @@ from finitevolx import Advection1D, CartesianGrid1D, Difference1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, Params, State, as_parameter
+from somax._src.models._nondim import require_positive
 
 
 class Burgers1DParams(Params):
@@ -94,6 +96,49 @@ class Burgers1D(SomaxModel):
         """Compute energy diagnostic."""
         energy = 0.5 * jnp.sum(state.u[1:-1] ** 2) * self.grid.dx
         return Burgers1DDiagnostics(energy=energy)
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 100,
+        reynolds: float,
+        **create_kw: Any,
+    ) -> tuple[Burgers1D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Advective scale set (:meth:`somax.Scales.advective`) with
+        ``L = U = 1``, so ``T = L/U = 1`` and the equation reads
+        ``d_t u + u . grad u = Re**-1 laplacian(u)``. The Reynolds
+        number is the only free number: ``nu = 1/Re``.
+
+
+        Args:
+            nx: Interior grid cells.
+            reynolds: Reynolds number ``Re = U L / nu``; sets
+                ``nu = 1/Re``.
+            **create_kw: Forwarded to :meth:`create` (``periodic``,
+                ``method``, ``mask``).
+
+        Returns:
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit; for the diffusive bound pass
+            ``mode="diffusive", diffusivity=1/reynolds``, since the
+            scale set cannot know the model's Reynolds number.
+
+        Raises:
+            ValueError: If an input is not positive.
+        """
+        context = "Burgers1D.from_nondimensional"
+        require_positive(context, reynolds=reynolds)
+        model = Burgers1D.create(
+            nx=nx,
+            Lx=1.0,
+            nu=1.0 / reynolds,
+            **create_kw,
+        )
+        return model, Scales.advective(L=1.0, U=1.0)
 
     @staticmethod
     def create(

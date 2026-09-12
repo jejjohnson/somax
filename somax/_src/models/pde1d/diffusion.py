@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -10,6 +10,7 @@ from finitevolx import CartesianGrid1D, Difference1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
@@ -94,6 +95,40 @@ class Diffusion1D(SomaxModel):
         """Compute energy diagnostic."""
         energy = 0.5 * jnp.sum(state.u[1:-1] ** 2) * self.grid.dx
         return Diffusion1DDiagnostics(energy=energy)
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 100,
+        **create_kw: Any,
+    ) -> tuple[Diffusion1D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Diffusive scale set (:meth:`somax.Scales.diffusive`) with
+        ``L = kappa = 1``, so ``T = L**2/kappa = 1`` and the equation
+        reads ``d_t u = laplacian(u)``. Pure diffusion has no velocity
+        scale, so this scaling leaves no free dimensionless number:
+        every diffusion problem is the same problem once rescaled, and
+        only the grid and the initial condition remain to be chosen.
+
+
+        Args:
+            nx: Interior grid cells.
+            **create_kw: Forwarded to :meth:`create` (``periodic``, ``mask``).
+
+        Returns:
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit.
+        """
+        model = Diffusion1D.create(
+            nx=nx,
+            Lx=1.0,
+            nu=1.0,
+            **create_kw,
+        )
+        return model, Scales.diffusive(L=1.0, kappa=1.0)
 
     @staticmethod
     def create(

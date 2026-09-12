@@ -242,3 +242,38 @@ class TestAdvectiveCoriolisValidation:
     @pytest.mark.parametrize("allowed", [0.0, -1e-4])
     def test_it_still_accepts_zero_and_negative(self, allowed):
         assert Scales.advective(L=1.0, U=1.0, f0=allowed).f0 == allowed
+
+
+class TestTheDiffusiveSetHasNoGroupsToPreserve:
+    """Its rotational groups are bookkeeping, not physics.
+
+    ``Scales.diffusive`` has no imposed velocity and no rotation: its
+    ``U = kappa/L`` exists only to keep the derived properties
+    well-defined. Preserving ``rossby`` or ``froude`` across
+    ``nondimensional()`` would be preserving an artefact, so the
+    contract is scoped to exclude them — and the one number the family
+    does have, the nondimensional diffusivity, is 1 either way.
+    """
+
+    def scales(self):
+        return Scales.diffusive(L=2.0, kappa=0.01)
+
+    def test_the_nondimensional_diffusivity_is_one_before_and_after(self):
+        """``kappa`` is implied by ``T = L**2 / kappa``."""
+        scales = self.scales()
+        for candidate in (scales, scales.nondimensional()):
+            kappa = candidate.L**2 / candidate.T
+            assert kappa * candidate.T / candidate.L**2 == pytest.approx(1.0)
+
+    def test_the_kind_still_survives(self):
+        assert self.scales().nondimensional().kind == "diffusive"
+
+    def test_the_unit_set_really_is_at_unit_scales(self):
+        unit = self.scales().nondimensional()
+        assert pytest.approx(1.0) == unit.L
+        assert pytest.approx(1.0) == unit.T
+
+    def test_rossby_is_not_claimed_to_survive(self):
+        """Documented, and pinned so the exclusion is deliberate."""
+        scales = self.scales()
+        assert scales.nondimensional().rossby != pytest.approx(scales.rossby)

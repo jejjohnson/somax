@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -17,7 +17,9 @@ from finitevolx import (
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
+from somax._src.core.scales import Scales
 from somax._src.core.types import Diagnostics, Params, State, as_parameter
+from somax._src.models._nondim import require_positive
 
 
 class Burgers2DParams(Params):
@@ -108,6 +110,57 @@ class Burgers2D(SomaxModel):
         ui, vi = state.u[1:-1, 1:-1], state.v[1:-1, 1:-1]
         ke = 0.5 * jnp.sum(ui**2 + vi**2) * self.grid.dx * self.grid.dy
         return Burgers2DDiagnostics(kinetic_energy=ke)
+
+    @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        aspect: float = 1.0,
+        reynolds: float,
+        **create_kw: Any,
+    ) -> tuple[Burgers2D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Advective scale set (:meth:`somax.Scales.advective`) with
+        ``L = U = 1``, so ``T = L/U = 1`` and the equation reads
+        ``d_t u + u . grad u = Re**-1 laplacian(u)``. The Reynolds
+        number is the only free number: ``nu = 1/Re``.
+
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
+            reynolds: Reynolds number ``Re = U L / nu``; sets
+                ``nu = 1/Re``.
+            **create_kw: Forwarded to :meth:`create` (``method``, ``mask``).
+
+        Returns:
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing. For the diffusive bound
+            add ``mode="diffusive", diffusivity=1/reynolds`` — the
+            scale set cannot know the model's Reynolds number.
+
+        Raises:
+            ValueError: If an input is not positive.
+        """
+        context = "Burgers2D.from_nondimensional"
+        require_positive(context, aspect=aspect)
+        require_positive(context, reynolds=reynolds)
+        model = Burgers2D.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            nu=1.0 / reynolds,
+            **create_kw,
+        )
+        return model, Scales.advective(L=1.0, U=1.0)
 
     @staticmethod
     def create(
