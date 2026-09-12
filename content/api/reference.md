@@ -3395,11 +3395,14 @@ xarray / zarr helpers that round-trip model states and snapshots (requires the `
 These symbols live in `somax.io` and require the optional `sim` dependency group (`uv sync --group sim`):
 
 - `somax.io.append_to_dataset`
+- `somax.io.apply_scale_metadata`
 - `somax.io.dataset_to_state`
 - `somax.io.load_dataset`
 - `somax.io.save_dataset`
+- `somax.io.scales_attrs`
 - `somax.io.snapshots_to_dataset`
 - `somax.io.state_to_dataset`
+- `somax.io.transform_attrs`
 
 ## Data Assimilation
 

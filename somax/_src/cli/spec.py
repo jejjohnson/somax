@@ -239,6 +239,11 @@ class RunSpec:
             consts=copy.deepcopy(self.scenario.consts),
             forcing=copy.deepcopy(self.scenario.forcing),
             initial_condition=copy.deepcopy(self.scenario.initial_condition),
+            # Carried across like every other block: dropping it sent a
+            # ``--debug`` run of a nondimensional config down the
+            # dimensional path with default SI constants, silently
+            # running different physics.
+            nondim=copy.deepcopy(self.scenario.nondim),
         )
         _merge_block_dict(new_scenario, self.debug.scenario, owner="scenario")
 
@@ -280,6 +285,12 @@ class RunSpec:
                 "consts": copy.deepcopy(self.scenario.consts),
                 "forcing": copy.deepcopy(self.scenario.forcing),
                 "initial_condition": copy.deepcopy(self.scenario.initial_condition),
+                # Without this, ``dump-yaml`` and ``show-config`` drop
+                # the dimensionless inputs and reloading the result
+                # switches to the dimensional factory. ``_build_manifest``
+                # hashes this dict too, so two runs at different Rossby
+                # numbers would otherwise share a config hash.
+                "nondim": copy.deepcopy(self.scenario.nondim),
             },
             "model": {
                 "name": self.model.name,

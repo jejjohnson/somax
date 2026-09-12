@@ -20,9 +20,6 @@ so ``t1 = 20`` is twenty basin-crossing times rather than a number of
 seconds.
 """
 
-from configs._authoring._common import default_debug
-
-
 DoubleGyreBTQGNondimConfig: dict = {
     "scenario": {
         "name": "double_gyre",
@@ -51,7 +48,17 @@ DoubleGyreBTQGNondimConfig: dict = {
         "save_interval": 1.0,
     },
     "output": {"format": "zarr", "save_final_state": True},
-    "debug": default_debug(),
+    # Not ``default_debug()``: its SI-oriented values are wrong twice
+    # over here. A 32-cell grid resolves the Munk layer with only 1.6
+    # cells, so the factory's own guard rejects the run before it
+    # starts; and its ``t1``/``save_interval`` are in *seconds*, which
+    # at ``dt=1e-3`` crossing times would be 86 million steps. The
+    # debug run stays nondimensional: a grid that still spans the Munk
+    # layer, and a couple of crossing times.
+    "debug": {
+        "scenario": {"grid": {"nx": 64, "ny": 64}},
+        "timestepping": {"t1": 2.0, "save_interval": 0.5},
+    },
     "assertions": {
         "munk_width": {"n_cells_min": 2.0},
         "stommel_width": {"n_cells_min": 1.0},

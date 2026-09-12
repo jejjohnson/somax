@@ -32,11 +32,11 @@ output:
 debug:
   scenario:
     grid:
-      nx: 32
-      ny: 32
+      nx: 64
+      ny: 64
   timestepping:
-    t1: 86400.0
-    save_interval: 600.0
+    t1: 2.0
+    save_interval: 0.5
 assertions:
   munk_width:
     n_cells_min: 2.0
