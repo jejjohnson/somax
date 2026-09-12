@@ -25,6 +25,13 @@ class SimulationCheckpointer(eqx.Module):
     def save(self, step: int, state: PyTree, model: eqx.Module) -> Path:
         """Save a checkpoint to disk.
 
+        Only the array leaves of ``model.params`` go to disk. A
+        constrained parameter built with :func:`~somax.positive` keeps
+        its transform as an ordinary pytree leaf, and Orbax has no
+        handler for a Python function; the structure around the arrays
+        is rebuilt from the target model on restore anyway, so nothing
+        is lost by leaving it behind.
+
         Args:
             step: Current simulation step.
             state: Model state pytree.
@@ -36,10 +43,11 @@ class SimulationCheckpointer(eqx.Module):
         import orbax.checkpoint as ocp
 
         path = Path(self.checkpoint_dir) / f"step_{step:08d}"
+        arrays, _ = eqx.partition(model.params, eqx.is_array)
         with ocp.StandardCheckpointer() as checkpointer:
             checkpointer.save(
                 path,
-                {"state": state, "params": model.params, "step": step},
+                {"state": state, "params": arrays, "step": step},
             )
             checkpointer.wait_until_finished()
         return path
@@ -59,22 +67,24 @@ class SimulationCheckpointer(eqx.Module):
             target_model: A model instance whose ``params`` structure
                 matches the saved checkpoint.
 
+        The saved parameters are the array leaves only (see
+        :meth:`save`); they are recombined with the target model's
+        non-array leaves, so a restored constrained parameter comes
+        back as a working wrapper rather than as a bare array.
+
         Returns:
             Tuple of (restored_state, restored_params, restored_step).
         """
         import orbax.checkpoint as ocp
 
         path = Path(self.checkpoint_dir) / f"step_{step:08d}"
+        arrays, static = eqx.partition(target_model.params, eqx.is_array)
         with ocp.StandardCheckpointer() as checkpointer:
             ckpt = checkpointer.restore(
                 path,
-                target={
-                    "state": target_state,
-                    "params": target_model.params,
-                    "step": 0,
-                },
+                target={"state": target_state, "params": arrays, "step": 0},
             )
-        return ckpt["state"], ckpt["params"], ckpt["step"]
+        return ckpt["state"], eqx.combine(ckpt["params"], static), ckpt["step"]
 
     def should_save(self, step: int) -> bool:
         """Check whether a checkpoint should be saved at this step."""
