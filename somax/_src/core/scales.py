@@ -91,9 +91,10 @@ class Scales(eqx.Module):
             A ``Scales`` with ``kind="advective"``.
 
         Raises:
-            ValueError: If ``L`` or ``U`` is not strictly positive.
+            ValueError: If ``L``, ``U``, ``H`` or ``g`` is not strictly
+                positive.
         """
-        _require_positive(L=L, U=U, H=H)
+        _require_positive(L=L, U=U, H=H, g=g)
         return cls(L=L, U=U, H=H, f0=f0, T=L / U, g=g, kind="advective")
 
     @classmethod
@@ -123,10 +124,10 @@ class Scales(eqx.Module):
             A ``Scales`` with ``kind="inertial"``.
 
         Raises:
-            ValueError: If ``L``, ``H``, ``f0`` or ``rossby`` is not
-                strictly positive.
+            ValueError: If ``L``, ``H``, ``f0``, ``rossby`` or ``g`` is
+                not strictly positive.
         """
-        _require_positive(L=L, H=H, f0=f0, rossby=rossby)
+        _require_positive(L=L, H=H, f0=f0, rossby=rossby, g=g)
         return cls(L=L, U=f0 * L * rossby, H=H, f0=f0, T=1.0 / f0, g=g, kind="inertial")
 
     @classmethod
@@ -138,7 +139,7 @@ class Scales(eqx.Module):
         rossby: float,
         g: float = GRAVITY,
     ) -> Scales:
-        """Planetary set: ``L = a``, ``T = 1 / Omega``, ``U = Omega * a * Ro``.
+        """Planetary set: ``L = a``, ``T = 1/Omega``, ``U = 2 * Omega * a * Ro``.
 
         The set for spherical models, whose natural length scale is the
         planet radius. ``f0`` is stored as ``2 * Omega`` so that
@@ -157,10 +158,10 @@ class Scales(eqx.Module):
             A ``Scales`` with ``kind="planetary"``.
 
         Raises:
-            ValueError: If ``a``, ``Omega``, ``H`` or ``rossby`` is not
-                strictly positive.
+            ValueError: If ``a``, ``Omega``, ``H``, ``rossby`` or ``g``
+                is not strictly positive.
         """
-        _require_positive(a=a, Omega=Omega, H=H, rossby=rossby)
+        _require_positive(a=a, Omega=Omega, H=H, rossby=rossby, g=g)
         return cls(
             L=a,
             U=2.0 * Omega * a * rossby,
@@ -229,18 +230,34 @@ class Scales(eqx.Module):
 
         What a ``from_nondimensional`` factory builds its model in:
         ``L = 1`` and the family's own choice of what else is unity
-        (``U = 1`` when advective, ``f0 = 1`` when inertial or
-        planetary). Useful in tests, to state that a nondimensional run
-        really is running at unit scales.
+        (``U = 1`` when advective, ``f0 = 1`` when inertial, ``Omega =
+        1`` when planetary). Useful in tests, to state that a
+        nondimensional run really is running at unit scales.
+
+        Gravity is *not* carried across. Every other scale becomes 1,
+        so keeping the SI ``9.81`` would change :attr:`burger`,
+        :attr:`froude`, :attr:`lamb` and :attr:`eta`, handing a factory
+        a different physical problem. It is instead set to whatever
+        reproduces this set's Burger number at the new unit scales,
+        ``g' = Bu (f0' L')**2 / H'`` — which is ``g H / U**2`` for the
+        advective set, ``g H / (f0 L)**2`` for the inertial one, and
+        four times that for the planetary one, whose ``f0'`` is ``2``.
 
         Returns:
-            A ``Scales`` of the same ``kind`` with unit scales.
+            A ``Scales`` of the same ``kind`` with unit scales and the
+            same dimensionless groups.
         """
+        burger = self.burger
         if self.kind == "advective":
-            return Scales.advective(L=1.0, U=1.0, f0=1.0 / self.rossby, H=1.0, g=self.g)
+            # f0' = 1/Ro is what keeps the Rossby number, so the
+            # gravity that keeps the Burger number scales with it.
+            f0 = 1.0 / self.rossby
+            return Scales.advective(L=1.0, U=1.0, f0=f0, H=1.0, g=burger * f0**2)
         if self.kind == "inertial":
-            return Scales.inertial(L=1.0, f0=1.0, H=1.0, rossby=self.rossby, g=self.g)
-        return Scales.planetary(a=1.0, Omega=1.0, H=1.0, rossby=self.rossby, g=self.g)
+            return Scales.inertial(L=1.0, f0=1.0, H=1.0, rossby=self.rossby, g=burger)
+        return Scales.planetary(
+            a=1.0, Omega=1.0, H=1.0, rossby=self.rossby, g=4.0 * burger
+        )
 
 
 def _require_positive(**values: float) -> None:
