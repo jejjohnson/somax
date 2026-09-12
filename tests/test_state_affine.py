@@ -518,3 +518,114 @@ class TestArrayValuedScaleValidation:
             h=jnp.asarray([[[1.0]], [[-2.0]], [[3.0]]]),
         )
         assert float(transform.scale.h[1, 0, 0]) == -2.0
+
+
+class TestGenericPytreesAreNotMistakenForMomentPairs:
+    """``from_samples`` accepts any pytree, including two-element ones.
+
+    A generated ``(mean, std)`` pair used to be a bare 2-tuple, so a
+    state that *is* a two-element container had its own structural node
+    unpacked instead — sending one child's statistics to ``loc`` and
+    the other's to ``scale``.
+    """
+
+    def samples(self):
+        rng = np.random.RandomState(0)
+        return (
+            jnp.asarray(rng.randn(6, 4) + 10.0),
+            jnp.asarray(rng.randn(6, 4) - 5.0),
+        )
+
+    def test_a_two_tuple_state_keeps_its_structure(self):
+        transform = StateAffine.from_samples(self.samples())
+        assert len(transform.loc) == 2
+        assert len(transform.scale) == 2
+
+    def test_each_child_gets_its_own_mean(self):
+        first, second = self.samples()
+        transform = StateAffine.from_samples((first, second))
+        np.testing.assert_allclose(
+            np.asarray(transform.loc[0]), np.asarray(jnp.mean(first)), rtol=1e-5
+        )
+        np.testing.assert_allclose(
+            np.asarray(transform.loc[1]), np.asarray(jnp.mean(second)), rtol=1e-5
+        )
+
+    def test_the_scales_are_standard_deviations_not_the_other_child(self):
+        first, second = self.samples()
+        transform = StateAffine.from_samples((first, second))
+        np.testing.assert_allclose(
+            np.asarray(transform.scale[0]), np.asarray(jnp.std(first)), rtol=1e-5
+        )
+
+    def test_it_round_trips(self):
+        samples = self.samples()
+        transform = StateAffine.from_samples(samples)
+        state = tuple(leaf[0] for leaf in samples)
+        back = transform.inverse(transform.forward(state))
+        for got, expected in zip(back, state, strict=True):
+            np.testing.assert_allclose(np.asarray(got), np.asarray(expected), rtol=1e-4)
+
+    def test_a_three_tuple_was_never_affected(self):
+        """Only the two-element case was ambiguous."""
+        rng = np.random.RandomState(1)
+        samples = tuple(jnp.asarray(rng.randn(6, 4)) for _ in range(3))
+        assert len(StateAffine.from_samples(samples).loc) == 3
+
+    def test_an_ordinary_state_still_works(self):
+        rng = np.random.RandomState(2)
+        shape = (5, 4, 4)
+        samples = NonlinearSW2DState(
+            h=jnp.asarray(rng.randn(*shape)),
+            u=jnp.asarray(rng.randn(*shape)),
+            v=jnp.asarray(rng.randn(*shape)),
+        )
+        transform = StateAffine.from_samples(samples)
+        assert jnp.ndim(transform.loc.h) == 0
+
+
+class TestSampleFloorMustBeUsable:
+    """``eps`` is the floor on the returned scale, so zero is not a floor."""
+
+    def samples(self):
+        return NonlinearSW2DState(
+            h=jnp.ones((5, 4, 4)), u=jnp.ones((5, 4, 4)), v=jnp.ones((5, 4, 4))
+        )
+
+    @pytest.mark.parametrize("bad", [0.0, -1e-8, float("nan"), float("inf")])
+    def test_a_bad_floor_is_rejected(self, bad):
+        with pytest.raises(ValueError, match="eps must be"):
+            StateAffine.from_samples(self.samples(), eps=bad)
+
+    def test_a_constant_field_would_otherwise_get_a_zero_scale(self):
+        """What the validation prevents: an inverse that divides by zero."""
+        transform = StateAffine.from_samples(self.samples(), eps=1e-6)
+        assert float(transform.scale.h) == pytest.approx(1e-6)
+
+    def test_a_valid_floor_is_still_accepted(self):
+        transform = StateAffine.from_samples(self.samples(), eps=1e-3)
+        assert float(transform.scale.h) == pytest.approx(1e-3)
+
+
+class TestNonlinearOneDimensionalCoriolisPartner:
+    """``NonlinearSW1DState.v`` is a T-point field, like the linear one."""
+
+    def test_it_declares_the_t_point_mask(self):
+        from somax._src.models.swm.nonlinear_1d import NonlinearSW1DState
+
+        assert NonlinearSW1DState.mask_locations == {"v": "h"}
+
+    def test_it_matches_the_linear_state(self):
+        from somax._src.models.swm.linear_1d import LinearSW1DState
+        from somax._src.models.swm.nonlinear_1d import NonlinearSW1DState
+
+        assert (
+            NonlinearSW1DState.mask_locations["v"]
+            == LinearSW1DState.mask_locations["v"]
+        )
+
+    def test_u_keeps_the_staggered_mask(self):
+        """Only ``v`` is collocated; ``u`` really is at U-points."""
+        from somax._src.models.swm.nonlinear_1d import NonlinearSW1DState
+
+        assert "u" not in NonlinearSW1DState.mask_locations

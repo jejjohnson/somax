@@ -499,9 +499,10 @@ Attributes:
         ``vector_field`` and parameters are untouched.
     transform: The affine state map. ``forward`` takes an inner
         state to wrapped coordinates.
-    time_scale: Inner time units per wrapped time unit. For a
-        nondimensionalising wrapper this is ``scales.T``; for a
-        purely statistical one it stays at 1.
+    time_scale: Inner time units per wrapped time unit, finite and
+        strictly positive. For a nondimensionalising wrapper this
+        is ``scales.T``; for a purely statistical one it stays
+        at 1.
 ```
 ````
 
@@ -1200,15 +1201,15 @@ constrained value can land *on* a bound but never outside it.
 
 Args:
     value: The initial constrained value, strictly inside the interval.
-    lower: Lower bound, exclusive.
-    upper: Upper bound, exclusive.
+    lower: Lower bound, exclusive. Must be finite.
+    upper: Upper bound, exclusive. Must be finite.
 
 Returns:
     A ``Parameterize`` that unwraps to ``value``.
 
 Raises:
-    ValueError: If the bounds are not ordered, or ``value`` lies
-        outside the open interval.
+    ValueError: If the bounds are not finite or not ordered, or
+        ``value`` lies outside the open interval.
 ```
 ````
 
@@ -1305,7 +1306,8 @@ optimiser that has not already diverged will go. It is never
 negative.
 
 Args:
-    value: The initial constrained value. Must be strictly positive.
+    value: The initial constrained value. Must be finite and
+        strictly positive.
 
 Returns:
     A ``Parameterize`` that unwraps to ``value``.
