@@ -24,7 +24,19 @@ from somax._src.cli.scenarios import ScenarioEntry, get_scenario
 # the inferred compatibility (geometry x coordinates + masks) gives the
 # wrong answer for a genuinely nonsensical combination — prefer fixing
 # the metadata on the registry entry first.
-INCOMPATIBLE_PAIRS: set[tuple[str, str]] = set()
+INCOMPATIBLE_PAIRS: set[tuple[str, str]] = {
+    # ``global_ocean`` is a full-sphere geometry, and both spherical
+    # models reject a latitude range that reaches a pole: their polar
+    # rows carry a solid-wall condition, which describes a latitude
+    # band and not the regular sphere (see
+    # ``somax._src.models.spherical._geometry``). The geometry x
+    # coordinates rule cannot see that — both are "spherical" — so
+    # without these entries ``list-pairs`` advertises a pairing that
+    # cannot be built. Remove them when pole coupling with a single
+    # gauge constraint lands.
+    ("global_ocean", "spherical_swm"),
+    ("global_ocean", "spherical_qg"),
+}
 
 
 class IncompatiblePairError(ValueError):

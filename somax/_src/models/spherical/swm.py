@@ -225,6 +225,13 @@ class SphericalSWM(SomaxModel):
         du_dt = du_dt - kappa * u
         dv_dt = dv_dt - kappa * v
 
+        # Hold the constrained rows fixed. ``apply_boundary_conditions``
+        # zeroes the wall-normal v before each evaluation, but the
+        # integrator projects only the RHS *input* — the returned and
+        # saved states are not projected — so a nonzero dv_dt on those
+        # rows would accumulate there and the snapshots would show
+        # through-flow at a wall the model says is closed.
+        dv_dt = dv_dt.at[0, :].set(0.0).at[-2, :].set(0.0).at[-1, :].set(0.0)
         return SphericalSWMState(h=dh_dt, u=du_dt, v=dv_dt)
 
     def apply_boundary_conditions(self, state: PyTree) -> SphericalSWMState:
@@ -304,6 +311,8 @@ class SphericalSWM(SomaxModel):
         wind_profile: str = "zonal",
         method: str = "upwind1",
         mask: Mask2D | None = None,
+        wind_stress_x: Float[Array, "Ny Nx"] | None = None,
+        wind_stress_y: Float[Array, "Ny Nx"] | None = None,
     ) -> SphericalSWM:
         """Convenience factory.
 
@@ -324,6 +333,11 @@ class SphericalSWM(SomaxModel):
                 pattern.
             method: Advection reconstruction for the mass equation.
             mask: Optional land/ocean mask.
+            wind_stress_x: Precomputed zonal stress pattern on the
+                model grid, overriding ``wind_profile``. For a scenario
+                that supplies its own forcing field rather than one of
+                the analytic profiles.
+            wind_stress_y: Precomputed meridional stress pattern.
 
         Returns:
             A ``SphericalSWM`` instance.
@@ -344,13 +358,20 @@ class SphericalSWM(SomaxModel):
         f_field = 2.0 * omega * jnp.sin(_lat_at_corner(grid))
 
         lat_T = grid.lat_T
-        if wind_profile == "none":
-            wind_stress_x = jnp.zeros_like(lat_T)
+        if wind_stress_x is None:
+            if wind_profile == "none":
+                wind_stress_x = jnp.zeros_like(lat_T)
+            else:
+                # Trades / westerlies: eastward at mid-latitudes,
+                # westward at the equator and poles.
+                wind_stress_x = -jnp.cos(2.0 * lat_T)
         else:
-            # Trades / westerlies: eastward at mid-latitudes, westward
-            # at the equator and poles.
-            wind_stress_x = -jnp.cos(2.0 * lat_T)
-        wind_stress_y = jnp.zeros_like(lat_T)
+            wind_stress_x = jnp.asarray(wind_stress_x)
+        wind_stress_y = (
+            jnp.zeros_like(lat_T)
+            if wind_stress_y is None
+            else jnp.asarray(wind_stress_y)
+        )
 
         return SphericalSWM(
             params=params,

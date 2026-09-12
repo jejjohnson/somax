@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from somax._src.cli.models_registry import (
@@ -443,3 +444,128 @@ class TestCliStubListMatchesTheRegistry:
         from somax._src.cli.app import _STUB_MODELS as cli_stubs
 
         assert set(cli_stubs) == _STUB_MODELS
+
+
+class TestSphericalAdaptersConsumeScenarioForcing:
+    """Both entries advertise ``forcing=("tau_x", "tau_y")``.
+
+    Reading only the scalar ``forcing_params`` left a scenario that
+    supplies its own fields running on the default analytic pattern —
+    usually at zero amplitude, so unforced.
+    """
+
+    def bundle(self, tau_x=None, tau_y=None):
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        return ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+            forcing=ForcingFields(tau_x=tau_x, tau_y=tau_y),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+        )
+
+    def pattern(self, model_shape=(10, 18)):
+        import numpy as np
+
+        return jnp.asarray(np.full(model_shape, 0.25))
+
+    def test_the_swm_uses_a_supplied_zonal_stress(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.pattern()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_stress_x), 0.25)
+
+    def test_the_swm_uses_a_supplied_meridional_stress(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_y=self.pattern()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_stress_y), 0.25)
+
+    def test_the_analytic_profile_is_still_the_default(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert float(np.abs(np.asarray(built.model.wind_stress_x)).max()) > 0.0
+        assert not np.allclose(np.asarray(built.model.wind_stress_x), 0.25)
+
+    def test_the_qg_uses_a_supplied_curl(self):
+        built = MODELS["spherical_qg"].build(self.bundle(tau_x=self.pattern()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_forcing), 0.25)
+
+    def test_the_qg_analytic_profile_is_still_the_default(self):
+        built = MODELS["spherical_qg"].build(self.bundle(), {})
+        assert not np.allclose(np.asarray(built.model.wind_forcing), 0.25)
+
+
+class TestSphericalInitialStateRespectsTheMask:
+    """Filling ``h`` with ``H0`` everywhere leaves water over land.
+
+    The masked operators never touch those cells, so the value persists
+    into the saved states and into ``diagnose``, where it counts
+    towards mass and potential energy.
+    """
+
+    def built(self, masked):
+        import numpy as np
+
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        mask = None
+        if masked:
+            wet = np.ones((8, 16), dtype=float)
+            wet[2:4, 3:6] = 0.0
+            mask = jnp.asarray(wet)
+        bundle = ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+                mask=mask,
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+            forcing=ForcingFields(),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+        )
+        return MODELS["spherical_swm"].build(bundle, {})
+
+    def test_dry_cells_start_dry(self):
+        built = self.built(masked=True)
+        dry = np.asarray(built.model.mask.h) == 0.0
+        assert dry.any()
+        np.testing.assert_allclose(np.asarray(built.state0.h)[dry], 0.0)
+
+    def test_wet_cells_start_at_the_configured_depth(self):
+        built = self.built(masked=True)
+        wet = np.asarray(built.model.mask.h) != 0.0
+        np.testing.assert_allclose(
+            np.asarray(built.state0.h)[wet], float(built.model.consts.H0)
+        )
+
+    def test_an_unmasked_scenario_is_filled_everywhere(self):
+        built = self.built(masked=False)
+        np.testing.assert_allclose(
+            np.asarray(built.state0.h), float(built.model.consts.H0)
+        )
+
+    def test_the_mass_diagnostic_excludes_land(self):
+        masked = self.built(masked=True)
+        unmasked = self.built(masked=False)
+        assert float(masked.model.diagnose(masked.state0).mass) < float(
+            unmasked.model.diagnose(unmasked.state0).mass
+        )
