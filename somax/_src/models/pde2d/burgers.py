@@ -17,7 +17,7 @@ from finitevolx import (
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class Burgers2DParams(Params):
@@ -134,7 +134,7 @@ class Burgers2D(SomaxModel):
             A ``Burgers2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = Burgers2DParams(nu=jnp.array(nu))
+        params = Burgers2DParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         advection = FVXAdvection2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)

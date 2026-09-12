@@ -10,7 +10,7 @@ from finitevolx import CartesianGrid2D, Difference2D, Mask2D, enforce_periodic
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class Diffusion2DParams(Params):
@@ -108,6 +108,6 @@ class Diffusion2D(SomaxModel):
             A ``Diffusion2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = Diffusion2DParams(nu=jnp.array(nu))
+        params = Diffusion2DParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         return Diffusion2D(params=params, grid=grid, diff=diff, mask=mask)

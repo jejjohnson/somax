@@ -16,7 +16,7 @@ from finitevolx import (
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class LinearConvection2DParams(Params):
@@ -124,7 +124,7 @@ class LinearConvection2D(SomaxModel):
             A ``LinearConvection2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = LinearConvection2DParams(cx=jnp.array(cx), cy=jnp.array(cy))
+        params = LinearConvection2DParams(cx=as_parameter(cx), cy=as_parameter(cy))
         diff = Difference2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)
         return LinearConvection2D(

@@ -22,6 +22,7 @@ import diffrax as dfx
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
+import paramax
 from loguru import logger
 from pipekit import StatefulOperator
 from pipekit_cycle import Cycle
@@ -412,7 +413,7 @@ def _integrate_and_write(
         metrics: dict[str, Any] = {}
         if spec.output.write_metrics and not only_final:
             try:
-                diagnostics = model.diagnose(final_state)
+                diagnostics = paramax.unwrap(model).diagnose(final_state)
             except Exception as exc:
                 logger.warning("model.diagnose failed: {}", exc)
                 diagnostics = None
@@ -567,7 +568,7 @@ def _format_physical_scalars(model: Any, state: Any) -> tuple[str, dict[str, flo
     that's already corrupted) it returns an empty line and dict.
     """
     try:
-        diagnostics = model.diagnose(state)
+        diagnostics = paramax.unwrap(model).diagnose(state)
     except Exception as exc:
         return f"diagnose failed: {type(exc).__name__}: {exc}", {}
     flat = _flatten_diagnostics(diagnostics)

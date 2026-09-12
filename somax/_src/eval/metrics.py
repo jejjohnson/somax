@@ -36,6 +36,7 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
+import paramax
 from jaxtyping import Array, Float
 
 
@@ -312,7 +313,7 @@ def compute_eval_metrics(model: Any, state: State) -> dict[str, float]:
     # via diagnose().invariants() (SWM mass/energy/enstrophy/Casimir, QG
     # energy/enstrophy), independent of the velocity-state field metrics below.
     try:
-        invariants = model.diagnose(state).invariants()
+        invariants = paramax.unwrap(model).diagnose(state).invariants()
     except Exception:
         invariants = {}
     for name, value in invariants.items():

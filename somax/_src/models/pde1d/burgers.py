@@ -10,7 +10,7 @@ from finitevolx import Advection1D, CartesianGrid1D, Difference1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class Burgers1DParams(Params):
@@ -118,7 +118,7 @@ class Burgers1D(SomaxModel):
             A ``Burgers1D`` model instance.
         """
         grid = CartesianGrid1D.from_interior(nx, Lx)
-        params = Burgers1DParams(nu=jnp.array(nu))
+        params = Burgers1DParams(nu=as_parameter(nu))
         diff = Difference1D(grid=grid, mask=mask)
         advection = Advection1D(grid=grid, mask=mask)
         return Burgers1D(
