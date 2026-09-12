@@ -106,12 +106,13 @@ class Diffusion2D(SomaxModel):
             nx: Interior cells in x.
             ny: Interior cells in y.
             aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
-            **create_kw: Forwarded to :meth:`create` (``method``,
-                ``mask``).
+            **create_kw: Forwarded to :meth:`create` (``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with the
-            cell count to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing.
         """
         context = "Diffusion2D.from_nondimensional"
         require_positive(context, aspect=aspect)

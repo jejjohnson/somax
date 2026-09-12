@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, ClassVar
 
 import equinox as eqx
@@ -102,6 +103,7 @@ class LinearConvection2D(SomaxModel):
         nx: int = 64,
         ny: int = 64,
         aspect: float = 1.0,
+        direction: tuple[float, float] = (1.0, 1.0),
         **create_kw: Any,
     ) -> tuple[LinearConvection2D, Scales]:
         r"""Build the model at unit scales instead of SI coefficients.
@@ -110,32 +112,42 @@ class LinearConvection2D(SomaxModel):
         --------------------
         Advective scale set (:meth:`somax.Scales.advective`) with
         ``L = 1`` and the wave speed as the velocity scale, so ``T = 1``
-        and the equation reads ``d_t u + grad u = 0``. Scaling out the
-        speed leaves no free dimensionless number; the Courant number
-        is a time-step choice, not a property of the problem, so use
-        ``scales.dt_from_cfl``.
+        and the equation reads ``d_t u + c.grad u = 0`` with ``|c| = 1``.
+
+        Scaling out the *speed* leaves no free dimensionless number,
+        but it does not remove the *direction*: ``(1, 0)``, ``(1, 1)``
+        and ``(-1, 2)`` are different problems on the same grid, and
+        only their common magnitude is a unit choice. ``direction``
+        carries that, normalised so the speed stays 1. The Courant
+        number is a time-step choice rather than a property of the
+        problem, so use ``scales.dt_from_cfl``.
 
 
         Args:
             nx: Interior cells in x.
             ny: Interior cells in y.
             aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
-            **create_kw: Forwarded to :meth:`create` (``method``,
-                ``mask``).
+            direction: Propagation direction ``(cx, cy)``, normalised
+                to unit speed. Components may be zero or negative;
+                only the zero vector is rejected.
+            **create_kw: Forwarded to :meth:`create` (``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with the
-            cell count to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing.
         """
         context = "LinearConvection2D.from_nondimensional"
         require_positive(context, aspect=aspect)
+        cx, cy = _unit_direction(context, direction)
         model = LinearConvection2D.create(
             nx=nx,
             ny=ny,
             Lx=1.0,
             Ly=aspect,
-            cx=1.0,
-            cy=1.0,
+            cx=cx,
+            cy=cy,
             **create_kw,
         )
         return model, Scales.advective(L=1.0, U=1.0)
@@ -171,3 +183,37 @@ class LinearConvection2D(SomaxModel):
         return LinearConvection2D(
             params=params, grid=grid, diff=diff, interp=interp, mask=mask
         )
+
+
+def _unit_direction(
+    context: str, direction: tuple[float, float]
+) -> tuple[float, float]:
+    """Normalise a propagation direction to unit speed.
+
+    Args:
+        context: Caller name, for error messages.
+        direction: ``(cx, cy)``; components may be zero or negative.
+
+    Returns:
+        ``(cx, cy)`` scaled so ``cx**2 + cy**2 == 1``.
+
+    Raises:
+        ValueError: If the pair is not two finite numbers, or is the
+            zero vector, which has no direction to normalise.
+    """
+    if len(direction) != 2:
+        raise ValueError(
+            f"{context}: direction must be a (cx, cy) pair; got {direction!r}."
+        )
+    cx, cy = (float(c) for c in direction)
+    if not (math.isfinite(cx) and math.isfinite(cy)):
+        raise ValueError(
+            f"{context}: direction components must be finite; got {direction!r}."
+        )
+    speed = math.hypot(cx, cy)
+    if speed == 0.0:
+        raise ValueError(
+            f"{context}: direction must not be the zero vector — there is no "
+            f"direction to normalise, and the equation would be trivial."
+        )
+    return cx / speed, cy / speed

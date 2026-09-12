@@ -136,12 +136,15 @@ class Burgers2D(SomaxModel):
             aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
             reynolds: Reynolds number ``Re = U L / nu``; sets
                 ``nu = 1/Re``.
-            **create_kw: Forwarded to :meth:`create` (``method``,
-                ``mask``).
+            **create_kw: Forwarded to :meth:`create` (``method``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with the
-            cell count to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing. For the diffusive bound
+            add ``mode="diffusive", diffusivity=1/reynolds`` — the
+            scale set cannot know the model's Reynolds number.
 
         Raises:
             ValueError: If an input is not positive.

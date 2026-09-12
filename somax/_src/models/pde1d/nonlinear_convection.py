@@ -103,8 +103,8 @@ class NonlinearConvection1D(SomaxModel):
                 ``method``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
-            to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit.
         """
         model = NonlinearConvection1D.create(
             nx=nx,

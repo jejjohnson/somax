@@ -111,12 +111,11 @@ class Diffusion1D(SomaxModel):
 
         Args:
             nx: Interior grid cells.
-            **create_kw: Forwarded to :meth:`create` (``periodic``,
-                ``method``, ``mask``).
+            **create_kw: Forwarded to :meth:`create` (``periodic``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
-            to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit.
         """
         model = Diffusion1D.create(
             nx=nx,

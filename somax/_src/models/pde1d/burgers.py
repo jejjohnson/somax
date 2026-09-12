@@ -122,8 +122,10 @@ class Burgers1D(SomaxModel):
                 ``method``, ``mask``).
 
         Returns:
-            ``(model, scales)``. Pair ``scales.dt_from_cfl`` with ``nx``
-            to pick a step size in the same time unit.
+            ``(model, scales)``. ``scales.dt_from_cfl(C, nx)`` gives a
+            step in the same time unit; for the diffusive bound pass
+            ``mode="diffusive", diffusivity=1/reynolds``, since the
+            scale set cannot know the model's Reynolds number.
 
         Raises:
             ValueError: If an input is not positive.
