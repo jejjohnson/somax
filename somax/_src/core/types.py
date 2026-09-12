@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+import dataclasses
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.nn as jnn
 import jax.numpy as jnp
-from jaxtyping import Array, ArrayLike
-from paramax import NonTrainable, Parameterize
+import jax.tree_util as jtu
+from jaxtyping import Array, ArrayLike, PyTree
+from paramax import AbstractUnwrappable, NonTrainable, Parameterize
 
 
 class State(eqx.Module):
@@ -121,6 +123,27 @@ def _inv_softplus(x: Array) -> Array:
     return x + jnp.log(-jnp.expm1(-x))
 
 
+@dataclasses.dataclass(frozen=True)
+class _IntervalTransform:
+    """``raw -> lower + (upper - lower) * sigmoid(raw)``.
+
+    A module-level frozen dataclass rather than a closure built inside
+    :func:`interval`. ``Parameterize`` keeps its transform as static
+    pytree metadata, and two closures are never equal even when they
+    capture the same bounds — so two independently built models with
+    identical constraints would have different treedefs and could not
+    be stacked into an ensemble with ``tree_map``. A frozen dataclass
+    compares and hashes by its bounds, so equivalent wrappers stay
+    structurally interchangeable.
+    """
+
+    lower: float
+    upper: float
+
+    def __call__(self, raw: Array) -> Array:
+        return self.lower + (self.upper - self.lower) * jnn.sigmoid(raw)
+
+
 def positive(value: ArrayLike) -> Parameterize:
     """Constrain a parameter to be strictly positive.
 
@@ -148,10 +171,13 @@ def positive(value: ArrayLike) -> Parameterize:
             representation in softplus space.
     """
     array = jnp.asarray(value)
-    if jnp.any(array <= 0.0):
+    # ``all(> 0)`` rather than ``any(<= 0)``: every comparison with NaN
+    # is false, so the negated form would wave a NaN through and build
+    # a wrapper that unwraps to NaN.
+    if not bool(jnp.all(array > 0.0)):
         raise ValueError(
-            f"positive(): value must be strictly positive; got {value!r}. "
-            "A non-positive value has no softplus pre-image."
+            f"positive(): value must be strictly positive and finite; got "
+            f"{value!r}. A non-positive value has no softplus pre-image."
         )
     return Parameterize(jnn.softplus, _inv_softplus(array))
 
@@ -182,18 +208,15 @@ def interval(value: ArrayLike, lower: float, upper: float) -> Parameterize:
             f"interval(): upper must exceed lower; got ({lower!r}, {upper!r})."
         )
     array = jnp.asarray(value)
-    if jnp.any(array <= lower) or jnp.any(array >= upper):
+    # Stated positively so that NaN fails it — see :func:`positive`.
+    if not bool(jnp.all((array > lower) & (array < upper))):
         raise ValueError(
             f"interval(): value must lie strictly inside ({lower!r}, {upper!r}); "
             f"got {value!r}."
         )
     scaled = (array - lower) / (upper - lower)
     raw = jnp.log(scaled) - jnp.log1p(-scaled)
-
-    def _to_interval(r: Array) -> Array:
-        return lower + (upper - lower) * jnn.sigmoid(r)
-
-    return Parameterize(_to_interval, raw)
+    return Parameterize(_IntervalTransform(float(lower), float(upper)), raw)
 
 
 def frozen(value: ArrayLike) -> NonTrainable:
@@ -211,3 +234,54 @@ def frozen(value: ArrayLike) -> NonTrainable:
         A ``NonTrainable`` wrapper that unwraps to ``value``.
     """
     return NonTrainable(jnp.asarray(value))
+
+
+def as_parameter(value: ArrayLike | Parameterize | NonTrainable) -> Any:
+    """Coerce a factory argument into a ``Params`` leaf.
+
+    Model factories take plain numbers and convert them with
+    ``jnp.asarray``, which cannot convert a paramax wrapper — so
+    ``BarotropicQG.create(lateral_viscosity=positive(100.0))`` would
+    fail, and a constrained model could only be built by surgery with
+    ``eqx.tree_at``. Wrappers are passed through untouched; everything
+    else is converted as before.
+
+    Args:
+        value: A number, array, or paramax wrapper.
+
+    Returns:
+        The wrapper unchanged, or ``jnp.asarray(value)``.
+    """
+    if isinstance(value, AbstractUnwrappable):
+        return value
+    return jnp.asarray(value)
+
+
+def trainable_mask(tree: PyTree) -> PyTree:
+    """Boolean pytree marking which leaves an optimiser may update.
+
+    ``NonTrainable`` removes a leaf from the *backward* pass, so its
+    gradient is exact zero — but a zero gradient is not the same as no
+    update. A decoupled-weight-decay optimiser such as ``optax.adamw``
+    computes its update from the parameter value as well as the
+    gradient, so applying one to a whole model still drifts a
+    :func:`frozen` constant. Pass this mask to ``optax.masked`` (or use
+    it with ``eqx.partition``) to leave those leaves genuinely alone.
+
+    Args:
+        tree: Any pytree, typically a model.
+
+    Returns:
+        A pytree of the same structure whose leaves are ``True`` for
+        trainable leaves and ``False`` under a ``NonTrainable``.
+
+    Example:
+        >>> optimiser = optax.masked(optax.adamw(1e-3), trainable_mask(model))
+    """
+
+    def mark(leaf: Any) -> Any:
+        if isinstance(leaf, NonTrainable):
+            return jtu.tree_map(lambda _: False, leaf)
+        return True
+
+    return jtu.tree_map(mark, tree, is_leaf=lambda x: isinstance(x, NonTrainable))

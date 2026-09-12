@@ -10,7 +10,7 @@ from finitevolx import CartesianGrid1D, Difference1D, Interpolation1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
 
 
 class LinearSW1DState(State):
@@ -185,8 +185,8 @@ class LinearShallowWater1D(SomaxModel):
         """
         grid = CartesianGrid1D.from_interior(nx, Lx)
         params = LinearSW1DParams(
-            lateral_viscosity=jnp.array(lateral_viscosity),
-            bottom_drag=jnp.array(bottom_drag),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
         )
         consts = LinearSW1DPhysConsts(gravity=g, f0=f0, H0=H0)
         diff = Difference1D(grid=grid, mask=mask)

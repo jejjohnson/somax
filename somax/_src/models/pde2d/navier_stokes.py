@@ -18,7 +18,7 @@ from finitevolx import (
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class NSVorticityState(State):
@@ -318,7 +318,7 @@ class IncompressibleNS2D(SomaxModel):
             An ``IncompressibleNS2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = NSParams(nu=jnp.array(nu))
+        params = NSParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)
         advection = FVXAdvection2D(grid=grid, mask=mask)
