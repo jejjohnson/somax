@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -31,6 +33,9 @@ class LinearSW2DState(State):
     h: Float[Array, "Ny Nx"]
     u: Float[Array, "Ny Nx"]
     v: Float[Array, "Ny Nx"]
+
+    # ``h`` is the perturbation, so it is already centred on zero.
+    scale_kinds: ClassVar[dict[str, str]] = {"h": "height_anomaly"}
 
 
 class LinearSW2DParams(Params):
