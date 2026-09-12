@@ -2484,6 +2484,125 @@ Args:
 ```
 ````
 
+### `SphericalQG`
+
+*class*
+
+```python
+SphericalQG(params: 'SphericalQGParams', consts: 'SphericalQGPhysConsts', grid: 'SphericalGrid2D', diff: 'SphericalDifference2D', interp: 'Interpolation2D', laplacian: 'SphericalLaplacian2D', advection: 'SphericalAdvection2D', diffusion: 'SphericalDiffusion2D', mask: 'Mask2D | None', f_field: "Float[Array, 'Ny Nx']", wind_forcing: "Float[Array, 'Ny Nx']", method: 'str' = 'upwind1', cg_tol: 'float' = 1e-06, cg_max_steps: 'int' = 500) -> None
+```
+
+Barotropic quasi-geostrophic flow on a sphere.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Advects absolute vorticity ``q + f`` by the non-divergent flow
+recovered from the streamfunction::
+
+    dq/dt = -adv_sphere(q + f, u, v) + nu lap(q) - kappa q + tau curl
+
+with ``(u, v) = (-1/R dpsi/dlat, 1/(R cos(phi)) dpsi/dlon)`` and
+``psi`` from ``lap_sphere(psi) = q``.
+
+The planetary vorticity gradient is not a constant here. Advecting
+the *absolute* vorticity ``q + f(phi)`` with ``f = 2 Omega sin(phi)``
+reproduces ``beta = 2 Omega cos(phi)/R`` implicitly, so it varies
+from its maximum at the equator to zero at the poles rather than
+being frozen at a reference latitude.
+
+Inversion is iterative. The spherical Laplacian is not diagonal in
+any transform a lat-lon grid affords — the ``cos(phi)`` metric
+couples latitudes — so the DST route the Cartesian model uses does
+not apply, and the elliptic problem is solved by conjugate
+gradients against the ``SphericalLaplacian2D`` operator.
+
+Args:
+    params: Differentiable parameters.
+    consts: Frozen physical constants.
+    grid: Spherical Arakawa C-grid.
+    diff: Spherical difference operators.
+    interp: Interpolation operators.
+    laplacian: Spherical Laplacian, used both in the RHS and as the
+        operator the inversion solves against.
+    advection: Spherical scalar advection.
+    diffusion: Spherical harmonic diffusion.
+    mask: Optional land/ocean mask (``None`` = all-ocean).
+    f_field: Precomputed Coriolis field at T-points.
+    wind_forcing: Normalised wind-stress-curl pattern.
+    method: Advection reconstruction method.
+    cg_tol: Convergence tolerance for the PV inversion, used for
+        both the relative and the absolute criterion. The default
+        is chosen for float32: a tighter absolute tolerance never
+        trips, and CG runs to its step cap.
+    cg_max_steps: Iteration cap for the PV inversion.
+```
+````
+
+### `SphericalSWM`
+
+*class*
+
+```python
+SphericalSWM(params: 'SphericalSWMParams', consts: 'SphericalSWMPhysConsts', grid: 'SphericalGrid2D', diff: 'SphericalDifference2D', interp: 'Interpolation2D', vorticity: 'SphericalVorticity2D', advection: 'SphericalAdvection2D', diffusion: 'SphericalDiffusion2D', mask: 'Mask2D | None', f_field: "Float[Array, 'Ny Nx']", wind_stress_x: "Float[Array, 'Ny Nx']", wind_stress_y: "Float[Array, 'Ny Nx']", method: 'str' = 'upwind1') -> None
+```
+
+Shallow water on a sphere, vector-invariant form.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Solves the rotating shallow-water equations on a spherical Arakawa
+C-grid::
+
+    dh/dt = -div_sphere(h u)
+    du/dt = +q (h v)_bar - (1/(R cos(phi))) dP/dlon + nu lap(u) - kappa u
+    dv/dt = -q (h u)_bar - (1/R) dP/dlat            + nu lap(v) - kappa v
+
+with ``q = (zeta + f)/h`` the potential vorticity and
+``P = KE + g h`` the Bernoulli potential. Every horizontal
+derivative carries the spherical metric: the ``1/(R cos(phi))``
+factor in longitude and ``1/R`` in latitude, supplied by the
+finitevolx spherical operators.
+
+Coriolis is the full ``f(phi) = 2 Omega sin(phi)``, not a beta-plane
+expansion about a reference latitude. The planetary vorticity
+gradient ``beta = 2 Omega cos(phi)/R`` is then implicit in the field
+and varies correctly from equator to pole.
+
+Known limitation
+----------------
+Mass is conserved only to discretisation accuracy, not to machine
+precision as in the Cartesian :class:`NonlinearShallowWater2D`. The
+spherical flux divergence does not telescope exactly against
+``spherical_area_weights`` — the cell area it implicitly divides by
+differs from the one that function returns — so a balanced
+solid-body rotation loses of order ``1e-3`` of its mass over six
+hours. The drift is independent of the time step and only weakly
+dependent on resolution, which places it in the spatial operator.
+Tracked upstream as jejjohnson/finitevolX#247; until it is fixed,
+treat the mass diagnostic here as a drift signal rather than a
+conserved quantity.
+
+Args:
+    params: Differentiable parameters.
+    consts: Frozen physical constants.
+    grid: Spherical Arakawa C-grid.
+    diff: Spherical difference operators.
+    interp: Interpolation operators (staggering only, metric-free).
+    vorticity: Spherical vorticity / PV operator.
+    advection: Spherical scalar advection, for the mass equation.
+    diffusion: Spherical harmonic diffusion.
+    mask: Optional land/ocean mask (``None`` = all-ocean).
+    f_field: Precomputed Coriolis field at X-points.
+    wind_stress_x: Normalised zonal wind-stress pattern.
+    wind_stress_y: Normalised meridional wind-stress pattern.
+    method: Advection reconstruction method for the mass equation.
+```
+````
+
 ### `geostrophic_adjustment_2d`
 
 *function*
@@ -2634,6 +2753,14 @@ Each model carries dataclass companions for its state, differentiable parameters
 - `NonlinearSW2DPhysConsts` — Frozen physical constants for the 2D nonlinear shallow water model.
 - `NonlinearSW2DState` — State for the 2D nonlinear shallow water model.
 - `ReparamQGDiagnostics` — Diagnostics for the reparameterized QG model.
+- `SphericalQGDiagnostics` — Diagnostics for the spherical QG model.
+- `SphericalQGParams` — Differentiable parameters for the spherical QG model.
+- `SphericalQGPhysConsts` — Frozen physical constants for the spherical QG model.
+- `SphericalQGState` — State for the spherical barotropic QG model.
+- `SphericalSWMDiagnostics` — Diagnostics for the spherical shallow water model.
+- `SphericalSWMParams` — Differentiable parameters for the spherical shallow water model.
+- `SphericalSWMPhysConsts` — Frozen physical constants for the spherical shallow water model.
+- `SphericalSWMState` — State for the spherical shallow water model.
 
 ## Domain
 
@@ -2775,8 +2902,11 @@ it inspects the model / state and returns only the metrics that make
 sense. Non-fluid models (Lorenz, diffusion, …) and multilayer (3D) states
 yield an empty dict rather than an error.
 
-Scope: this targets **velocity-state Arakawa C-grid models** — those whose
-state carries 2D ``u`` / ``v`` (SWM, Burgers). **Vorticity / streamfunction
+Scope: this targets **Cartesian velocity-state Arakawa C-grid models** —
+those whose state carries 2D ``u`` / ``v`` (SWM, Burgers). Spherical
+models get their ``invariant_*`` entries, which their own ``diagnose``
+area-weights correctly, but not the field metrics, which assume a
+uniform ``dx * dy`` cell area. **Vorticity / streamfunction
 models** (``barotropic_qg``, the vorticity Navier-Stokes) are intentionally
 *not* covered: they evolve ``q`` / ``omega`` and never define a discrete
 velocity divergence (non-divergence is only an analytic property, so a

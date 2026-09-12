@@ -105,7 +105,7 @@ def check_cfl(
             f"cfl: model {type(model).__name__!r} has no .grid attribute; "
             f"cannot infer dx"
         )
-    dx_min = float(min(grid.dx, grid.dy))
+    dx_min = _min_cell_width(grid, "cfl")
     dt = float(spec.timestepping.dt)
     cfl = wave_speed_m_per_s * dt / dx_min
     if cfl > max_cfl:
@@ -117,6 +117,44 @@ def check_cfl(
             f"  dx_min     = {dx_min:.2f} m\n"
             f"  → maximum stable dt at this CFL: {dt_safe:.4f} s"
         )
+
+
+def _min_cell_width(grid: Any, check: str) -> float:
+    """Narrowest physical cell of a grid, Cartesian or spherical.
+
+    A ``SphericalGrid2D`` has no ``dx``: its zonal width is the
+    latitude-dependent ``R cos(lat) dlon``, so a check written against
+    the Cartesian attributes raises ``AttributeError`` instead of
+    reporting a stability verdict.
+
+    Computed here rather than read off ``grid.min_cell_width``: that
+    helper arrives with finitevolX#244 and somax still pins v0.0.41.
+    The cosine is clamped because ``cos(pi/2)`` is a small *negative*
+    number in float32, which would otherwise give a negative width and
+    hence a negative CFL bound.
+
+    Args:
+        grid: The model's grid.
+        check: Caller name, for the error message.
+
+    Returns:
+        The smallest interior cell width, in metres.
+
+    Raises:
+        AssertionFailedError: If the grid exposes neither spelling.
+    """
+    cos_lat = getattr(grid, "cos_lat_T", None)
+    if cos_lat is not None:
+        interior = np.asarray(jnp.asarray(cos_lat))[1:-1, 1:-1]
+        dx = float(np.min(np.maximum(interior, 0.0))) * float(grid.R) * float(grid.dlon)
+        dy = float(grid.R) * float(grid.dlat)
+        return min(dx, dy) if dx > 0.0 else dy
+    if hasattr(grid, "dx") and hasattr(grid, "dy"):
+        return float(min(grid.dx, grid.dy))
+    raise AssertionFailedError(
+        f"{check}: grid {type(grid).__name__!r} exposes neither dx/dy nor a "
+        f"spherical metric; cannot determine the cell width."
+    )
 
 
 def check_pv_inversion(
@@ -150,12 +188,22 @@ def check_pv_inversion(
         AssertionFailedError: If the model is not a barotropic QG model, or if
             the round-trip residual exceeds ``tol``.
     """
-    invert = getattr(model, "_invert_pv", None)
-    diff = getattr(model, "diff", None)
-    if invert is None or diff is None or not hasattr(diff, "laplacian"):
+    # Two spellings of the same pair. The Cartesian model keeps the
+    # inversion private and its Laplacian on the difference operator;
+    # the spherical one exposes ``invert_pv`` and carries a separate
+    # ``laplacian`` operator, because the spherical Laplacian is not a
+    # method of the difference stencils. Both are barotropic QG, so
+    # both get the check.
+    invert = getattr(model, "_invert_pv", None) or getattr(model, "invert_pv", None)
+    laplacian = getattr(model, "laplacian", None)
+    if laplacian is None:
+        diff = getattr(model, "diff", None)
+        laplacian = getattr(diff, "laplacian", None) if diff is not None else None
+    if invert is None or laplacian is None:
         raise AssertionFailedError(
-            f"pv_inversion: model {type(model).__name__!r} has no _invert_pv / "
-            f"diff.laplacian; this check applies to barotropic QG."
+            f"pv_inversion: model {type(model).__name__!r} exposes no PV "
+            f"inversion and Laplacian pair (_invert_pv/invert_pv with "
+            f"diff.laplacian or laplacian); this check applies to barotropic QG."
         )
     # Build the factory initial state for this scenario x model pair.
     from somax._src.cli._factories import build
@@ -177,7 +225,7 @@ def check_pv_inversion(
             f"the bare Laplacian round-trip cannot reproduce."
         )
     psi = invert(q)
-    q_hat = diff.laplacian(psi)
+    q_hat = laplacian(psi)
     # Compare on the interior (drop the one-cell ghost halo the BC owns).
     interior = (slice(1, -1), slice(1, -1))
     num = float(jnp.linalg.norm((q_hat - q)[interior]))

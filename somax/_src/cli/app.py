@@ -295,7 +295,10 @@ def restart(
 _STUB_SCENARIOS = frozenset(
     {"north_atlantic", "med_sea", "gulf_stream", "southern_ocean", "global_ocean"}
 )
-_STUB_MODELS = frozenset({"spherical_swm", "spherical_qg"})
+#: Models registered but not yet implemented. Empty since #73 landed
+#: the spherical pair; kept so re-stubbing a model is a visible edit
+#: rather than a silent omission from ``list-models``.
+_STUB_MODELS: frozenset[str] = frozenset()
 
 
 @app.command(name="list-scenarios")
