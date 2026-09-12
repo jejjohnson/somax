@@ -592,3 +592,41 @@ class TestAdvectiveBoundAccountsForDirection:
         dt = scales.dt_from_cfl(0.4, (64, 64), direction=(1.0, 0.0))
         assert dt == pytest.approx(0.4 / 64)
         assert float(model.params.cy) == pytest.approx(0.0)
+
+
+class TestDirectionNormalisationSurvivesExtremeComponents:
+    """The direction is documented as magnitude-invariant.
+
+    ``sqrt(sum(c*c))`` breaks that at both ends: squaring components
+    around ``1e200`` overflows, giving an infinite speed and a
+    direction of all zeros, while components around ``1e-200``
+    underflow to a zero speed and are rejected as if the vector were
+    the zero vector. ``math.hypot`` does neither.
+
+    (In CPython the overflowing square raises ``OverflowError`` rather
+    than returning infinity — broken either way, just more loudly.)
+    """
+
+    scales = Scales.advective(L=1.0, U=1.0, f0=1.0, H=1.0)
+
+    def reference(self):
+        return self.scales.dt_from_cfl(0.4, (16, 16), direction=(3.0, 4.0))
+
+    @pytest.mark.parametrize("magnitude", [1e-200, 1e-30, 1.0, 1e30, 1e200])
+    def test_the_step_is_the_same_at_any_magnitude(self, magnitude):
+        scaled = self.scales.dt_from_cfl(
+            0.4, (16, 16), direction=(3.0 * magnitude, 4.0 * magnitude)
+        )
+        assert scaled == pytest.approx(self.reference(), rel=1e-12)
+
+    def test_squaring_really_does_break(self):
+        """Otherwise the parametrization above would prove nothing."""
+        with pytest.raises(OverflowError):
+            _ = (3.0e200) ** 2
+        # And at the other end it silently underflows, which is worse:
+        # the sum is zero and the vector looks like the zero vector.
+        assert (3.0e-200) ** 2 == 0.0
+
+    def test_the_zero_vector_is_still_rejected(self):
+        with pytest.raises(ValueError, match="zero vector"):
+            self.scales.dt_from_cfl(0.4, (16, 16), direction=(0.0, 0.0))

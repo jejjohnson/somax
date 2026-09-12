@@ -34,7 +34,12 @@ class Diffusion2DState(State):
 
     u: Array
 
-    # ``u`` here is a T-point scalar, not a C-grid velocity.
+    # ``u`` here is a T-point scalar, not a C-grid velocity: it is the
+    # transported quantity, and the velocity is a separate coefficient.
+    # Its amplitude comes from the initial condition, so there is no
+    # scale for it in ``Scales`` and the nondimensionalisation leaves
+    # it alone rather than dividing it by ``U``.
+    scale_kinds: ClassVar[dict[str, str]] = {"u": "tracer"}
     mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
