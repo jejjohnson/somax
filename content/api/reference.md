@@ -490,7 +490,7 @@ Integrate ``inner`` in transformed coordinates.
 ```text
 The wrapped model is a ``SomaxModel`` like any other: it integrates,
 steps, and reports diagnostics through the same interface. Every
-time passed to it — ``t0``, ``t1``, ``dt``, ``save_at`` — is in the
+time passed to it — ``t0``, ``t1``, ``dt``, ``saveat`` — is in the
 *transformed* time unit, related to the inner model's by
 ``t_inner = time_scale * t_outer``.
 
