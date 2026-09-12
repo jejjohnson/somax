@@ -277,6 +277,7 @@ class Scales(eqx.Module):
         mode: str | None = None,
         diffusivity: float | None = None,
         extent: float | Sequence[float] | None = None,
+        direction: Sequence[float] | None = None,
     ) -> float:
         r"""Largest time step meeting a CFL target, in this set's time unit.
 
@@ -310,6 +311,14 @@ class Scales(eqx.Module):
                 Defaults to 1 per axis; pass ``(1.0, aspect)`` for a
                 rectangular 2-D domain, whose ``y`` spacing is
                 ``aspect/ny`` rather than ``1/ny``.
+            direction: Advection direction, one component per axis, for
+                the advective bound. Given, the bound is exact:
+                ``C / sum_i |c_i|/dx_i``. Omitted, the worst case over
+                all directions of the same speed is used, which is
+                never larger than the requested Courant number but can
+                be up to ``sqrt(ndim)`` smaller than a direction-aware
+                step. Ignored by the diffusive bound, which is
+                isotropic.
 
         Returns:
             The time step, expressed in units of :attr:`T` — the unit a
@@ -352,10 +361,33 @@ class Scales(eqx.Module):
 
         if mode == "advective":
             # u_hat = U T / L: the speed the nondimensional model
-            # actually carries. Dividing by it — the advective set is
-            # the only one where it is 1.
+            # actually carries. The advective set is the only one where
+            # it is 1.
             velocity = self.U * self.T / self.L
-            return cfl * min(spacings) / velocity
+            if direction is None:
+                # Worst case over every direction of that speed. The
+                # Courant number is ``dt * sum_i |c_i| / dx_i``, and for
+                # a fixed magnitude Cauchy-Schwarz maximises that sum at
+                # ``|c| * sqrt(sum_i dx_i**-2)`` — reached when the
+                # velocity leans towards the finer axes. Using
+                # ``min(dx)`` instead assumes all the speed lies on one
+                # axis, which understates the sum by up to sqrt(ndim):
+                # the default diagonal 2-D convection direction really
+                # does exceed it by sqrt(2).
+                courant_per_unit_time = math.sqrt(
+                    sum(1.0 / spacing**2 for spacing in spacings)
+                )
+            else:
+                components = _unit_components(direction, len(spacings))
+                courant_per_unit_time = sum(
+                    abs(component) / spacing
+                    for component, spacing in zip(components, spacings, strict=True)
+                )
+                if courant_per_unit_time == 0.0:
+                    raise ValueError(
+                        "dt_from_cfl: direction must not be the zero vector."
+                    )
+            return cfl / (velocity * courant_per_unit_time)
         if mode == "diffusive":
             if diffusivity is None:
                 if self.kind != "diffusive":
@@ -408,6 +440,39 @@ class Scales(eqx.Module):
         return Scales.planetary(
             a=1.0, Omega=1.0, H=1.0, rossby=self.rossby, g=4.0 * burger
         )
+
+
+def _unit_components(direction: Sequence[float], n_axes: int) -> tuple[float, ...]:
+    """Normalise an advection direction to unit speed, one per axis.
+
+    Args:
+        direction: One component per axis.
+        n_axes: How many axes the cell counts described.
+
+    Returns:
+        The components scaled to unit magnitude.
+
+    Raises:
+        ValueError: If the length disagrees with ``n_axes``, a
+            component is not finite, or the vector is zero.
+    """
+    components = tuple(float(c) for c in direction)
+    if len(components) != n_axes:
+        raise ValueError(
+            f"dt_from_cfl: direction names {len(components)} axes but "
+            f"n_cells names {n_axes}."
+        )
+    if not all(math.isfinite(c) for c in components):
+        raise ValueError(
+            f"dt_from_cfl: direction components must be finite; got {direction!r}."
+        )
+    speed = math.sqrt(sum(c * c for c in components))
+    if speed == 0.0:
+        raise ValueError(
+            "dt_from_cfl: direction must not be the zero vector — there is no "
+            "direction to normalise."
+        )
+    return tuple(c / speed for c in components)
 
 
 def _require_positive(**values: float) -> None:
