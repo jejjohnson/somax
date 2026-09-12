@@ -2,6 +2,7 @@ from somax.core import (
     Diagnostics as Diagnostics,
     Params as Params,
     PhysConsts as PhysConsts,
+    ScaledModel as ScaledModel,
     Scales as Scales,
     SomaxModel as SomaxModel,
     State as State,

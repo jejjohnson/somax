@@ -474,6 +474,38 @@ Args:
 ```
 ````
 
+### `ScaledModel`
+
+*class*
+
+```python
+ScaledModel(inner: 'SomaxModel', transform: 'StateAffine', time_scale: 'float' = 1.0) -> None
+```
+
+Integrate ``inner`` in transformed coordinates.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The wrapped model is a ``SomaxModel`` like any other: it integrates,
+steps, and reports diagnostics through the same interface. Every
+time passed to it — ``t0``, ``t1``, ``dt``, ``saveat`` — is in the
+*transformed* time unit, related to the inner model's by
+``t_inner = time_scale * t_outer``.
+
+Attributes:
+    inner: The model being wrapped. Its ``create()`` signature,
+        ``vector_field`` and parameters are untouched.
+    transform: The affine state map. ``forward`` takes an inner
+        state to wrapped coordinates.
+    time_scale: Inner time units per wrapped time unit, finite and
+        strictly positive. For a nondimensionalising wrapper this
+        is ``scales.T``; for a purely statistical one it stays
+        at 1.
+```
+````
+
 ### `Scales`
 
 *class*
