@@ -285,13 +285,17 @@ class Scales(eqx.Module):
         and the bound accounts for all of them. A single ``int`` is the
         1-D case.
 
-        The advective bound is :math:`C \min_i \Delta x_i / \hat u`
-        and the diffusive one
-        :math:`C / (2 \hat\kappa \sum_i \Delta x_i^{-2})`, both in
-        nondimensional units, where
-        :math:`\hat u = U T / L` is the nondimensional velocity and
-        :math:`\hat\kappa = \kappa T / L^2` the nondimensional
-        diffusivity.
+        The advective bound is
+        :math:`C / (\hat u \sum_i |c_i| / \Delta x_i)` for a known unit
+        direction :math:`c`, and
+        :math:`C / (\hat u \sqrt{\sum_i \Delta x_i^{-2}})` without one
+        — the worst case over every direction of that speed, since
+        Cauchy-Schwarz maximises the directional sum there. The
+        diffusive bound is
+        :math:`C / (2 \hat\kappa \sum_i \Delta x_i^{-2})`. Both are in
+        nondimensional units, where :math:`\hat u = U T / L` is the
+        nondimensional velocity and :math:`\hat\kappa = \kappa T / L^2`
+        the nondimensional diffusivity.
 
         Args:
             cfl: Target Courant number.
