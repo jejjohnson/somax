@@ -22,6 +22,7 @@ needs re-dimensionalising.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import diffrax as dfx
@@ -49,14 +50,35 @@ class ScaledModel(SomaxModel):
             ``vector_field`` and parameters are untouched.
         transform: The affine state map. ``forward`` takes an inner
             state to wrapped coordinates.
-        time_scale: Inner time units per wrapped time unit. For a
-            nondimensionalising wrapper this is ``scales.T``; for a
-            purely statistical one it stays at 1.
+        time_scale: Inner time units per wrapped time unit, finite and
+            strictly positive. For a nondimensionalising wrapper this
+            is ``scales.T``; for a purely statistical one it stays
+            at 1.
     """
 
     inner: SomaxModel
     transform: StateAffine
     time_scale: float = eqx.field(static=True, default=1.0)
+
+    def __check_init__(self) -> None:
+        """Reject a time scale that is not a usable change of variables.
+
+        Zero is the dangerous one: every tendency is multiplied by it
+        and the inner model is evaluated at ``t = 0`` forever, so the
+        integration returns a frozen trajectory rather than reporting
+        that the coordinate change is degenerate. NaN and infinity
+        corrupt the solve outright. Negative is rejected too — the
+        transform would run the model backwards in time, which nothing
+        here is written for, and silently doing so would be worse than
+        saying no.
+        """
+        if not math.isfinite(self.time_scale) or self.time_scale <= 0.0:
+            raise ValueError(
+                f"ScaledModel: time_scale must be a finite positive number; "
+                f"got {self.time_scale!r}. It is inner time units per "
+                f"wrapped time unit, so zero freezes the trajectory and a "
+                f"negative value reverses it."
+            )
 
     # ------------------------------------------------------------------
     # SomaxModel contract

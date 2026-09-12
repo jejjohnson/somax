@@ -120,7 +120,10 @@ def burger_to_g_prime(
             f"{context}: burger and thickness_ratio must have the same "
             f"length; got {len(burger)} and {len(thickness)}."
         )
-    if not burger:
+    # ``len(...) == 0`` rather than ``not burger``: a multi-element
+    # NumPy or JAX array is a perfectly good sequence here, but its
+    # truth value is ambiguous and raises before the conversion below.
+    if len(burger) == 0:
         raise ValueError(f"{context}: burger must not be empty.")
     for index, (bu, h) in enumerate(zip(burger, thickness, strict=True)):
         require_positive(context, **{f"burger[{index}]": bu, f"thickness[{index}]": h})
