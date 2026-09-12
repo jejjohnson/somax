@@ -1169,15 +1169,15 @@ constrained value can land *on* a bound but never outside it.
 
 Args:
     value: The initial constrained value, strictly inside the interval.
-    lower: Lower bound, exclusive.
-    upper: Upper bound, exclusive.
+    lower: Lower bound, exclusive. Must be finite.
+    upper: Upper bound, exclusive. Must be finite.
 
 Returns:
     A ``Parameterize`` that unwraps to ``value``.
 
 Raises:
-    ValueError: If the bounds are not ordered, or ``value`` lies
-        outside the open interval.
+    ValueError: If the bounds are not finite or not ordered, or
+        ``value`` lies outside the open interval.
 ```
 ````
 
@@ -1274,7 +1274,8 @@ optimiser that has not already diverged will go. It is never
 negative.
 
 Args:
-    value: The initial constrained value. Must be strictly positive.
+    value: The initial constrained value. Must be finite and
+        strictly positive.
 
 Returns:
     A ``Parameterize`` that unwraps to ``value``.

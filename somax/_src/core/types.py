@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import Any, ClassVar
 
 import equinox as eqx
@@ -161,7 +162,8 @@ def positive(value: ArrayLike) -> Parameterize:
     negative.
 
     Args:
-        value: The initial constrained value. Must be strictly positive.
+        value: The initial constrained value. Must be finite and
+            strictly positive.
 
     Returns:
         A ``Parameterize`` that unwraps to ``value``.
@@ -171,10 +173,13 @@ def positive(value: ArrayLike) -> Parameterize:
             representation in softplus space.
     """
     array = jnp.asarray(value)
-    # ``all(> 0)`` rather than ``any(<= 0)``: every comparison with NaN
-    # is false, so the negated form would wave a NaN through and build
-    # a wrapper that unwraps to NaN.
-    if not bool(jnp.all(array > 0.0)):
+    # ``all`` of a positive predicate rather than ``any`` of its
+    # negation: every comparison with NaN is false, so the negated form
+    # would wave a NaN through and build a wrapper that unwraps to NaN.
+    # Finiteness is tested separately because ``+inf`` satisfies
+    # ``> 0``, stores an infinite raw value, and unwraps back to
+    # ``inf`` — an overflowed calibration value is not a usable one.
+    if not bool(jnp.all(jnp.isfinite(array) & (array > 0.0))):
         raise ValueError(
             f"positive(): value must be strictly positive and finite; got "
             f"{value!r}. A non-positive value has no softplus pre-image."
@@ -193,23 +198,33 @@ def interval(value: ArrayLike, lower: float, upper: float) -> Parameterize:
 
     Args:
         value: The initial constrained value, strictly inside the interval.
-        lower: Lower bound, exclusive.
-        upper: Upper bound, exclusive.
+        lower: Lower bound, exclusive. Must be finite.
+        upper: Upper bound, exclusive. Must be finite.
 
     Returns:
         A ``Parameterize`` that unwraps to ``value``.
 
     Raises:
-        ValueError: If the bounds are not ordered, or ``value`` lies
-            outside the open interval.
+        ValueError: If the bounds are not finite or not ordered, or
+            ``value`` lies outside the open interval.
     """
+    if not (math.isfinite(lower) and math.isfinite(upper)):
+        # A semi-infinite interval passes the ordering test but has no
+        # usable logit: ``scaled`` collapses to 0 or 1, the stored raw
+        # value becomes infinite, and unwrapping then evaluates
+        # ``inf * sigmoid(-inf)``, which is NaN.
+        raise ValueError(
+            f"interval(): bounds must be finite; got ({lower!r}, {upper!r}). "
+            f"A semi-infinite interval has no logit — use positive() for a "
+            f"one-sided bound."
+        )
     if not upper > lower:
         raise ValueError(
             f"interval(): upper must exceed lower; got ({lower!r}, {upper!r})."
         )
     array = jnp.asarray(value)
     # Stated positively so that NaN fails it — see :func:`positive`.
-    if not bool(jnp.all((array > lower) & (array < upper))):
+    if not bool(jnp.all(jnp.isfinite(array) & (array > lower) & (array < upper))):
         raise ValueError(
             f"interval(): value must lie strictly inside ({lower!r}, {upper!r}); "
             f"got {value!r}."
