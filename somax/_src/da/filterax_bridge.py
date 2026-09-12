@@ -38,6 +38,13 @@ class SomaxDynamics(AbstractDynamics):
 
     model: Any
     template: Any
+    #: Optional :class:`~somax.StateAffine`. Set it when the flat
+    #: vectors come from ``state_to_vector``/``make_ensemble`` with a
+    #: transform: without it the adapter would hand the model
+    #: transformed values as if they were physical ones, advancing a
+    #: near-zero standardised thickness as a real layer depth and
+    #: corrupting the first forecast.
+    transform: Any = None
 
     def __call__(
         self,
@@ -45,9 +52,20 @@ class SomaxDynamics(AbstractDynamics):
         t0: Float[Array, ""],
         t1: Float[Array, ""],
     ) -> Float[Array, " N_x"]:
-        """Advance a single flat state from ``t0`` to ``t1``."""
+        """Advance a single flat state from ``t0`` to ``t1``.
+
+        When :attr:`transform` is set the incoming vector is in
+        transformed coordinates, so it is mapped back before the model
+        sees it and forward again afterwards — the filter keeps working
+        in the coordinates ``make_ensemble`` produced, while the model
+        keeps working in its own.
+        """
         _, unravel = ravel_pytree(self.template)
         x = unravel(state)
+        if self.transform is not None:
+            x = self.transform.inverse(x)
         x_next = self.model.step(x, t1 - t0, t0=t0)
+        if self.transform is not None:
+            x_next = self.transform.forward(x_next)
         flat, _ = ravel_pytree(x_next)
         return flat

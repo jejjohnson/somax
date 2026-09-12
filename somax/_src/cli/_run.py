@@ -32,6 +32,7 @@ from somax._src.cli import _assertions
 from somax._src.cli._factories import build
 from somax._src.cli._progress import RunLogContext, start_run_log, stop_run_log
 from somax._src.cli._units import (
+    field_units,
     format_field_stats,
     format_time_seconds,
     format_wallclock,
@@ -218,11 +219,64 @@ def _attrs_for(spec: RunSpec, *, mode: str) -> dict[str, Any]:
         "somax_sim_mode": mode,
         "scenario_name": spec.scenario.name,
         "model_name": spec.model.name,
+        # Which coordinates the state is in. The state *class* is the
+        # same either way, so without this a restart cannot tell a
+        # dimensional q ~ U/L from a dimensionless one and would
+        # advance the raw values in the wrong units.
+        "somax_coordinates": "nondimensional" if spec.scenario.nondim else "si",
         "t0": float(spec.timestepping.t0),
         "t1": float(spec.timestepping.t1),
         "dt": float(spec.timestepping.dt),
         "save_interval": float(spec.timestepping.save_interval),
     }
+
+
+def _require_matching_coordinates(spec: RunSpec, ds: Any, restart_path: Any) -> None:
+    """Refuse a restart that crosses dimensional coordinate systems.
+
+    The state class is the same on both sides — a nondimensional
+    ``barotropic_qg`` run still produces a ``BarotropicQGState`` — so
+    the class check above passes and the raw values are then advanced
+    in the target model's units. A dimensional ``q ~ U/L`` read as
+    dimensionless vorticity is off by the vorticity scale, silently.
+
+    An artifact written before this attr existed carries no marker,
+    and is necessarily SI: nondimensional CLI runs arrive with the
+    marker itself, so there is no unmarked nondimensional artifact to
+    confuse it with. An SI target therefore accepts it, which keeps
+    every existing simulation continuable. A nondimensional target
+    still refuses: there the absent marker is the one case that would
+    silently advance dimensional values as dimensionless ones.
+
+    Args:
+        spec: The target run spec.
+        ds: The restart artifact's dataset.
+        restart_path: For the error message.
+
+    Raises:
+        ValueError: If the artifact's coordinates differ from the
+            target's, or are unknown and the target is nondimensional.
+    """
+    wanted = "nondimensional" if spec.scenario.nondim else "si"
+    found = ds.attrs.get("somax_coordinates")
+    if found is None:
+        if wanted == "si":
+            return
+        raise ValueError(
+            f"restart artifact at {restart_path} does not record which "
+            f"coordinate system it is in, and this run is {wanted}. An "
+            f"unmarked artifact predates nondimensional runs, so it is "
+            f"SI; re-export it from a current run, or set "
+            f"somax_coordinates on the dataset if you know the units."
+        )
+    if found != wanted:
+        raise ValueError(
+            f"restart artifact at {restart_path} holds {found} state but "
+            f"this run is {wanted}. The state class is the same either "
+            f"way, so the values would be advanced in the wrong units "
+            f"rather than failing. Restart from a matching artifact, or "
+            f"convert it with a StateAffine built from the run's Scales."
+        )
 
 
 # ----------------------------------------------------------------------
@@ -306,6 +360,7 @@ def _integrate_and_write(
         spec.model.name,
         scenario_params=_scenario_params(spec),
         model_params=_model_params(spec),
+        nondim=spec.scenario.nondim,
     )
     state0 = initial_state if initial_state is not None else factory_state0
 
@@ -540,7 +595,20 @@ def _state_diagnostics(state: Any) -> dict[str, dict[str, float]]:
     return out
 
 
-def _format_state_stats(diag: dict[str, dict[str, float]]) -> str:
+def _units_for(spec: Any) -> dict[str, str]:
+    """Unit mapping for a run's heartbeat line.
+
+    A run built from a ``scenario.nondim`` block has no SI units to
+    report, so every field is marked ``-`` rather than left carrying a
+    label like ``q[1/s]`` that is not what the numbers mean.
+    """
+    nondim = getattr(getattr(spec, "scenario", None), "nondim", None)
+    return field_units("nondim" if nondim else "si")
+
+
+def _format_state_stats(
+    diag: dict[str, dict[str, float]], units: dict[str, str] | None = None
+) -> str:
     """Format the state diagnostics dict with per-field units."""
     return " ".join(
         format_field_stats(
@@ -549,6 +617,7 @@ def _format_state_stats(diag: dict[str, dict[str, float]]) -> str:
             mean_val=stats["mean"],
             max_val=stats["max"],
             nan_count=stats["nan"],
+            units=units,
         )
         for name, stats in diag.items()
     )
@@ -691,6 +760,8 @@ class _ChunkStep(StatefulOperator):
         checkpoint_dir: Path | None,
         checkpoint_label: str | None,
         monitors: list[Monitor],
+        units: dict[str, str] | None = None,
+        coordinates: str = "si",
     ) -> None:
         self.model = model
         self.state_class = state_class
@@ -705,6 +776,8 @@ class _ChunkStep(StatefulOperator):
         self.checkpoint_dir = checkpoint_dir
         self.checkpoint_label = checkpoint_label
         self.monitors = monitors
+        self.units = units
+        self.coordinates = coordinates
 
     def _apply(self, state: Any, carry: _ChunkCarry) -> tuple[Any, _ChunkCarry]:
         log = self.run_log.log
@@ -764,7 +837,7 @@ class _ChunkStep(StatefulOperator):
         log.debug(
             f"chunk {i + 1}/{self.n_diag_intervals} "
             f"sim_t={format_time_seconds(chunk_t1)} | "
-            f"{_format_state_stats(state_diag)}"
+            f"{_format_state_stats(state_diag, self.units)}"
             + (f" | physics: {phys_line}" if phys_line else "")
             + f" | wall={format_wallclock(chunk_wall)}"
             + metric_line
@@ -779,7 +852,7 @@ class _ChunkStep(StatefulOperator):
                 f"somax-sim {self.mode} integration halted during chunk "
                 f"{i + 1}/{self.n_diag_intervals} "
                 f"(sim_t={format_time_seconds(chunk_t1)}): {terminate_reason}.\n"
-                f"  {_format_state_stats(state_diag)}\n"
+                f"  {_format_state_stats(state_diag, self.units)}\n"
                 f"  Refusing to write artifacts. The condition appeared between "
                 f"sim_t={format_time_seconds(chunk_t0)} and "
                 f"sim_t={format_time_seconds(chunk_t1)} — earlier chunks were "
@@ -817,6 +890,10 @@ class _ChunkStep(StatefulOperator):
                 ckpt_attrs: dict[str, Any] = {
                     "somax_sim_t": float(chunk_t1),
                     "somax_snapshot_ordinal": int(snapshot_ordinal),
+                    # Same marker the final-state artifacts carry: a
+                    # checkpoint is a restart source too, and the state
+                    # class alone cannot say which units it is in.
+                    "somax_coordinates": self.coordinates,
                 }
                 if self.checkpoint_label:
                     ckpt_attrs["somax_checkpoint_of"] = str(self.checkpoint_label)
@@ -920,11 +997,12 @@ def _chunked_integrate_with_diagnostics(
     n_diag_intervals = diag_ts.shape[0] - 1
 
     # Initial diagnostics (before any integration).
+    units = _units_for(spec)
     init_state_diag = _state_diagnostics(state0)
     init_phys, _init_flat = _format_physical_scalars(model, state0)
     log.debug(
         f"chunk 0/{n_diag_intervals} sim_t={format_time_seconds(float(diag_ts[0]))} | "
-        f"{_format_state_stats(init_state_diag)}"
+        f"{_format_state_stats(init_state_diag, units)}"
         + (f" | physics: {init_phys}" if init_phys else "")
         + " | initial state"
     )
@@ -946,6 +1024,8 @@ def _chunked_integrate_with_diagnostics(
         checkpoint_dir=checkpoint_dir,
         checkpoint_label=checkpoint_label,
         monitors=active_monitors,
+        units=units,
+        coordinates="nondimensional" if spec.scenario.nondim else "si",
     )
     carry0 = _ChunkCarry(
         index=0,
@@ -1320,6 +1400,7 @@ def restart(
         spec.model.name,
         scenario_params=_scenario_params(spec),
         model_params=_model_params(spec),
+        nondim=spec.scenario.nondim,
     )
     expected_state_class = type(factory_state0)
     state0 = io.dataset_to_state(ds, state_class=expected_state_class)
@@ -1332,6 +1413,7 @@ def restart(
             f"a final_state.zarr written by a compatible run."
         )
 
+    _require_matching_coordinates(spec, ds, restart_path)
     spec = _maybe_override_t0_from_checkpoint(spec, ds)
 
     return _integrate_and_write(

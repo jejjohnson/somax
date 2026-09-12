@@ -38,6 +38,12 @@ class ScenarioSpec:
             that the scenario uses to build ``ForcingFields``).
         initial_condition: ``{"type": "...", "params": {...}}`` — IC
             shape and its parameters.
+        nondim: Dimensionless numbers routed to the model's
+            ``from_nondimensional`` factory (``rossby``, ``beta_hat``,
+            ``munk``, ``stommel``, ...). Mutually exclusive with
+            ``consts``: the two describe the same physics in different
+            units, and accepting both would let a config state a pair
+            that disagrees. Empty means a dimensional run.
     """
 
     name: str
@@ -45,6 +51,7 @@ class ScenarioSpec:
     consts: dict[str, Any] = field(default_factory=dict)
     forcing: dict[str, Any] = field(default_factory=dict)
     initial_condition: dict[str, Any] = field(default_factory=dict)
+    nondim: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -198,6 +205,14 @@ class RunSpec:
         if not isinstance(self.model.name, str) or not self.model.name:
             raise ValueError("model.name must be a non-empty string")
 
+        if self.scenario.nondim and self.scenario.consts:
+            raise ValueError(
+                "scenario.nondim and scenario.consts are mutually exclusive: "
+                f"nondim sets {sorted(self.scenario.nondim)} while consts sets "
+                f"{sorted(self.scenario.consts)}. They describe the same "
+                "physics in different units, so give one or the other."
+            )
+
     # ------------------------------------------------------------------
     # Debug merge
     # ------------------------------------------------------------------
@@ -224,6 +239,11 @@ class RunSpec:
             consts=copy.deepcopy(self.scenario.consts),
             forcing=copy.deepcopy(self.scenario.forcing),
             initial_condition=copy.deepcopy(self.scenario.initial_condition),
+            # Carried across like every other block: dropping it sent a
+            # ``--debug`` run of a nondimensional config down the
+            # dimensional path with default SI constants, silently
+            # running different physics.
+            nondim=copy.deepcopy(self.scenario.nondim),
         )
         _merge_block_dict(new_scenario, self.debug.scenario, owner="scenario")
 
@@ -265,6 +285,12 @@ class RunSpec:
                 "consts": copy.deepcopy(self.scenario.consts),
                 "forcing": copy.deepcopy(self.scenario.forcing),
                 "initial_condition": copy.deepcopy(self.scenario.initial_condition),
+                # Without this, ``dump-yaml`` and ``show-config`` drop
+                # the dimensionless inputs and reloading the result
+                # switches to the dimensional factory. ``_build_manifest``
+                # hashes this dict too, so two runs at different Rossby
+                # numbers would otherwise share a config hash.
+                "nondim": copy.deepcopy(self.scenario.nondim),
             },
             "model": {
                 "name": self.model.name,
@@ -312,6 +338,7 @@ class RunSpec:
             consts=dict(scenario_data.get("consts", {})),
             forcing=dict(scenario_data.get("forcing", {})),
             initial_condition=dict(scenario_data.get("initial_condition", {})),
+            nondim=dict(scenario_data.get("nondim", {})),
         )
         model = ModelSpec(
             name=model_data["name"],
