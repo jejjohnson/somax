@@ -276,3 +276,49 @@ class TestTransforms:
         leaves = jax.tree_util.tree_leaves(model.grid)
         arrays = [leaf for leaf in leaves if hasattr(leaf, "shape") and leaf.shape]
         assert arrays
+
+
+class TestGeometryRestrictionsAreStated:
+    """``psi = 0`` on both polar rows is a wall, not a pole.
+
+    A zonal solid-body flow has ``psi`` proportional to ``sin(phi)``,
+    which takes different values at the two poles and cannot be
+    represented at all under that condition — so a full-sphere range
+    would silently solve a different problem.
+    """
+
+    def test_a_full_sphere_latitude_range_is_rejected(self):
+        with pytest.raises(ValueError, match="reaches a pole"):
+            build(lat_range=(-90.0, 90.0))
+
+    def test_a_regional_longitude_span_is_rejected(self):
+        with pytest.raises(ValueError, match="periodic"):
+            build(lon_range=(0.0, 120.0))
+
+    def test_a_band_is_still_accepted(self):
+        assert build(lat_range=(-85.0, 85.0)) is not None
+
+
+class TestPvInversionAssertionAcceptsThisModel:
+    """The preflight check must recognise the spherical spelling.
+
+    The Cartesian model keeps its inversion private and its Laplacian
+    on ``diff``; this one exposes ``invert_pv`` and a separate
+    ``laplacian`` operator, and the check used to reject it before
+    testing anything.
+    """
+
+    def test_the_model_exposes_the_pair_the_check_looks_for(self):
+        model = build()
+        assert callable(model.invert_pv)
+        assert callable(model.laplacian)
+
+    def test_the_round_trip_the_check_performs_closes(self):
+        model = build()
+        psi = smooth_streamfunction(model)
+        q = model.laplacian(psi)
+        residual = model.laplacian(model.invert_pv(q)) - q
+        relative = float(
+            jnp.linalg.norm(residual[INTERIOR]) / jnp.linalg.norm(q[INTERIOR])
+        )
+        assert relative < 1e-4

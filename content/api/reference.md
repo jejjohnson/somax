@@ -2900,8 +2900,11 @@ it inspects the model / state and returns only the metrics that make
 sense. Non-fluid models (Lorenz, diffusion, …) and multilayer (3D) states
 yield an empty dict rather than an error.
 
-Scope: this targets **velocity-state Arakawa C-grid models** — those whose
-state carries 2D ``u`` / ``v`` (SWM, Burgers). **Vorticity / streamfunction
+Scope: this targets **Cartesian velocity-state Arakawa C-grid models** —
+those whose state carries 2D ``u`` / ``v`` (SWM, Burgers). Spherical
+models get their ``invariant_*`` entries, which their own ``diagnose``
+area-weights correctly, but not the field metrics, which assume a
+uniform ``dx * dy`` cell area. **Vorticity / streamfunction
 models** (``barotropic_qg``, the vorticity Navier-Stokes) are intentionally
 *not* covered: they evolve ``q`` / ``omega`` and never define a discrete
 velocity divergence (non-divergence is only an analytic property, so a

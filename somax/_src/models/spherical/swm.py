@@ -20,6 +20,10 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.models.spherical._geometry import (
+    _require_global_longitude,
+    _require_open_poles,
+)
 
 
 class SphericalSWMState(State):
@@ -79,7 +83,8 @@ class SphericalSWMDiagnostics(Diagnostics):
     the same thing at every latitude.
 
     Args:
-        energy: Area-integrated total energy.
+        energy: Area-integrated total energy,
+            ``h * KE + g h^2 / 2``.
         enstrophy: Area-integrated potential enstrophy.
         mass: Area-integrated mass.
         casimir_q3: PV Casimir, the ``q^3`` moment.
@@ -261,7 +266,14 @@ class SphericalSWM(SomaxModel):
         area = spherical_area_weights(self.grid)[interior]
         h_on_X = self.interp.T_to_X(h)
 
-        energy = jnp.sum(area * (ke[interior] + 0.5 * g * h[interior] ** 2))
+        # ``kinetic_energy`` returns the *specific* KE, 0.5(u^2+v^2),
+        # so it has to be weighted by the layer thickness before it can
+        # be added to the potential term — otherwise the two have
+        # different units and the kinetic part is undercounted by a
+        # factor of h.
+        energy = jnp.sum(
+            area * (h[interior] * ke[interior] + 0.5 * g * h[interior] ** 2)
+        )
         enstrophy = 0.5 * jnp.sum(area * q[interior] ** 2 * h_on_X[interior])
         mass = jnp.sum(area * h[interior])
         casimir_q3 = jnp.sum(area * q[interior] ** 3 * h_on_X[interior])
@@ -316,6 +328,9 @@ class SphericalSWM(SomaxModel):
         Returns:
             A ``SphericalSWM`` instance.
         """
+        context = "SphericalSWM.create"
+        _require_global_longitude(context, lon_range)
+        _require_open_poles(context, lat_range)
         grid = SphericalGrid2D.from_interior(nx, ny, lon_range, lat_range, R=radius)
 
         params = SphericalSWMParams(

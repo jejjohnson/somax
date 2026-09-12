@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from somax._src.cli.scenarios import ScenarioBundle
 
 from ._types import BuiltModel, ModelEntry, SupportFlags
-from .spherical_swm import _require_spherical
+from .spherical_swm import _numerics, _require_spherical, _spherical_mask
 
 
 def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
@@ -32,7 +32,8 @@ def _build(scenario: ScenarioBundle, params: dict[str, Any]) -> BuiltModel:
         bottom_drag=float(model_params.get("bottom_drag", 0.0)),
         wind_amplitude=float(forcing.get("wind_amplitude", 0.0)),
         wind_profile=str(forcing.get("wind_profile", "zonal")),
-        mask=geometry.mask,
+        mask=_spherical_mask(scenario),
+        **_numerics(params, "method", "cg_tol", "cg_max_steps"),
     )
 
     ic = scenario.initial_condition

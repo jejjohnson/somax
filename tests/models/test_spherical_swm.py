@@ -305,3 +305,97 @@ class TestTransforms:
         leaves = jax.tree_util.tree_leaves(model.grid)
         arrays = [leaf for leaf in leaves if hasattr(leaf, "shape") and leaf.shape]
         assert arrays, "spherical grid should expose its metric arrays as leaves"
+
+
+class TestTotalEnergyIsDimensionallyConsistent:
+    """``kinetic_energy`` is *specific* KE, so it needs weighting by h.
+
+    Adding ``0.5(u^2+v^2)`` straight to ``0.5 g h^2`` mixes units and
+    undercounts the kinetic part by a factor of the layer thickness.
+    """
+
+    def test_energy_scales_with_the_depth_of_a_moving_layer(self):
+        """Doubling h at fixed velocity doubles the kinetic part.
+
+        Measured at negligible gravity: at Earth's g the potential term
+        is ~1e18 and the kinetic one ~1e14, so subtracting to isolate
+        the kinetic part loses it to float32 cancellation.
+        """
+        model = build(g=1.0e-9)
+        shape = (model.grid.Ny, model.grid.Nx)
+
+        def energy(depth):
+            state = SphericalSWMState(
+                h=jnp.full(shape, depth),
+                u=jnp.full(shape, 1.0),
+                v=jnp.zeros(shape),
+            )
+            return float(model.diagnose(state).energy)
+
+        assert energy(2.0 * DEPTH) == pytest.approx(2.0 * energy(DEPTH), rel=1e-3)
+
+    def test_the_kinetic_part_is_not_independent_of_depth(self):
+        """The bug this replaces: an unweighted KE would not move."""
+        model = build(g=1.0e-9)
+        shape = (model.grid.Ny, model.grid.Nx)
+
+        def energy(depth):
+            state = SphericalSWMState(
+                h=jnp.full(shape, depth),
+                u=jnp.full(shape, 1.0),
+                v=jnp.zeros(shape),
+            )
+            return float(model.diagnose(state).energy)
+
+        assert energy(2.0 * DEPTH) != pytest.approx(energy(DEPTH), rel=1e-2)
+
+    def test_the_kinetic_part_matches_the_hand_computed_integral(self):
+        from finitevolx import spherical_area_weights
+
+        model = build()
+        shape = (model.grid.Ny, model.grid.Nx)
+        state = SphericalSWMState(
+            h=jnp.full(shape, DEPTH),
+            u=jnp.full(shape, 2.0),
+            v=jnp.zeros(shape),
+        )
+        area = float(jnp.sum(spherical_area_weights(model.grid)[1:-1, 1:-1]))
+        expected = DEPTH * 0.5 * 2.0**2 * area + 0.5 * GRAVITY * DEPTH**2 * area
+        assert float(model.diagnose(state).energy) == pytest.approx(expected, rel=1e-3)
+
+    def test_a_state_at_rest_is_purely_potential(self):
+        from finitevolx import spherical_area_weights
+
+        model = build()
+        area = float(jnp.sum(spherical_area_weights(model.grid)[1:-1, 1:-1]))
+        energy = float(model.diagnose(at_rest(model)).energy)
+        assert energy == pytest.approx(0.5 * GRAVITY * DEPTH**2 * area, rel=1e-4)
+
+
+class TestGeometryRestrictionsAreStated:
+    """The boundary conditions describe one shape of domain only."""
+
+    def test_a_regional_longitude_span_is_rejected(self):
+        """The zonal wrap would join two unrelated boundaries."""
+        with pytest.raises(ValueError, match="periodic"):
+            build(lon_range=(0.0, 90.0))
+
+    def test_a_full_sphere_latitude_range_is_rejected(self):
+        """A solid wall is the wrong condition at a true pole."""
+        with pytest.raises(ValueError, match="reaches a pole"):
+            build(lat_range=(-90.0, 90.0))
+
+    def test_either_pole_alone_is_enough_to_reject(self):
+        for lat_range in ((-90.0, 80.0), (-80.0, 90.0)):
+            with pytest.raises(ValueError, match="reaches a pole"):
+                build(lat_range=lat_range)
+
+    def test_a_band_is_still_accepted(self):
+        assert build(lat_range=(-85.0, 85.0)) is not None
+
+    def test_the_global_span_is_still_accepted(self):
+        assert build(lon_range=(0.0, 360.0)) is not None
+
+    def test_an_offset_global_span_is_accepted(self):
+        """It is the 360-degree width that matters, not the origin."""
+        assert build(lon_range=(-180.0, 180.0)) is not None

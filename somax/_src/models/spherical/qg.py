@@ -20,6 +20,10 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.models.spherical._geometry import (
+    _require_global_longitude,
+    _require_open_poles,
+)
 
 
 class SphericalQGState(State):
@@ -324,6 +328,9 @@ class SphericalQG(SomaxModel):
         Returns:
             A ``SphericalQG`` instance.
         """
+        context = "SphericalQG.create"
+        _require_global_longitude(context, lon_range)
+        _require_open_poles(context, lat_range)
         grid = SphericalGrid2D.from_interior(nx, ny, lon_range, lat_range, R=radius)
 
         params = SphericalQGParams(
