@@ -96,3 +96,26 @@ reported in whatever units the model runs in, and
 `ConservationDriftMonitor` reports relative drift, which is
 scale-invariant, so a nondimensional run gets the same conservation
 signal as a dimensional one.
+
+## Learned priors (optional)
+
+The `flows` extra bridges a `StateAffine` into flowjax, so a normalising
+flow can be composed onto a fixed physical scaling instead of having to
+relearn it:
+
+```python
+from somax.flows import learned_prior
+
+prior = learned_prior(transform, state_example, flow, base_distribution)
+```
+
+The flow models the standardised state; the scaling maps its output back
+to physical units, so the prior is over physical states while the flow
+only ever sees O(1) numbers. `content/tutorials/learned_prior_flowjax.py`
+works through it.
+
+flowjax stays optional. Its own `Affine` forces the scale through a
+trainable softplus parameterisation, which is the opposite of what a
+fixed physical scale wants, and it brings the whole flow stack along.
+The log-determinant only matters when transforming densities; every
+other use of the affine map in somax needs no flow library.
