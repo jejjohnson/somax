@@ -9,7 +9,7 @@ import jax.random as jrandom
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class L96Params(Params):
@@ -121,7 +121,7 @@ class Lorenz96(SomaxModel):
         Returns:
             A ``Lorenz96`` model instance.
         """
-        return Lorenz96(params=L96Params(F=jnp.array(F)), advection=advection)
+        return Lorenz96(params=L96Params(F=as_parameter(F)), advection=advection)
 
 
 def rhs_lorenz_96(x: Array, F: float = 8, advection: bool = True) -> Array:

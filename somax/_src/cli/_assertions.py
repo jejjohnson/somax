@@ -39,8 +39,13 @@ from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 import numpy as np
-import paramax
 from loguru import logger
+
+from somax._src.core.resolution import (
+    AssertionFailedError,
+    check_munk_width,
+    check_stommel_width,
+)
 
 
 if TYPE_CHECKING:
@@ -50,10 +55,6 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------
 # Exception
 # ----------------------------------------------------------------------
-
-
-class AssertionFailedError(RuntimeError):
-    """Raised when an opt-in preflight or postflight assertion fails."""
 
 
 # ----------------------------------------------------------------------
@@ -133,6 +134,9 @@ def check_deformation_radius(
     ``L_d/dx < n_cells_min``; WARN when ``n_cells_min <= L_d/dx <
     n_cells_warn``.
 
+    ``dx`` here is the coarser of the two spacings, since a deformation
+    radius is isotropic and must be spanned in both directions.
+
     Requires a stratified model exposing ``model.strat.g_prime`` /
     ``model.strat.H`` and ``model.consts.f0`` (multilayer SWM, baroclinic /
     reparameterized QG). Raises for models without that structure so a typo'd
@@ -197,7 +201,12 @@ def check_deformation_radius(
         internal = radii[1:] if radii.shape[0] > 1 else radii
         Ld = float(np.min(internal))
         source = "sqrt(g'H)/f0 estimate"
-    dx_min = float(min(grid.dx, grid.dy))
+    # The *coarser* spacing: a deformation radius is an isotropic
+    # length, so it has to be resolved in both directions, and taking
+    # the finer one would pass an anisotropic grid that resolves it
+    # along only one axis. (The Munk and Stommel guards take dx
+    # instead — those layers are normal to the western wall.)
+    dx_min = float(max(grid.dx, grid.dy))
     ratio = Ld / dx_min
     if ratio < n_cells_min:
         raise AssertionFailedError(
@@ -333,165 +342,6 @@ def check_static_stability(spec: RunSpec, model: Any) -> None:
             f"interface(s) {bad.tolist()} (g' = {internal.tolist()}).\n"
             f"  N^2 <= 0 implies a convectively unstable / mis-ordered density "
             f"profile. Order layers light-to-dense (top-to-bottom)."
-        )
-
-
-def _boundary_layer_inputs(model: Any, check: str) -> tuple[Any, float, float]:
-    """Shared lookup for the western-boundary-layer guards.
-
-    Returns ``(params, beta, dx_min)`` with constrained parameters
-    already reconstituted, so a model carrying ``somax.positive``
-    wrappers is checked on its actual coefficient values.
-    """
-    model = paramax.unwrap(model)
-    consts = getattr(model, "consts", None)
-    grid = getattr(model, "grid", None)
-    params = getattr(model, "params", None)
-    if consts is None or grid is None or params is None:
-        raise AssertionFailedError(
-            f"{check}: model {type(model).__name__!r} lacks params/consts/grid; "
-            f"this check applies to beta-plane QG models."
-        )
-    beta = getattr(consts, "beta", None)
-    if beta is None:
-        raise AssertionFailedError(
-            f"{check}: model {type(model).__name__!r} does not expose "
-            f"consts.beta; the boundary-layer width is undefined without it."
-        )
-    beta = abs(float(beta))
-    if beta == 0.0:
-        raise AssertionFailedError(
-            f"{check}: consts.beta is zero. There is no western boundary "
-            f"layer on an f-plane, so this check does not apply."
-        )
-    return params, beta, float(min(grid.dx, grid.dy))
-
-
-def check_munk_width(
-    spec: RunSpec | None,
-    model: Any,
-    *,
-    n_cells_min: float = 2.0,
-    n_cells_warn: float = 4.0,
-) -> None:
-    """Pre-flight: the Munk (viscous) western boundary layer is resolved.
-
-    The Munk layer has width ``delta_M = (nu / beta)**(1/3)``. It is the
-    thinnest feature a viscous wind-driven gyre contains, so if the grid
-    cannot span it the western boundary current is wrong no matter what
-    the interior looks like. FAIL when ``delta_M/dx < n_cells_min``;
-    WARN below ``n_cells_warn``.
-
-    Works on dimensional and nondimensional models alike, since it
-    compares two lengths taken from the same model.
-
-    Args:
-        spec: The validated RunSpec (unused; present for registry
-            signature symmetry, and ``None`` when called from a
-            ``from_nondimensional`` factory).
-        model: The constructed model instance.
-        n_cells_min: ``delta_M/dx`` below which to FAIL.
-        n_cells_warn: ``delta_M/dx`` below which to WARN.
-
-    Raises:
-        AssertionFailedError: If the model lacks beta / viscosity, if
-            viscosity is zero, or if the layer is unresolved.
-    """
-    del spec
-    params, beta, dx_min = _boundary_layer_inputs(model, "munk_width")
-    nu = getattr(params, "lateral_viscosity", None)
-    if nu is None:
-        raise AssertionFailedError(
-            "munk_width: model does not expose params.lateral_viscosity; "
-            "cannot compute the Munk width."
-        )
-    nu = abs(float(jnp.asarray(nu)))
-    if nu == 0.0:
-        raise AssertionFailedError(
-            "munk_width: lateral_viscosity is zero, so there is no Munk "
-            "layer. Drop this check for an inviscid or Stommel-only run."
-        )
-    delta_m = (nu / beta) ** (1.0 / 3.0)
-    ratio = delta_m / dx_min
-    if ratio < n_cells_min:
-        raise AssertionFailedError(
-            f"munk_width check FAILED: delta_M/dx = {ratio:.2f} < "
-            f"{n_cells_min}\n"
-            f"  delta_M = {delta_m:.4g} (= (nu/beta)^(1/3), nu={nu:.4g}, "
-            f"beta={beta:.4g})\n"
-            f"  dx      = {dx_min:.4g}\n"
-            f"  → the western boundary current is unresolved; refine the "
-            f"grid or raise the viscosity "
-            f"(nu >= {beta * (n_cells_min * dx_min) ** 3:.4g})."
-        )
-    if ratio < n_cells_warn:
-        logger.warning(
-            "Munk layer marginally resolved: delta_M/dx = {:.2f} "
-            "(delta_M={:.4g}, dx={:.4g})",
-            ratio,
-            delta_m,
-            dx_min,
-        )
-
-
-def check_stommel_width(
-    spec: RunSpec | None,
-    model: Any,
-    *,
-    n_cells_min: float = 1.0,
-    n_cells_warn: float = 2.0,
-) -> None:
-    """Pre-flight: the Stommel (frictional) western boundary layer is resolved.
-
-    The Stommel layer has width ``delta_S = kappa / beta``. The
-    threshold is one cell rather than two: a drag-dominated boundary
-    layer is a smoother structure than a viscous one, so a coarser
-    representation is still meaningful.
-
-    Args:
-        spec: The validated RunSpec (unused; see :func:`check_munk_width`).
-        model: The constructed model instance.
-        n_cells_min: ``delta_S/dx`` below which to FAIL.
-        n_cells_warn: ``delta_S/dx`` below which to WARN.
-
-    Raises:
-        AssertionFailedError: If the model lacks beta / drag, if drag is
-            zero, or if the layer is unresolved.
-    """
-    del spec
-    params, beta, dx_min = _boundary_layer_inputs(model, "stommel_width")
-    kappa = getattr(params, "bottom_drag", None)
-    if kappa is None:
-        raise AssertionFailedError(
-            "stommel_width: model does not expose params.bottom_drag; "
-            "cannot compute the Stommel width."
-        )
-    kappa = abs(float(jnp.asarray(kappa)))
-    if kappa == 0.0:
-        raise AssertionFailedError(
-            "stommel_width: bottom_drag is zero, so there is no Stommel "
-            "layer. Drop this check for a Munk-only run."
-        )
-    delta_s = kappa / beta
-    ratio = delta_s / dx_min
-    if ratio < n_cells_min:
-        raise AssertionFailedError(
-            f"stommel_width check FAILED: delta_S/dx = {ratio:.2f} < "
-            f"{n_cells_min}\n"
-            f"  delta_S = {delta_s:.4g} (= kappa/beta, kappa={kappa:.4g}, "
-            f"beta={beta:.4g})\n"
-            f"  dx      = {dx_min:.4g}\n"
-            f"  → the frictional boundary layer is unresolved; refine the "
-            f"grid or raise the drag "
-            f"(kappa >= {beta * n_cells_min * dx_min:.4g})."
-        )
-    if ratio < n_cells_warn:
-        logger.warning(
-            "Stommel layer marginally resolved: delta_S/dx = {:.2f} "
-            "(delta_S={:.4g}, dx={:.4g})",
-            ratio,
-            delta_s,
-            dx_min,
         )
 
 

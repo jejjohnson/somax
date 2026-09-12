@@ -25,6 +25,7 @@ and read it back off :attr:`Scales.kind`.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Literal
 
 import equinox as eqx
@@ -93,9 +94,10 @@ class Scales(eqx.Module):
             A ``Scales`` with ``kind="advective"``.
 
         Raises:
-            ValueError: If ``L`` or ``U`` is not strictly positive.
+            ValueError: If ``L``, ``U``, ``H`` or ``g`` is not strictly
+                positive.
         """
-        _require_positive(L=L, U=U, H=H)
+        _require_positive(L=L, U=U, H=H, g=g)
         return cls(L=L, U=U, H=H, f0=f0, T=L / U, g=g, kind="advective")
 
     @classmethod
@@ -125,10 +127,10 @@ class Scales(eqx.Module):
             A ``Scales`` with ``kind="inertial"``.
 
         Raises:
-            ValueError: If ``L``, ``H``, ``f0`` or ``rossby`` is not
-                strictly positive.
+            ValueError: If ``L``, ``H``, ``f0``, ``rossby`` or ``g`` is
+                not strictly positive.
         """
-        _require_positive(L=L, H=H, f0=f0, rossby=rossby)
+        _require_positive(L=L, H=H, f0=f0, rossby=rossby, g=g)
         return cls(L=L, U=f0 * L * rossby, H=H, f0=f0, T=1.0 / f0, g=g, kind="inertial")
 
     @classmethod
@@ -140,7 +142,7 @@ class Scales(eqx.Module):
         rossby: float,
         g: float = GRAVITY,
     ) -> Scales:
-        """Planetary set: ``L = a``, ``T = 1 / Omega``, ``U = Omega * a * Ro``.
+        """Planetary set: ``L = a``, ``T = 1/Omega``, ``U = 2 * Omega * a * Ro``.
 
         The set for spherical models, whose natural length scale is the
         planet radius. ``f0`` is stored as ``2 * Omega`` so that
@@ -159,10 +161,10 @@ class Scales(eqx.Module):
             A ``Scales`` with ``kind="planetary"``.
 
         Raises:
-            ValueError: If ``a``, ``Omega``, ``H`` or ``rossby`` is not
-                strictly positive.
+            ValueError: If ``a``, ``Omega``, ``H``, ``rossby`` or ``g``
+                is not strictly positive.
         """
-        _require_positive(a=a, Omega=Omega, H=H, rossby=rossby)
+        _require_positive(a=a, Omega=Omega, H=H, rossby=rossby, g=g)
         return cls(
             L=a,
             U=2.0 * Omega * a * rossby,
@@ -200,9 +202,10 @@ class Scales(eqx.Module):
             A ``Scales`` with ``kind="diffusive"``.
 
         Raises:
-            ValueError: If ``L`` or ``kappa`` is not strictly positive.
+            ValueError: If ``L``, ``kappa`` or ``g`` is not strictly
+                positive.
         """
-        _require_positive(L=L, kappa=kappa)
+        _require_positive(L=L, kappa=kappa, g=g)
         return cls(
             L=L,
             U=kappa / L,
@@ -269,39 +272,103 @@ class Scales(eqx.Module):
     def dt_from_cfl(
         self,
         cfl: float,
-        n_cells: int,
+        n_cells: int | Sequence[int],
         *,
         mode: str | None = None,
+        diffusivity: float | None = None,
+        extent: float | Sequence[float] | None = None,
     ) -> float:
-        """Largest time step meeting a CFL target, in this set's time unit.
+        r"""Largest time step meeting a CFL target, in this set's time unit.
+
+        Multi-dimensional by construction: pass one cell count per axis
+        and the bound accounts for all of them. A single ``int`` is the
+        1-D case.
+
+        The advective bound is :math:`C \min_i \Delta x_i / \hat u`
+        and the diffusive one
+        :math:`C / (2 \hat\kappa \sum_i \Delta x_i^{-2})`, both in
+        nondimensional units, where
+        :math:`\hat u = U T / L` is the nondimensional velocity and
+        :math:`\hat\kappa = \kappa T / L^2` the nondimensional
+        diffusivity.
 
         Args:
             cfl: Target Courant number.
-            n_cells: Interior cells across ``L``, so ``dx = L/n_cells``.
-            mode: ``"advective"`` for ``dt <= C dx / U``, ``"diffusive"``
-                for ``dt <= C dx**2 / (2 kappa)``. Defaults to the
+            n_cells: Interior cells across each axis. An ``int`` means
+                one axis; a sequence gives one count per axis.
+            mode: ``"advective"`` or ``"diffusive"``. Defaults to the
                 diffusive form for a diffusive scale set and the
                 advective form otherwise.
+            diffusivity: Nondimensional diffusivity :math:`\kappa T/L^2`
+                for the diffusive bound. For the models whose factories
+                take a Reynolds or Péclet number this is ``1/Re`` or
+                ``1/Pe`` — the value the model actually carries, which
+                the scale set cannot know. Defaults to 1 for a
+                diffusive scale set, where the scaling makes it exactly
+                1 by construction; required otherwise.
+            extent: Domain length along each axis in units of ``L``.
+                Defaults to 1 per axis; pass ``(1.0, aspect)`` for a
+                rectangular 2-D domain, whose ``y`` spacing is
+                ``aspect/ny`` rather than ``1/ny``.
 
         Returns:
             The time step, expressed in units of :attr:`T` — the unit a
             nondimensional model built from these scales expects.
 
         Raises:
-            ValueError: If ``cfl`` or ``n_cells`` is not positive, or
-                ``mode`` is unrecognised.
+            ValueError: If ``cfl``, a cell count or an extent is not
+                positive, if ``mode`` is unrecognised, if ``extent``
+                and ``n_cells`` disagree in length, or if the diffusive
+                bound is asked for without a diffusivity on a
+                non-diffusive set.
         """
-        _require_positive(cfl=cfl, n_cells=float(n_cells))
+        _require_positive(cfl=cfl)
+        counts = (n_cells,) if isinstance(n_cells, int) else tuple(n_cells)
+        if not counts:
+            raise ValueError("dt_from_cfl: n_cells must name at least one axis.")
+        for axis, count in enumerate(counts):
+            _require_positive(**{f"n_cells[{axis}]": float(count)})
+
+        if extent is None:
+            extents = (1.0,) * len(counts)
+        else:
+            extents = (
+                (float(extent),)
+                if isinstance(extent, (int, float))
+                else tuple(float(e) for e in extent)
+            )
+        if len(extents) != len(counts):
+            raise ValueError(
+                f"dt_from_cfl: extent names {len(extents)} axes but n_cells "
+                f"names {len(counts)}."
+            )
+        for axis, value in enumerate(extents):
+            _require_positive(**{f"extent[{axis}]": value})
+
+        spacings = tuple(e / c for e, c in zip(extents, counts, strict=True))
+
         if mode is None:
             mode = "diffusive" if self.kind == "diffusive" else "advective"
-        dx = 1.0 / n_cells  # in units of L
+
         if mode == "advective":
-            # dt <= C dx/U; in units of T = L/U for the advective set the
-            # velocity is 1, so this is C * dx scaled by T/(L/U).
-            return cfl * dx * (self.T / (self.L / self.U))
+            # u_hat = U T / L: the speed the nondimensional model
+            # actually carries. Dividing by it — the advective set is
+            # the only one where it is 1.
+            velocity = self.U * self.T / self.L
+            return cfl * min(spacings) / velocity
         if mode == "diffusive":
-            kappa = self.L * self.U  # the diffusivity implied by the set
-            return cfl * dx**2 / 2.0 * (self.T * kappa / self.L**2)
+            if diffusivity is None:
+                if self.kind != "diffusive":
+                    raise ValueError(
+                        "dt_from_cfl: the diffusive bound needs the model's "
+                        "nondimensional diffusivity (1/Re for the Burgers and "
+                        "Navier-Stokes factories, 1/Pe where a Peclet number "
+                        "is used). Only a diffusive scale set fixes it at 1."
+                    )
+                diffusivity = 1.0
+            _require_positive(diffusivity=diffusivity)
+            inverse_squares = sum(1.0 / spacing**2 for spacing in spacings)
+            return cfl / (2.0 * diffusivity * inverse_squares)
         raise ValueError(
             f"dt_from_cfl: mode must be 'advective' or 'diffusive'; got {mode!r}."
         )
@@ -311,20 +378,36 @@ class Scales(eqx.Module):
 
         What a ``from_nondimensional`` factory builds its model in:
         ``L = 1`` and the family's own choice of what else is unity
-        (``U = 1`` when advective, ``f0 = 1`` when inertial or
-        planetary). Useful in tests, to state that a nondimensional run
-        really is running at unit scales.
+        (``U = 1`` when advective, ``f0 = 1`` when inertial, ``Omega =
+        1`` when planetary). Useful in tests, to state that a
+        nondimensional run really is running at unit scales.
+
+        Gravity is *not* carried across. Every other scale becomes 1,
+        so keeping the SI ``9.81`` would change :attr:`burger`,
+        :attr:`froude`, :attr:`lamb` and :attr:`eta`, handing a factory
+        a different physical problem. It is instead set to whatever
+        reproduces this set's Burger number at the new unit scales,
+        ``g' = Bu (f0' L')**2 / H'`` — which is ``g H / U**2`` for the
+        advective set, ``g H / (f0 L)**2`` for the inertial one, and
+        four times that for the planetary one, whose ``f0'`` is ``2``.
 
         Returns:
-            A ``Scales`` of the same ``kind`` with unit scales.
+            A ``Scales`` of the same ``kind`` with unit scales and the
+            same dimensionless groups.
         """
+        burger = self.burger
         if self.kind == "advective":
-            return Scales.advective(L=1.0, U=1.0, f0=1.0 / self.rossby, H=1.0, g=self.g)
+            # f0' = 1/Ro is what keeps the Rossby number, so the
+            # gravity that keeps the Burger number scales with it.
+            f0 = 1.0 / self.rossby
+            return Scales.advective(L=1.0, U=1.0, f0=f0, H=1.0, g=burger * f0**2)
         if self.kind == "inertial":
-            return Scales.inertial(L=1.0, f0=1.0, H=1.0, rossby=self.rossby, g=self.g)
+            return Scales.inertial(L=1.0, f0=1.0, H=1.0, rossby=self.rossby, g=burger)
         if self.kind == "diffusive":
-            return Scales.diffusive(L=1.0, kappa=1.0, g=self.g)
-        return Scales.planetary(a=1.0, Omega=1.0, H=1.0, rossby=self.rossby, g=self.g)
+            return Scales.diffusive(L=1.0, kappa=1.0, g=burger)
+        return Scales.planetary(
+            a=1.0, Omega=1.0, H=1.0, rossby=self.rossby, g=4.0 * burger
+        )
 
 
 def _require_positive(**values: float) -> None:

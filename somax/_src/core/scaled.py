@@ -24,8 +24,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import diffrax as dfx
 import equinox as eqx
 import jax.tree_util as jtu
+import paramax
 from jaxtyping import PyTree
 
 from somax._src.core.model import SomaxModel
@@ -38,7 +40,7 @@ class ScaledModel(SomaxModel):
 
     The wrapped model is a ``SomaxModel`` like any other: it integrates,
     steps, and reports diagnostics through the same interface. Every
-    time passed to it — ``t0``, ``t1``, ``dt``, ``save_at`` — is in the
+    time passed to it — ``t0``, ``t1``, ``dt``, ``saveat`` — is in the
     *transformed* time unit, related to the inner model's by
     ``t_inner = time_scale * t_outer``.
 
@@ -82,6 +84,27 @@ class ScaledModel(SomaxModel):
             lambda d, scale: self.time_scale * d / scale,
             tendency,
             self.transform.scale,
+        )
+
+    def build_terms(self) -> dfx.AbstractTerm:
+        """Rescale the inner model's terms, preserving their structure.
+
+        The inherited implementation would wrap the whole transformed
+        right-hand side in a single ``ODETerm``, discarding an IMEX
+        model's explicit/implicit split — so wrapping a
+        ``TermModel.create(..., imex=True)`` would make it incompatible
+        with :func:`somax.solvers.imex_solver`, and integrate its stiff
+        diffusion explicitly under the default solver.
+
+        Instead the inner term tree is built first and each ``ODETerm``
+        in it is rescaled in place. Boundary conditions come from the
+        inner terms, in the inner model's own coordinates, rather than
+        being conjugated through the transform.
+        """
+        return _rescale_term(
+            paramax.unwrap(self.inner).build_terms(),
+            transform=self.transform,
+            time_scale=self.time_scale,
         )
 
     def apply_boundary_conditions(self, state: PyTree) -> PyTree:
@@ -173,3 +196,52 @@ class ScaledModel(SomaxModel):
         """
         transform = StateAffine.from_samples(samples, **from_samples_kw)
         return cls(inner=inner, transform=transform, time_scale=1.0)
+
+
+def _rescale_term(
+    term: dfx.AbstractTerm,
+    *,
+    transform: StateAffine,
+    time_scale: float,
+) -> dfx.AbstractTerm:
+    """Map a diffrax term into transformed coordinates, structure intact.
+
+    Recurses through ``MultiTerm`` so an IMEX split survives: each
+    ``ODETerm`` keeps its place, and the solver still routes the
+    explicit and implicit parts to the stages they were assembled for.
+
+    Args:
+        term: The inner model's diffrax term.
+        transform: The affine state map.
+        time_scale: Inner time units per wrapped time unit.
+
+    Returns:
+        A term of the same shape, evaluating in wrapped coordinates.
+
+    Raises:
+        TypeError: If the tree holds a term that is neither a
+            ``MultiTerm`` nor an ``ODETerm`` — an SDE term, say, whose
+            rescaling is not a chain rule on the drift alone.
+    """
+    if isinstance(term, dfx.MultiTerm):
+        return dfx.MultiTerm(
+            *(
+                _rescale_term(sub, transform=transform, time_scale=time_scale)
+                for sub in term.terms
+            )
+        )
+    if isinstance(term, dfx.ODETerm):
+        inner_vector_field = term.vector_field
+
+        def rescaled(t: float, y: PyTree, args: PyTree | None = None) -> PyTree:
+            tendency = inner_vector_field(t * time_scale, transform.inverse(y), args)
+            return jtu.tree_map(
+                lambda d, scale: time_scale * d / scale, tendency, transform.scale
+            )
+
+        return dfx.ODETerm(rescaled)
+    raise TypeError(
+        f"ScaledModel: cannot rescale a {type(term).__name__}. Only ODETerm "
+        "and MultiTerm are supported; an affine change of variables is not a "
+        "chain rule on the drift alone for a stochastic term."
+    )

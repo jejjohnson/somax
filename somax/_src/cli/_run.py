@@ -32,6 +32,7 @@ from somax._src.cli import _assertions
 from somax._src.cli._factories import build
 from somax._src.cli._progress import RunLogContext, start_run_log, stop_run_log
 from somax._src.cli._units import (
+    field_units,
     format_field_stats,
     format_time_seconds,
     format_wallclock,
@@ -541,7 +542,20 @@ def _state_diagnostics(state: Any) -> dict[str, dict[str, float]]:
     return out
 
 
-def _format_state_stats(diag: dict[str, dict[str, float]]) -> str:
+def _units_for(spec: Any) -> dict[str, str]:
+    """Unit mapping for a run's heartbeat line.
+
+    A run built from a ``scenario.nondim`` block has no SI units to
+    report, so every field is marked ``-`` rather than left carrying a
+    label like ``q[1/s]`` that is not what the numbers mean.
+    """
+    nondim = getattr(getattr(spec, "scenario", None), "nondim", None)
+    return field_units("nondim" if nondim else "si")
+
+
+def _format_state_stats(
+    diag: dict[str, dict[str, float]], units: dict[str, str] | None = None
+) -> str:
     """Format the state diagnostics dict with per-field units."""
     return " ".join(
         format_field_stats(
@@ -550,6 +564,7 @@ def _format_state_stats(diag: dict[str, dict[str, float]]) -> str:
             mean_val=stats["mean"],
             max_val=stats["max"],
             nan_count=stats["nan"],
+            units=units,
         )
         for name, stats in diag.items()
     )
@@ -692,6 +707,7 @@ class _ChunkStep(StatefulOperator):
         checkpoint_dir: Path | None,
         checkpoint_label: str | None,
         monitors: list[Monitor],
+        units: dict[str, str] | None = None,
     ) -> None:
         self.model = model
         self.state_class = state_class
@@ -706,6 +722,7 @@ class _ChunkStep(StatefulOperator):
         self.checkpoint_dir = checkpoint_dir
         self.checkpoint_label = checkpoint_label
         self.monitors = monitors
+        self.units = units
 
     def _apply(self, state: Any, carry: _ChunkCarry) -> tuple[Any, _ChunkCarry]:
         log = self.run_log.log
@@ -765,7 +782,7 @@ class _ChunkStep(StatefulOperator):
         log.debug(
             f"chunk {i + 1}/{self.n_diag_intervals} "
             f"sim_t={format_time_seconds(chunk_t1)} | "
-            f"{_format_state_stats(state_diag)}"
+            f"{_format_state_stats(state_diag, self.units)}"
             + (f" | physics: {phys_line}" if phys_line else "")
             + f" | wall={format_wallclock(chunk_wall)}"
             + metric_line
@@ -780,7 +797,7 @@ class _ChunkStep(StatefulOperator):
                 f"somax-sim {self.mode} integration halted during chunk "
                 f"{i + 1}/{self.n_diag_intervals} "
                 f"(sim_t={format_time_seconds(chunk_t1)}): {terminate_reason}.\n"
-                f"  {_format_state_stats(state_diag)}\n"
+                f"  {_format_state_stats(state_diag, self.units)}\n"
                 f"  Refusing to write artifacts. The condition appeared between "
                 f"sim_t={format_time_seconds(chunk_t0)} and "
                 f"sim_t={format_time_seconds(chunk_t1)} — earlier chunks were "
@@ -921,11 +938,12 @@ def _chunked_integrate_with_diagnostics(
     n_diag_intervals = diag_ts.shape[0] - 1
 
     # Initial diagnostics (before any integration).
+    units = _units_for(spec)
     init_state_diag = _state_diagnostics(state0)
     init_phys, _init_flat = _format_physical_scalars(model, state0)
     log.debug(
         f"chunk 0/{n_diag_intervals} sim_t={format_time_seconds(float(diag_ts[0]))} | "
-        f"{_format_state_stats(init_state_diag)}"
+        f"{_format_state_stats(init_state_diag, units)}"
         + (f" | physics: {init_phys}" if init_phys else "")
         + " | initial state"
     )
@@ -947,6 +965,7 @@ def _chunked_integrate_with_diagnostics(
         checkpoint_dir=checkpoint_dir,
         checkpoint_label=checkpoint_label,
         monitors=active_monitors,
+        units=units,
     )
     carry0 = _ChunkCarry(
         index=0,

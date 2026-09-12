@@ -69,7 +69,62 @@ def build(
                 "cannot be built from a scenario.nondim block. Remove the "
                 "block and give scenario.consts instead."
             )
+        _reject_dimensional_overrides(model_name, model_params, bundle)
         built = model_entry.from_nondimensional(bundle, nondim)
     else:
         built = model_entry.build(bundle, model_params or {})
     return built.model, built.state0
+
+
+#: ``model.params`` keys a nondimensional build derives for itself, and
+#: ``scenario.forcing`` keys it would otherwise discard.
+_DIMENSIONAL_PARAM_KEYS = frozenset(
+    {"lateral_viscosity", "bottom_drag", "wind_amplitude", "nu", "kappa"}
+)
+_DIMENSIONAL_FORCING_KEYS = frozenset({"wind_amplitude", "tau0"})
+
+
+def _reject_dimensional_overrides(
+    model_name: str,
+    model_params: dict[str, Any] | None,
+    bundle: Any,
+) -> None:
+    """Refuse a config that mixes dimensionless and dimensional knobs.
+
+    The nondimensional path never forwards ``model_params``, and the
+    adapters read only ``wind_profile`` from the forcing block — so a
+    config could carry ``scenario.nondim`` alongside
+    ``model.params.lateral_viscosity`` or
+    ``scenario.forcing.wind_amplitude``, pass validation, and then run
+    with coefficients that are not the ones it asks for. Since the
+    dimensionless numbers *derive* those coefficients, the two cannot
+    both be honoured; saying so beats silently picking one.
+
+    Args:
+        model_name: For the error message.
+        model_params: The ``model`` block, if any.
+        bundle: The built scenario, whose ``forcing_params`` is checked.
+
+    Raises:
+        ValueError: If a conflicting dimensional key is present.
+    """
+    clashes = []
+    params = dict((model_params or {}).get("params", {}))
+    clashes += [
+        f"model.params.{key}"
+        for key in sorted(params)
+        if key in _DIMENSIONAL_PARAM_KEYS
+    ]
+    forcing = dict(getattr(bundle, "forcing_params", {}) or {})
+    clashes += [
+        f"scenario.forcing.{key}"
+        for key in sorted(forcing)
+        if key in _DIMENSIONAL_FORCING_KEYS
+    ]
+    if clashes:
+        raise ValueError(
+            f"{model_name}: {clashes} cannot be combined with a "
+            f"scenario.nondim block — the dimensionless numbers derive those "
+            f"coefficients, so the run would not use the values given here. "
+            f"Drop them, or drop scenario.nondim and give scenario.consts."
+        )

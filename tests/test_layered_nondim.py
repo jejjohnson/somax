@@ -15,7 +15,10 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from somax._src.cli._assertions import AssertionFailedError
+from somax._src.cli._assertions import (
+    AssertionFailedError,
+    check_deformation_radius,
+)
 from somax._src.core.scales import Scales
 from somax._src.core.transforms import StateAffine
 from somax._src.models.qg.baroclinic import BaroclinicQG, BaroclinicQGState
@@ -577,3 +580,215 @@ class TestMultilayerStateTransform:
         assert transform.scale.h.shape == (2, 1, 1)
         recovered = transform.inverse(transform.forward(state))
         np.testing.assert_allclose(recovered.h, state.h, rtol=1e-5)
+
+
+class TestReturnedScalesUseTheInterfaceGravity:
+    """``Scales.g`` must be ``g_prime[0]``, not standard gravity.
+
+    The scales describe the *nondimensional* model, whose surface-mode
+    gravity is the first reduced gravity. Left at 9.81 they disagree
+    with the Burger number that was asked for, and the thickness-anomaly
+    scale ``f0 U L / g`` comes out wrong by the ratio between them —
+    which can be orders of magnitude.
+    """
+
+    def build(self, cls, **kw):
+        return cls.from_nondimensional(
+            nx=64,
+            ny=64,
+            rossby=0.02,
+            beta_hat=20.0,
+            burger=[1.0, 0.02],
+            thickness_ratio=[1.0, 4.0],
+            delta_M=0.06,
+            **kw,
+        )
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    def test_burger_round_trips(self, cls):
+        _, scales = self.build(cls)
+        assert scales.burger == pytest.approx(1.0, rel=1e-6)
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    def test_gravity_is_the_first_reduced_gravity(self, cls):
+        model, scales = self.build(cls)
+        g_prime = float(np.asarray(model.strat.g_prime)[0])
+        assert scales.g == pytest.approx(g_prime, rel=1e-6)
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    def test_gravity_is_not_standard_gravity(self, cls):
+        _, scales = self.build(cls)
+        assert scales.g != pytest.approx(9.81)
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    def test_the_height_scale_follows(self, cls):
+        """``eta = f0 U L / g`` is what a StateAffine gives ``h``."""
+        _, scales = self.build(cls)
+        assert scales.eta == pytest.approx(scales.f0 / scales.g, rel=1e-6)
+
+    def test_a_different_burger_gives_a_different_gravity(self):
+        _, low = self.build(BaroclinicQG)
+        _, high = BaroclinicQG.from_nondimensional(
+            nx=64,
+            ny=64,
+            rossby=0.02,
+            beta_hat=20.0,
+            burger=[4.0, 0.02],
+            thickness_ratio=[1.0, 4.0],
+            delta_M=0.06,
+        )
+        assert high.g == pytest.approx(4.0 * low.g, rel=1e-6)
+
+
+class TestForwardedKwargsCannotOverrideDerivedValues:
+    """``**create_kw`` must not smuggle in a second stratification.
+
+    ``create`` prefers an explicit ``stratification`` over the ``H`` /
+    ``g_prime`` / ``n_layers`` the factory derived, while the returned
+    scales and the wind normalisation still describe the derived ones —
+    so the model and its scales would be different systems.
+    """
+
+    def base(self):
+        return dict(
+            nx=64,
+            ny=64,
+            rossby=0.02,
+            beta_hat=20.0,
+            burger=[1.0, 0.02],
+            thickness_ratio=[1.0, 4.0],
+            delta_M=0.06,
+        )
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    @pytest.mark.parametrize(
+        "name", ["stratification", "H", "g_prime", "n_layers", "f0", "beta"]
+    )
+    def test_a_derived_argument_is_rejected(self, cls, name):
+        with pytest.raises(ValueError, match="derived from the dimensionless"):
+            cls.from_nondimensional(**self.base(), **{name: None})
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    def test_an_unrelated_argument_still_goes_through(self, cls):
+        model, _ = cls.from_nondimensional(**self.base(), wind_profile="single")
+        assert model is not None
+
+    def test_the_shallow_water_factory_guards_too(self):
+        with pytest.raises(ValueError, match="derived from the dimensionless"):
+            NonlinearShallowWater2D.from_nondimensional(
+                nx=32, ny=32, rossby=0.1, burger=1.0, g=9.81
+            )
+
+    def test_the_message_names_the_offending_argument(self):
+        with pytest.raises(ValueError, match=r"\['stratification'\]"):
+            BaroclinicQG.from_nondimensional(**self.base(), stratification=None)
+
+
+class TestExplicitWindAmplitudeIsValidated:
+    """Every other coefficient is checked; ``wind_hat`` was not.
+
+    A non-finite value went straight into ``wind_amplitude`` and made
+    the tendencies non-finite on the first step.
+    """
+
+    def base(self):
+        return dict(
+            nx=64,
+            ny=64,
+            rossby=0.02,
+            beta_hat=20.0,
+            burger=[1.0, 0.02],
+            thickness_ratio=[1.0, 4.0],
+            delta_M=0.06,
+        )
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
+    def test_a_bad_wind_hat_is_rejected(self, cls, bad):
+        with pytest.raises(ValueError, match="wind_hat"):
+            cls.from_nondimensional(**self.base(), wind_hat=bad)
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    def test_zero_is_still_allowed(self, cls):
+        model, _ = cls.from_nondimensional(**self.base(), wind_hat=0.0)
+        assert float(np.asarray(model.params.wind_amplitude)) == 0.0
+
+    @pytest.mark.parametrize("cls", [BaroclinicQG, ReparameterizedQG])
+    def test_the_default_still_works(self, cls):
+        model, _ = cls.from_nondimensional(**self.base())
+        assert float(np.asarray(model.params.wind_amplitude)) > 0.0
+
+
+class TestMultilayerWindCarriesTheTopLayerThickness:
+    """The RHS divides by ``H[0]``, so the factory must multiply by it.
+
+    Otherwise the realised acceleration is ``wind_hat / H[0]`` whenever
+    ``thickness_ratio[0]`` is not 1 — silently not the wind that was
+    asked for.
+    """
+
+    def build(self, first_layer):
+        return MultilayerShallowWater2D.from_nondimensional(
+            nx=32,
+            ny=32,
+            rossby=0.1,
+            burger=[1.0, 0.05],
+            thickness_ratio=[first_layer, 4.0],
+            wind_hat=0.5,
+        )
+
+    def realised(self, model):
+        """The acceleration the RHS actually applies to the top layer."""
+        tau0 = float(np.asarray(model.params.wind_amplitude))
+        return tau0 / float(np.asarray(model.strat.H)[0])
+
+    def test_the_requested_wind_is_what_the_rhs_applies(self):
+        model, scales = self.build(first_layer=2.0)
+        assert self.realised(model) == pytest.approx(0.5 * scales.U, rel=1e-6)
+
+    def test_a_unit_top_layer_is_unchanged(self):
+        """The case that used to work, so the fix is not a regression."""
+        model, scales = self.build(first_layer=1.0)
+        assert self.realised(model) == pytest.approx(0.5 * scales.U, rel=1e-6)
+
+    def test_the_thickness_actually_varies_the_amplitude(self):
+        thin, _ = self.build(first_layer=1.0)
+        thick, _ = self.build(first_layer=2.0)
+        assert float(np.asarray(thick.params.wind_amplitude)) == pytest.approx(
+            2.0 * float(np.asarray(thin.params.wind_amplitude)), rel=1e-6
+        )
+
+
+class TestDeformationRadiusUsesTheCoarserSpacing:
+    """A deformation radius is isotropic, so both directions must span it.
+
+    Taking the finer spacing passes a grid that resolves it along one
+    axis only.
+    """
+
+    def model(self, nx, ny):
+        return BaroclinicQG.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=1.0,
+            f0=50.0,
+            beta=20.0,
+            n_layers=2,
+            H=(1.0, 4.0),
+            g_prime=(2500.0, 50.0),
+        )
+
+    def test_an_anisotropic_grid_no_longer_passes(self):
+        with pytest.raises(AssertionFailedError, match="L_d/dx"):
+            check_deformation_radius(None, self.model(nx=4, ny=256))
+
+    def test_the_isotropic_grid_at_the_finer_spacing_passes(self):
+        """So the failure above is about the coarse axis, not the model."""
+        check_deformation_radius(None, self.model(nx=256, ny=256))
+
+    def test_the_reported_spacing_is_the_coarser_one(self):
+        model = self.model(nx=4, ny=256)
+        with pytest.raises(AssertionFailedError) as excinfo:
+            check_deformation_radius(None, model)
+        assert f"{max(model.grid.dx, model.grid.dy):.4g}" in str(excinfo.value)

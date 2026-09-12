@@ -156,3 +156,69 @@ class TestValidation:
     def test_planetary_rejects_zero_rotation(self):
         with pytest.raises(ValueError, match="Omega"):
             Scales.planetary(a=1.0, Omega=0.0, H=1.0, rossby=0.1)
+
+
+class TestNondimensionalPreservesTheGroups:
+    """The unit set must describe the *same* physics, not just unit scales.
+
+    Carrying the SI ``9.81`` across would leave every gravity-dependent
+    group wrong, and a factory handed those scales would build a
+    different problem.
+    """
+
+    def cases(self):
+        return [
+            Scales.advective(L=1.0e6, U=0.1, f0=1.0e-4, H=500.0),
+            Scales.inertial(L=1.0e6, f0=1.0e-4, H=500.0, rossby=0.01),
+            Scales.planetary(a=6.371e6, Omega=7.292e-5, H=3000.0, rossby=0.05),
+        ]
+
+    @pytest.mark.parametrize("group", ["rossby", "burger", "froude", "lamb"])
+    def test_group_is_unchanged(self, group):
+        for scales in self.cases():
+            got = getattr(scales.nondimensional(), group)
+            assert got == pytest.approx(getattr(scales, group), rel=1e-12)
+
+    def test_the_height_scale_ratio_is_unchanged(self):
+        """``eta/H`` is dimensionless, so it must survive too."""
+        for scales in self.cases():
+            unit = scales.nondimensional()
+            assert unit.eta / unit.H == pytest.approx(scales.eta / scales.H, rel=1e-12)
+
+    def test_gravity_is_not_carried_across(self):
+        """The whole point: 9.81 is meaningless at unit scales."""
+        scales = Scales.inertial(L=1.0e6, f0=1.0e-4, H=500.0, rossby=0.01)
+        assert scales.nondimensional().g != scales.g
+
+    def test_the_kind_survives(self):
+        for scales in self.cases():
+            assert scales.nondimensional().kind == scales.kind
+
+    def test_it_is_idempotent(self):
+        for scales in self.cases():
+            once = scales.nondimensional()
+            assert once.nondimensional().g == pytest.approx(once.g, rel=1e-12)
+
+
+class TestGravityValidation:
+    """``g`` is a physical input like any other; reject bad ones on entry.
+
+    Otherwise the failure surfaces later inside ``eta`` (a divide by
+    zero) or ``froude`` (a square root of a negative), far from the
+    call that caused it.
+    """
+
+    @pytest.mark.parametrize("bad", [0.0, -9.81, float("nan"), float("inf")])
+    def test_advective_rejects_it(self, bad):
+        with pytest.raises(ValueError, match="g must be"):
+            Scales.advective(L=1.0, U=1.0, g=bad)
+
+    @pytest.mark.parametrize("bad", [0.0, -9.81, float("nan")])
+    def test_inertial_rejects_it(self, bad):
+        with pytest.raises(ValueError, match="g must be"):
+            Scales.inertial(L=1.0, f0=1.0, H=1.0, rossby=0.1, g=bad)
+
+    @pytest.mark.parametrize("bad", [0.0, -9.81, float("nan")])
+    def test_planetary_rejects_it(self, bad):
+        with pytest.raises(ValueError, match="g must be"):
+            Scales.planetary(a=1.0, Omega=1.0, H=1.0, rossby=0.1, g=bad)
