@@ -771,9 +771,20 @@ class TestRestartsCannotCrossCoordinateSystems:
         with pytest.raises(ValueError, match="holds nondimensional state"):
             self.check(spec_nondim=False, artifact_coordinates="nondimensional")
 
-    def test_an_unmarked_artifact_is_rejected_rather_than_guessed(self):
+    def test_an_unmarked_artifact_is_accepted_by_a_dimensional_run(self):
+        """Every artifact written before this marker existed is SI.
+
+        Nondimensional CLI runs arrive with the marker, so there is no
+        unmarked nondimensional artifact to confuse it with — and
+        rejecting these would make every existing simulation
+        uncontinuable.
+        """
+        self.check(spec_nondim=False, artifact_coordinates=None)
+
+    def test_an_unmarked_artifact_is_still_rejected_by_a_nondimensional_run(self):
+        """The one case where guessing would advance SI as dimensionless."""
         with pytest.raises(ValueError, match="does not record"):
-            self.check(spec_nondim=False, artifact_coordinates=None)
+            self.check(spec_nondim=True, artifact_coordinates=None)
 
     def test_matching_coordinates_are_accepted(self):
         self.check(spec_nondim=False, artifact_coordinates="si")
