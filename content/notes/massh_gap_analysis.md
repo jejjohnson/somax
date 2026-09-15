@@ -2,7 +2,8 @@
 
 **Scope:** models / primitives only. Reference: `leguillf/MASSH@VarDyn`, cores
 `mapping/models/model_qg1l/jqgm.py` (QG1L), `mapping/models/model_qgsw/sw.py` (SW),
-`mapping/models/model_sw1l/jswm.py` (SW + internal tides). **Date:** 2026-06-05.
+`mapping/models/model_sw1l/jswm.py` (SW + internal tides). **Date:** 2026-06-05,
+re-verified 2026-09-15 against somax 0.0.14.
 
 Self-contained: math, MASSH reference (`file:line`), proposed `somax` API in the *actual*
 `models_registry` style, worked example. Mapped against the live registry
@@ -13,9 +14,18 @@ Self-contained: math, MASSH reference (`file:line`), proposed `somax` API in the
 ```{note}
 **Provenance of references.** The somax-side claims (registry mechanism, model contract,
 finitevolX operators) in this doc have been **verified against the repo on `main`**
-(2026-06-05) and carry concrete API names. The MASSH `file:line` citations are taken from the
-upstream `VarDyn` branch and have **not** been re-verified here — treat them as pointers, not
-exact line guarantees.
+(2026-06-05, re-checked 2026-09-15 on 0.0.14, with line numbers refreshed) and carry concrete
+API names. The MASSH `file:line` citations are taken from the upstream `VarDyn` branch and
+have **not** been re-verified here — treat them as pointers, not exact line guarantees.
+
+Since the first draft, two things landed that this note now accounts for: the reduced-order
+forcing basis (`somax/_src/core/basis.py`, 0.0.12), which changes the shape of the
+internal-tide proposal in §2, and the data-assimilation bridges (`somax.da`), which make the
+adjoint test in §3 a gate on a path that is now exercised for real. Issue
+[#141](https://github.com/jejjohnson/somax/issues/141) was also filed from a second pass over
+MASSH and covers two *models* this note does not: the equivalent-barotropic SSH-keyed QG and
+the internal-tide shallow water with open boundaries. §2 here overlaps with the second and
+defers to #141 for the model; this note keeps the forcing-level framing.
 ```
 
 -----
@@ -97,9 +107,10 @@ ageostrophic velocity) and `forcing_tracer_from_bc` (nudge tracer to BC).
 ### What somax can reuse (verified)
 
 - **Scalar advection by a velocity field** already exists and is exercised by the SWM mass
-  equation. `nonlinear_2d.py:161` does `dh_dt = self.advection(h, u, v, method=self.method)`
-  where `self.advection` is `finitevolx.Advection2D(grid, mask)` and `method` selects the
-  reconstruction (`"upwind1"`, `"weno5"`, `"wenoz5"`, …). **The same operator advects a tracer
+  equation. `nonlinear_2d.py:176` does `dh_dt = self.advection(h, u, v, method=self.method)`
+  where `self.advection` is `finitevolx.Advection2D(grid=grid, mask=mask)` (imported as
+  `FVXAdvection2D`, with `mask: Mask2D | None`) and `method` selects the reconstruction
+  (`"upwind1"`, `"weno5"`, `"wenoz5"`, …). **The same operator advects a tracer
   `c`** — `self.advection(c, u, v, method="weno5")`. (Note: `method=` is a `__call__` arg,
   *not* a constructor arg.) Crucially, this call returns the **flux-form** tendency
   `−∇·(c\,u) = −(u·∇c) − c\,(∇·u)`, so it *already contains* the spurious `c·(∇·u)` term; the
@@ -107,11 +118,14 @@ ageostrophic velocity) and `forcing_tracer_from_bc` (nudge tracer to BC).
   (`dt_c_fluxdiv + c_phys*vel_div_area`).
 - **Divergence** for the `c·(∇·u)` correction: `finitevolx.divergence_2d(u, v, dx, dy)` (free
   function) or `finitevolx.Divergence2D(grid)(u, v)` / `Difference2D.divergence` (all real).
-- **WENO reconstruction** is real and rich — `method="weno3/5/7/9"`, `"wenoz5"`, plus TVD
-  limiters (`"minmod"`, `"van_leer"`, `"superbee"`, `"mc"`) — reached through
-  `Advection2D(...).__call__(..., method=...)`, which is the idiomatic route and avoids
-  hand-wiring WENO. (The low-level pieces also live at `finitevolx.weno_3pts/5pts/…` and an
-  internal `_src/advection/weno.py`, but the public, masking-aware path is `Advection2D`.)
+- **WENO reconstruction** is real and rich. `Advection2D(...).__call__(..., method=...)`
+  accepts `"upwind1"` / `"upwind2"` / `"upwind3"`, `"weno3"` / `"weno5"` / `"weno7"` /
+  `"weno9"` and `"wenoz5"` (verified against the 0.0.14 pin), which is the idiomatic route
+  and avoids hand-wiring WENO. The TVD limiters (`minmod`, `van_leer`, `superbee`, `mc`) also
+  exist, but **not** as `method=` strings: they are reached through
+  `Reconstruction2D.tvd_x(h, u, limiter="minmod")` / `tvd_y`, one level below `Advection2D`.
+  (The low-level pieces also live at `finitevolx.weno_3pts/5pts/…`, but the public,
+  masking-aware path is `Advection2D`.)
 
 ```{warning}
 **`rayleigh_relaxation` does not exist in finitevolX.** An earlier draft referenced
@@ -119,7 +133,11 @@ ageostrophic velocity) and `forcing_tracer_from_bc` (nudge tracer to BC).
 symbol (the only "relaxation" string is an unrelated internal in `multigrid.py`). Tracer-to-BC
 nudging must be written in somax — a one-line relaxation term `−(c − c_bc)/τ` added in the
 tracer tendency — or contributed upstream first. somax's `forcing.py` (`ForcingProtocol`,
-`ConstantForcing`, `InterpolatedForcing`) is the right pattern to model the nudging target on.
+`ConstantForcing`, `NoForcing`, `SeasonalWindForcing`, `InterpolatedForcing`) is the right
+pattern to model the nudging target on, and `basis.py` now has the seam that was missing when
+this was first written: `ForcingTerm` / `add_to` lift any `ForcingProtocol` field onto a state
+component as a tendency, so the nudging target can enter the tracer equation without a
+bespoke hook.
 ```
 
 ### Proposed somax API (corrected to the real contract)
@@ -135,6 +153,11 @@ class TracerSWMState(State):           # eqx.Module pytree -> jvp/vjp traverse i
     u: Float[Array, "Ny Nx"]
     v: Float[Array, "Ny Nx"]
     c: Float[Array, "n_trac Ny Nx"]    # passive tracers (e.g. SST, SSS)
+    # The two per-state conventions every 0.0.14 model declares, so the
+    # nondimensional path (StateAffine.from_scales reads scale_kinds) and the
+    # mask threading (mask_locations picks the stagger) know about ``c``:
+    scale_kinds: ClassVar[dict[str, str]] = {"c": "tracer"}
+    mask_locations: ClassVar[dict[str, str]] = {"c": "h"}
 
 class TracerSWM(SomaxModel):
     """nonlinear (or multilayer) SW + N passive tracers advected by surface velocity.
@@ -169,6 +192,8 @@ TRACER_SWM = ModelEntry(
     build=_build,
 )
 # then add "tracer_swm": TRACER_SWM to MODELS in models_registry/__init__.py
+# (ModelEntry also takes an optional ``from_nondimensional`` builder since
+# 0.0.14; leave it None until the tracer model has a scale set.)
 ```
 
 A QG variant (`tracer_qg`, wrapping `multilayer_qg` / `barotropic_qg`) can **skip the
@@ -223,26 +248,38 @@ it.)
 
 somax already has `linear_swm` (the linear single-layer SW core) **and an oscillatory body
 forcing**: `somax/_src/core/forcing.py:43` `SeasonalWindForcing` produces
-`tau0 * cos(omega*t + phase)` with a *learnable* amplitude `tau0` and static `omega`. The
-internal-tide forcing is the **multi-constituent generalization** of exactly this object:
-a sum over `ω` of `Re[(a_ω + i b_ω) e^{iωt}]` with learnable spatial `(a_ω, b_ω)` fields. So
-this gap is best framed as **a new `ForcingProtocol` subclass + a thin `linear_swm` variant
-that consumes it**, not a new model written from scratch.
+`tau0 * cos(omega*t + phase)` with a *learnable* amplitude `tau0` and static `omega`.
+
+**What changed since the first draft.** The multi-constituent generalization this section
+originally proposed as a new class now exists as a composition of things in
+`somax/_src/core/basis.py` (the reduced-order forcing basis, 0.0.12):
+
+- `FourierInTime(freqs, phases)` is a cosine temporal gate `b_a(t) = cos(ω_a t + φ_a)` over
+  any number of atoms — its docstring names the one-mode case as `SeasonalWindForcing`.
+- `BasisForcing(coeffs, spatial, temporal)` pairs that gate with a fixed spatial dictionary
+  `Phi (Ngrid, m)` and a learnable coefficient vector `coeffs (m,)`, which is the DA control.
+- `ForcingTerm` / `add_to` lift the resulting field onto a state component as a tendency, the
+  seam that lets a `ForcingProtocol` reach a model RHS at all.
+
+The tidal body forcing `Σ_ω [a_ω(x) cos ωt − b_ω(x) sin ωt]` is exactly a `BasisForcing`: two
+atoms per constituent (phases `0` and `π/2`) tiled against the spatial dictionary that holds
+the `a_ω` / `b_ω` patterns, with `coeffs` as the learnable amplitudes. So this gap is best
+framed as **a builder in `forcing_bank.py` that returns such a `BasisForcing`, plus a
+`linear_swm` variant that attaches it through `ForcingTerm`** — not a new forcing class and
+not a new model written from scratch.
 
 ### Proposed somax API (corrected)
 
 ```python
-# somax/_src/core/forcing.py
-class TidalForcing(ForcingProtocol):
-    """Multi-constituent oscillatory body forcing: Sum_w Re[(a_w + i b_w) e^{i w t}].
-    The per-constituent amplitude fields (a_w, b_w) are differentiable controls for 4DVar."""
-    omegas: tuple[float, ...] = eqx.field(static=True)     # constituent frequencies
-    a: Float[Array, "n_omega Ny Nx"]                       # learnable
-    b: Float[Array, "n_omega Ny Nx"]                       # learnable
-    def __call__(self, t):
-        return jnp.sum(self.a * jnp.cos(...) - self.b * jnp.sin(...), axis=0)
+# somax/_src/core/forcing_bank.py — alongside ssh_geostrophic / sss_coastal
+def tidal_constituents(
+    spatial: SpatialBasis,                 # a_w / b_w patterns as dictionary columns
+    omegas: tuple[float, ...],             # M2, S2, K1, ... [rad/s]
+) -> BasisForcing:
+    """Sum_w Re[(a_w + i b_w) e^{i w t}] as a BasisForcing: FourierInTime with
+    phases (0, pi/2) per constituent, tiled against ``spatial`` via tile_in_time."""
 
-# a registry entry mirroring linear_swm but with forcing=TidalForcing:
+# a registry entry mirroring linear_swm, attaching the forcing with ForcingTerm:
 INTERNAL_TIDE_SWM = ModelEntry(
     name="internal_tide_swm", family="swm", layers=1, coordinates="cartesian",
     supports=SupportFlags(masks=True, spherical=False, forcing=("tidal",)),
@@ -252,6 +289,14 @@ INTERNAL_TIDE_SWM = ModelEntry(
 
 Because the dynamics are linear, the tangent-linear is the model itself and the adjoint is
 exact — the cheapest possible case for the §3 machinery.
+
+```{note}
+**Where #141 goes further.** Issue #141 proposes an `InternalTideSW` model with an equivalent
+depth `He`, per-constituent *open-boundary plane-wave* forcing (`compute_IT_2D` /
+`_wave_phases` in MASSH) and radiating boundary conditions. The body-forcing framing above is
+the part `BasisForcing` already covers; open and relaxation boundary conditions are new
+infrastructure and belong to #141. Treat this section as the forcing half of that issue.
+```
 
 -----
 
@@ -263,9 +308,14 @@ somax is JAX + Equinox, so `jvp` / `vjp` are *available* (and every model's stat
 `eqx.Module` pytree, so AD traverses the full state — verified). But MASSH packages TGL/ADJ as
 named methods plus an **adjoint test**, and that packaging is itself a primitive for a
 4DVar-baseline library. A learned-correction or hybrid user shouldn't hand-roll the adjoint
-plumbing or remember to verify `⟨M dx, y⟩ = ⟨dx, M*y⟩`. **Verified: somax has no
-`adjoint_test`, no TGL/ADJ helper, no `jvp`/`vjp` wrapper today** — `jax.grad`
+plumbing or remember to verify `⟨M dx, y⟩ = ⟨dx, M*y⟩`. **Verified (still true on 0.0.14):
+somax has no `adjoint_test`, no TGL/ADJ helper, no `jvp`/`vjp` wrapper** — `jax.grad`
 interoperability is noted in `model.py` but nothing packages it.
+
+The stakes are higher than in June. `somax.da` now ships `SomaxForwardModel`, the flat-vector
+`ForwardModel` that vardax's `StrongFourDVar` / `IncrementalFourDVar` roll out, and
+`tests/da/test_vardax.py` runs a 4DVar fit through it. That is exactly the gradient path an
+adjoint test is meant to gate, and it currently has no such gate.
 
 ### Math
 
@@ -314,10 +364,14 @@ check** MASSH lists as future work.
 ```{note}
 **Caveat on differentiating `step`.** somax's `step` integrates with diffrax (default
 `Tsit5`, adaptive). Differentiating through `diffeqsolve` is supported, but for a packaged
-`step_adj` it's worth pinning the adjoint method (`diffrax.RecursiveCheckpointAdjoint` or
-`BacksolveAdjoint`) rather than relying on the default, and documenting the cost. For the
-linear `internal_tide_swm` (§2) the adjoint is exact and cheap; for the nonlinear SW/QG cores
-it is the usual reverse-mode cost.
+`step_adj` it's worth pinning the adjoint method rather than relying on the default, and
+documenting the cost. Don't invent a new knob for that: `pipekit_jax.to_diffrax_adjoint`
+already maps a pipekit adjoint spec onto `diffrax.RecursiveCheckpointAdjoint` (its
+recommended default), `DirectAdjoint`, `BacksolveAdjoint` (flagged there as divergent for
+chaotic dynamics — never a default) or `ImplicitAdjoint`, and `truncated_scan` handles the
+truncated-BPTT case at the rollout layer. `step_adj` should take that spec. For the linear
+`internal_tide_swm` (§2) the adjoint is exact and cheap; for the nonlinear SW/QG cores it is
+the usual reverse-mode cost.
 ```
 
 ### Example
@@ -341,17 +395,21 @@ dstate_T = step_adj(model, state0, cotangent, dt)  # gradient seed
    (`+ c·∇·u`) and the in-somax nudging term are the only model-specific logic. (Do **not**
    wait on a finitevolX `rayleigh_relaxation` op — it doesn't exist.)
 3. **`internal_tide_swm`** (§2) — only if internal-tide / SSH work enters scope; best done as
-   a `TidalForcing(ForcingProtocol)` + a `linear_swm` variant, generalizing the existing
-   `SeasonalWindForcing`.
+   a `tidal_constituents` builder returning a `BasisForcing` (`FourierInTime` gate, two atoms
+   per constituent) + a `linear_swm` variant that attaches it with `ForcingTerm`. The
+   open-boundary and equivalent-depth half of the model is #141's.
 
 ## References
 
-- **somax (verified on `main`, 2026-06-05):** `somax/_src/cli/models_registry/` (`ModelEntry`,
-  `MODELS` dict, `_build` pattern), `somax/_src/core/model.py` (`SomaxModel.vector_field` /
-  `integrate` / `step`), `somax/_src/models/swm/nonlinear_2d.py:161`
-  (`Advection2D` scalar advection of `h`), `somax/_src/core/forcing.py:43`
-  (`SeasonalWindForcing`), `finitevolx` (`Advection2D`, `divergence_2d`,
-  `Difference2D.divergence`, `weno_5pts` / `Reconstruction2D`).
+- **somax (verified on `main` 2026-06-05, re-verified on 0.0.14 2026-09-15):**
+  `somax/_src/cli/models_registry/` (`ModelEntry`, `MODELS` dict, `_build` pattern),
+  `somax/_src/core/model.py` (`SomaxModel.vector_field` / `integrate` / `step`),
+  `somax/_src/models/swm/nonlinear_2d.py:176` (`Advection2D` scalar advection of `h`),
+  `somax/_src/core/forcing.py:43` (`SeasonalWindForcing`), `somax/_src/core/basis.py`
+  (`BasisForcing`, `FourierInTime`, `ForcingTerm`, `add_to`), `somax/da.py`
+  (`SomaxForwardModel`, `SomaxDynamics`), `finitevolx` (`Advection2D`, `divergence_2d`,
+  `Difference2D.divergence`, `weno_5pts` / `Reconstruction2D`, `Mask2D`), `pipekit_jax`
+  (`to_diffrax_adjoint`, `truncated_scan`).
 - **MASSH (`VarDyn`, unverified line numbers):** `model_qgsw/sw.py` (`advection_tracer`,
   `step_with_tracer`, `step_{tgl,adj}`, `adjoint_test_sw`), `model_qg1l/jqgm.py` (`Qgm_trac`),
   `model_sw1l/jswm.py`; `doc/overview/04_dynamical_models.md`, `13_notes_future_work.md`;
