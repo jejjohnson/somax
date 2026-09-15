@@ -6,8 +6,8 @@ stack and a phased plan for aligning **somax** with the framework
 (`finitevolx` / `spectraldiffx`), and the data-assimilation consumers
 (`vardax` / `filterax`).
 
-> **Status:** Phases 0-2 are merged and Phase 3 is implemented (see
-> [What has been done](#what-has-been-done)). Phases 4-5 are proposed.
+> **Status:** Phases 0-4 are implemented (see
+> [What has been done](#what-has-been-done)). Phase 5 is proposed.
 
 ## The ecosystem at a glance
 
@@ -36,7 +36,7 @@ stack and a phased plan for aligning **somax** with the framework
 | **xrtoolz** | 0.0.8 | Broad and real; consumes `pipekit.Operator` | Preprocessing + evaluation to reuse |
 | **vardax** | 0.1.8 | FourDVarNet real; classical methods architected | Consumes somax as `ForwardModel` |
 | **filterax** | 0.0.3 | EnKF / ETKF / LETKF / smoothers / EKI real, differentiable | Consumes somax as dynamics |
-| **somax** | 0.0.8 | Real model library + CLI; the refactor target | — |
+| **somax** | 0.0.14 | Real model library + CLI; the refactor target | — |
 
 ## Where somax stands
 
@@ -166,7 +166,17 @@ the bulk cleanup; 4–5 are the future-facing payoff. Suggested order:
   work. The xrtoolz `CMEMSSource` / `CDSSource` loaders remain the right tool
   for real basin data if/when that work starts (kept out of somax's core).
 
-### Phase 4 — Data-assimilation integration (vardax / filterax)
+### Phase 4 — Data-assimilation integration (vardax / filterax) *(done)*
+
+> **What actually shipped**: the `somax.da` adapter layer — `SomaxDynamics`
+> (filterax), `SomaxForwardModel` (vardax), `SubsampleObs`, and the shared
+> `state_to_vector` / `make_ensemble` bridge, all behind the optional `da`
+> dependency group so plain `import somax` never needs the DA stack. The
+> `gaussx` covariances below arrive transitively through filterax / vardax
+> rather than as a somax dependency. **One item is outstanding**: the
+> observation operators are flat-vector only (the filterax surface); the
+> pytree-state operators for vardax are still marked "Phase 4b" in
+> `_src/da/obs.py`.
 
 - Provide somax-side `ObservationOperator`s (satisfying the pipekit-cycle
   protocol; vardax/filterax also offer generic ones — `AveragingKernel`,
@@ -209,6 +219,28 @@ imports them (conformance is structural).
 
 The full test suite passes, and `ruff check`, `ruff format`, and `ty check`
 are clean on the changed files.
+
+**Phase 4** wires somax into the DA stack through `somax.da`:
+
+- **`_src/da/filterax_bridge.py`** — `SomaxDynamics`, adapting a model's
+  pytree `step` to filterax's flat-vector `AbstractDynamics`.
+- **`_src/da/vardax_bridge.py`** — `SomaxForwardModel`, the flat-vector
+  `pipekit_cycle.ForwardModel` that `StrongFourDVar` / `IncrementalFourDVar`
+  / `VarDACycle` consume.
+- **`_src/da/obs.py`** — `SubsampleObs`, a sparse observation operator on
+  the flat state.
+- **`_src/da/flatten.py`** — `state_to_vector` / `make_ensemble`, both
+  taking an optional `StateAffine` so the background covariance is scaled
+  per field instead of sharing one `std` across thickness and velocity.
+- **`tests/da/`** — an ETKF pass through filterax and a `StrongFourDVar`
+  pass through vardax with a `gaussx`-built background covariance.
+- **`content/tutorials/data_assimilation_{etkf,4dvar}`** — the two
+  end-to-end walkthroughs.
+
+Outstanding in this phase: pytree-state observation operators for the
+variational path ("Phase 4b" in `_src/da/obs.py`). The filterax and vardax
+dependencies live in the optional `da` group, and `gaussx` comes in
+transitively rather than as a somax dependency.
 
 > **Note on local development.** The `finitevolx` / `spectraldiffx`
 > dependencies are private git pins. To run the suite against the local

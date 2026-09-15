@@ -75,8 +75,8 @@ spelling in the spherical literature.
 
 ```yaml
 scenario:
-  name: global_ocean
-  grid: {nx: 128, ny: 64, lon_bounds: [0.0, 360.0], lat_bounds: [-80.0, 80.0]}
+  name: southern_ocean
+  grid: {nx: 128, ny: 64, lon_bounds: [0.0, 360.0], lat_bounds: [-70.0, -30.0]}
   nondim:
     rossby: 0.05
     lamb: 10.0      # or burger: 0.1 — the same thing inverted
@@ -94,7 +94,18 @@ planetary vorticity gradient is fixed by the geometry,
 `beta = 2 Omega cos(phi)/a`, rather than being a free number.
 
 The lat/lon bounds stay in degrees. They are a geometric choice, not a
-scale: a nondimensional sphere is still a sphere.
+scale: a nondimensional sphere is still a sphere. The longitude range has
+to close on itself, as it does above, because the zonal boundary
+condition joins the western and eastern edges unconditionally.
+
+`southern_ocean` is the scenario the compatibility matrix pairs with the
+spherical models; `global_ocean` is refused for both of them, because its
+latitude range reaches a pole and the models put a solid wall on their
+polar rows — a description of a latitude band rather than of the regular
+sphere. Neither spherical scenario builds yet, though: both are Phase-2
+stubs that raise, so the block above is the schema rather than a run you
+can start today. Filling in `southern_ocean` is
+[#79](https://github.com/jejjohnson/somax/issues/79).
 
 ### The equatorial deformation radius
 
