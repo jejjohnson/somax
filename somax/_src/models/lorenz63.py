@@ -8,7 +8,7 @@ import jax.random as jrandom
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
 
 
 class L63Params(Params):
@@ -141,9 +141,9 @@ class Lorenz63(SomaxModel):
             A ``Lorenz63`` model instance.
         """
         params = L63Params(
-            sigma=jnp.array(sigma),
-            rho=jnp.array(rho),
-            beta=jnp.array(beta),
+            sigma=as_parameter(sigma),
+            rho=as_parameter(rho),
+            beta=as_parameter(beta),
         )
         return Lorenz63(params=params)
 

@@ -34,7 +34,6 @@ which is the evidence that the decomposition is faithful.
 from __future__ import annotations
 
 import equinox as eqx
-import jax.numpy as jnp
 from finitevolx import (
     Advection2D as FVXAdvection2D,
     CartesianGrid2D,
@@ -47,6 +46,7 @@ from jaxtyping import Array, PyTree
 
 from somax._src.core.model import TermModel
 from somax._src.core.terms import IMPLICIT, Kind, Scaled, Term, implicit
+from somax._src.core.types import as_parameter
 from somax._src.models.pde2d.burgers import Burgers2D, Burgers2DState
 
 
@@ -194,7 +194,7 @@ class Burgers2DTermModel(TermModel):
             A ``Burgers2DTermModel`` instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        nu_arr = jnp.asarray(nu)
+        nu_arr = as_parameter(nu)
 
         advection = Burgers2DAdvection(
             advection=FVXAdvection2D(grid=grid, mask=mask),
@@ -227,7 +227,10 @@ class Burgers2DTermModel(TermModel):
         Returns:
             A ``Burgers2DTermModel`` mirroring ``model``.
         """
-        nu_arr = jnp.asarray(model.params.nu)
+        # Already a Params leaf — plain array or wrapper — so it is
+        # passed through rather than converted; TermModel.build_terms
+        # unwraps it at evaluation time.
+        nu_arr = model.params.nu
         advection = Burgers2DAdvection(
             advection=model.advection,
             interp=model.interp,

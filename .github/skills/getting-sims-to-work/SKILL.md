@@ -79,12 +79,20 @@ Compile cost and run cost are different. Measure before you wait.
 
   ```python
   import time, jax
+
   t = time.time()
-  sol = model.integrate(s0, t0=0.0, t1=60*86400.0, dt=dt,
-                        saveat=dfx.SaveAt(ts=jnp.array([60*86400.0])), max_steps=200_000)
+  sol = model.integrate(
+      s0,
+      t0=0.0,
+      t1=60 * 86400.0,
+      dt=dt,
+      saveat=dfx.SaveAt(ts=jnp.array([60 * 86400.0])),
+      max_steps=200_000,
+  )
   jax.block_until_ready(sol.ys.q)
-  n = int(60*86400.0/dt); el = time.time()-t
-  print(f"{el/n*1e3:.2f} ms/step → 1 yr ≈ {el/n*31557600/dt:.0f}s")
+  n = int(60 * 86400.0 / dt)
+  el = time.time() - t
+  print(f"{el / n * 1e3:.2f} ms/step → 1 yr ≈ {el / n * 31557600 / dt:.0f}s")
   ```
 
   At 64² a QG step is ~2.5 ms ⇒ 1 yr ≈ 65 s. **128² × 3 yr is minutes** — never

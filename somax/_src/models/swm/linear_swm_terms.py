@@ -234,8 +234,10 @@ class LinearSWM2DTermModel(TermModel):
             f_field=model.f_field,
             g=model.consts.gravity,
             H0=model.consts.H0,
-            nu=jnp.asarray(model.params.lateral_viscosity),
-            kappa=jnp.asarray(model.params.bottom_drag),
+            # Passed through unconverted: these are already Params
+            # leaves, and jnp.asarray cannot convert a paramax wrapper.
+            nu=model.params.lateral_viscosity,
+            kappa=model.params.bottom_drag,
             imex=imex,
         )
         return LinearSWM2DTermModel(terms=rhs, grid=model.grid, bc_type=model.bc_type)

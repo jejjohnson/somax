@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -16,7 +18,9 @@ from finitevolx import (
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.scales import Scales
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
+from somax._src.models._nondim import require_positive
 
 
 class NSVorticityState(State):
@@ -27,6 +31,11 @@ class NSVorticityState(State):
     """
 
     omega: Array
+
+    # ``omega`` is this family's spelling of vorticity.
+    scale_kinds: ClassVar[dict[str, str]] = {"omega": "vorticity"}
+    # Vorticity is carried at T-points, not the C-grid corner.
+    mask_locations: ClassVar[dict[str, str]] = {"omega": "h"}
 
 
 class NSParams(Params):
@@ -281,6 +290,58 @@ class IncompressibleNS2D(SomaxModel):
         )
 
     @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        aspect: float = 1.0,
+        reynolds: float,
+        **create_kw: Any,
+    ) -> tuple[IncompressibleNS2D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Advective scale set (:meth:`somax.Scales.advective`) with
+        ``L = U = 1``, so ``T = L/U = 1`` and the equation reads
+        ``d_t u + u . grad u = Re**-1 laplacian(u)``. The Reynolds
+        number is the only free number: ``nu = 1/Re``.
+
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
+            reynolds: Reynolds number ``Re = U L / nu``; sets
+                ``nu = 1/Re``.
+            **create_kw: Forwarded to :meth:`create` (``problem``,
+                ``u_lid``, ``body_force``, ``method``, ``mask``).
+
+        Returns:
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing. For the diffusive bound
+            add ``mode="diffusive", diffusivity=1/reynolds`` — the
+            scale set cannot know the model's Reynolds number.
+
+        Raises:
+            ValueError: If an input is not positive.
+        """
+        context = "IncompressibleNS2D.from_nondimensional"
+        require_positive(context, aspect=aspect)
+        require_positive(context, reynolds=reynolds)
+        model = IncompressibleNS2D.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            nu=1.0 / reynolds,
+            **create_kw,
+        )
+        return model, Scales.advective(L=1.0, U=1.0)
+
+    @staticmethod
     def create(
         nx: int = 64,
         ny: int = 64,
@@ -311,7 +372,7 @@ class IncompressibleNS2D(SomaxModel):
             An ``IncompressibleNS2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = NSParams(nu=jnp.array(nu))
+        params = NSParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         interp = Interpolation2D(grid=grid, mask=mask)
         advection = FVXAdvection2D(grid=grid, mask=mask)

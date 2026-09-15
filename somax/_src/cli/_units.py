@@ -23,6 +23,32 @@ FIELD_UNITS: dict[str, str] = {
 }
 
 
+# A nondimensional run has no SI units to report. Every field is marked
+# "-" rather than left blank, so a run log makes it obvious the numbers
+# are dimensionless instead of looking like unlabelled SI values.
+FIELD_UNITS_NONDIM: dict[str, str] = dict.fromkeys(FIELD_UNITS, "-")
+
+
+def field_units(mode: str = "si") -> dict[str, str]:
+    """Field-name to unit mapping for a run.
+
+    Args:
+        mode: ``"si"`` for a dimensional run, ``"nondim"`` for one built
+            through a ``from_nondimensional`` factory.
+
+    Returns:
+        The mapping to use when formatting field statistics.
+
+    Raises:
+        ValueError: If ``mode`` is unrecognised.
+    """
+    if mode == "si":
+        return FIELD_UNITS
+    if mode == "nondim":
+        return FIELD_UNITS_NONDIM
+    raise ValueError(f"field_units: mode must be 'si' or 'nondim'; got {mode!r}.")
+
+
 # Time conversion thresholds: (cutoff_seconds, unit_label, divisor).
 # First match wins.
 _TIME_THRESHOLDS: list[tuple[float, str, float]] = [
@@ -71,6 +97,7 @@ def format_field_stats(
     mean_val: float,
     max_val: float,
     nan_count: int,
+    units: dict[str, str] | None = None,
 ) -> str:
     """Format one State field's [min, mean, max] reduction with units.
 
@@ -80,8 +107,17 @@ def format_field_stats(
         h[m]=[500,2.50e+03,4.62e+03] u[m/s]=[-0.50,1.3e-04,0.50]
 
     NaN counts are appended only when present.
+
+    Args:
+        field_name: State field to label.
+        min_val: Minimum over the field.
+        mean_val: Mean over the field.
+        max_val: Maximum over the field.
+        nan_count: Number of NaNs, appended only when non-zero.
+        units: Field-name to unit mapping; defaults to the SI one. Pass
+            ``field_units("nondim")`` for a nondimensional run.
     """
-    unit = FIELD_UNITS.get(field_name, "")
+    unit = (units or FIELD_UNITS).get(field_name, "")
     unit_tag = f"[{unit}]" if unit else ""
     body = f"[{min_val:.3g},{mean_val:.3g},{max_val:.3g}]"
     if nan_count:

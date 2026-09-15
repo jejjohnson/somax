@@ -120,7 +120,9 @@ class TestPVInversion:
 
     def test_non_qg_model_rejected(self) -> None:
         spec, model = _multilayer_swm_model((500.0, 1500.0), (9.81, 0.02))
-        with pytest.raises(AssertionFailedError, match="no _invert_pv"):
+        with pytest.raises(
+            AssertionFailedError, match="no PV inversion and Laplacian pair"
+        ):
             check_pv_inversion(spec, model)
 
     def test_baroclinic_qg_rejected(self) -> None:

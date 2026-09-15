@@ -131,18 +131,22 @@ class ForcingTerm(Term):
     place: Callable[[PyTree, Array], PyTree] = eqx.field(static=True)
 
     def __call__(self, t: float, state: PyTree, args: PyTree | None = None) -> PyTree:
-        field = self.forcing(t, None)          # (Ny, Nx) after reshape
+        field = self.forcing(t, None)  # (Ny, Nx) after reshape
         zeros = jtu.tree_map(lambda leaf: leaf * 0.0, state)
-        return self.place(zeros, field)        # tendency on one component
+        return self.place(zeros, field)  # tendency on one component
 
 
-def add_to(component: str, layer: int | None = None) -> Callable[[PyTree, Array], PyTree]:
+def add_to(
+    component: str, layer: int | None = None
+) -> Callable[[PyTree, Array], PyTree]:
     """Build a `place` that adds `field` onto one named state component
     (optionally one layer). Mirrors the QG/SWM placement convention."""
+
     def _place(zeros: PyTree, field: Array) -> PyTree:
         leaf = getattr(zeros, component)
         leaf = leaf.at[layer].add(field) if layer is not None else leaf + field
         return eqx.tree_at(lambda s: getattr(s, component), zeros, leaf)
+
     return _place
 ```
 
@@ -173,8 +177,8 @@ class SpatialBasis(eqx.Module):
     spectral basis, or a prescribed / wavenumber law for a frame.
     """
 
-    Phi: Float[Array, "Ngrid m"]      # geonnax dictionary on the flattened grid
-    std: Float[Array, "m"]            # Lambda^{1/2}, from the prior layer
+    Phi: Float[Array, "Ngrid m"]  # geonnax dictionary on the flattened grid
+    std: Float[Array, "m"]  # Lambda^{1/2}, from the prior layer
 
     def synthesize(self, coeffs: Float[Array, "m"]) -> Float[Array, "Ngrid"]:
         return self.Phi @ coeffs
@@ -204,16 +208,16 @@ class BasisForcing(ForcingProtocol):
     model grid; `ForcingTerm` (Section 6) lifts it onto a state component.
     """
 
-    coeffs: Float[Array, "m"]                 # learnable control, visible to jax.grad
-    spatial: SpatialBasis                      # fixed geonnax dictionary + prior std
-    temporal: TemporalBasis                    # fixed geonnax temporal gate
+    coeffs: Float[Array, "m"]  # learnable control, visible to jax.grad
+    spatial: SpatialBasis  # fixed geonnax dictionary + prior std
+    temporal: TemporalBasis  # fixed geonnax temporal gate
     grid_shape: tuple[int, ...] = eqx.field(static=True)  # domain.Nx, for reshape
 
     def __call__(self, t: float, grid: eqx.Module | None = None) -> Array:
-        b = self.temporal.weights(t)               # (m,)
-        active = self.coeffs * b                    # (m,)
-        flat = self.spatial.synthesize(active)      # (Ngrid,)
-        return flat.reshape(self.grid_shape)        # (Ny, Nx)
+        b = self.temporal.weights(t)  # (m,)
+        active = self.coeffs * b  # (m,)
+        flat = self.spatial.synthesize(active)  # (Ngrid,)
+        return flat.reshape(self.grid_shape)  # (Ny, Nx)
 
     def whiten(self, u: Float[Array, "m"]) -> "BasisForcing":
         # w = Lambda^{1/2} u for the diagonal prior; the flow-prior note
@@ -233,18 +237,18 @@ A `SpatialBasis` is built by evaluating a geonnax function on `domain.coords`; t
 ```python
 import jax.numpy as jnp
 import numpy as np
-from geonnax.basis import gabor_frame_grid          # public surface
+from geonnax.basis import gabor_frame_grid  # public surface
 
 
 def spatial_from_gabor(domain, *, n_scales, base_scale, slope, amp) -> SpatialBasis:
-    xy = domain.coords                          # (Ngrid, ndim)
+    xy = domain.coords  # (Ngrid, ndim)
     # bounds is a build-time-concrete (ndim, 2) [lo, hi] box, from the static
     # xmin / xmax tuples — not (domain.xmin, domain.xmax) directly.
     bounds = np.stack([np.asarray(domain.xmin), np.asarray(domain.xmax)], axis=-1)
     Phi, centers, scales, wavenumbers = gabor_frame_grid(
         xy, bounds, n_scales=n_scales, base_scale=base_scale
     )
-    std = jnp.sqrt(amp * wavenumbers ** (-slope))      # SSH-like spectral law
+    std = jnp.sqrt(amp * wavenumbers ** (-slope))  # SSH-like spectral law
     return SpatialBasis(Phi=Phi, std=std)
 
 
@@ -263,8 +267,8 @@ Lognormal variables (ocean colour) wrap the synthesis in a transform:
 ```python
 class TransformedForcing(ForcingProtocol):
     base: ForcingProtocol
-    forward: callable = eqx.field(static=True)    # e.g. log10
-    inverse: callable = eqx.field(static=True)    # e.g. lambda z: 10.0 ** z
+    forward: callable = eqx.field(static=True)  # e.g. log10
+    inverse: callable = eqx.field(static=True)  # e.g. lambda z: 10.0 ** z
 
     def __call__(self, t: float, grid: eqx.Module | None = None) -> Array:
         return self.inverse(self.base(t, grid))
@@ -290,10 +294,24 @@ The spectral and Slepian bases use the **eigenvalue half** of the geonnax contra
 As landed in `forcing_bank.py` (`GaussianWindowsInTime` wraps `gaussian_window_features`; `tile_in_time` builds the separable space-time frame; the preset defaults to constant-in-time and switches to the time-distributed regime when `windows=(centers, widths)` is passed):
 
 ```python
-def ssh_geostrophic(domain, *, n_scales=6, base_scale=20e3, slope=4.0,
-                    amplitude=2e-6, oversample=1.0, windows=None) -> BasisForcing:
-    spatial = spatial_from_gabor(domain, n_scales=n_scales, base_scale=base_scale,
-                                 slope=slope, amplitude=amplitude, oversample=oversample)
+def ssh_geostrophic(
+    domain,
+    *,
+    n_scales=6,
+    base_scale=20e3,
+    slope=4.0,
+    amplitude=2e-6,
+    oversample=1.0,
+    windows=None,
+) -> BasisForcing:
+    spatial = spatial_from_gabor(
+        domain,
+        n_scales=n_scales,
+        base_scale=base_scale,
+        slope=slope,
+        amplitude=amplitude,
+        oversample=oversample,
+    )
     if windows is None:
         temporal = ConstantInTime(m=spatial.Phi.shape[1])
     else:

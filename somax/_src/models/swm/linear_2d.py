@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import (
@@ -16,7 +18,7 @@ from finitevolx import (
 from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
 
 
 class LinearSW2DState(State):
@@ -31,6 +33,9 @@ class LinearSW2DState(State):
     h: Float[Array, "Ny Nx"]
     u: Float[Array, "Ny Nx"]
     v: Float[Array, "Ny Nx"]
+
+    # ``h`` is the perturbation, so it is already centred on zero.
+    scale_kinds: ClassVar[dict[str, str]] = {"h": "height_anomaly"}
 
 
 class LinearSW2DParams(Params):
@@ -204,8 +209,8 @@ class LinearShallowWater2D(SomaxModel):
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
         params = LinearSW2DParams(
-            lateral_viscosity=jnp.array(lateral_viscosity),
-            bottom_drag=jnp.array(bottom_drag),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
         )
         consts = LinearSW2DPhysConsts(gravity=g, f0=f0, beta=beta, H0=H0)
         diff = Difference2D(grid=grid, mask=mask)

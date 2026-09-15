@@ -45,6 +45,8 @@ from somax._src.core.helmholtz import (
     PeriodicHelmholtzCache,
 )
 from somax._src.core.model import SomaxModel, TermModel
+from somax._src.core.scaled import ScaledModel
+from somax._src.core.scales import Scales
 from somax._src.core.terms import (
     Compose,
     Scaled,
@@ -56,8 +58,22 @@ from somax._src.core.terms import (
     implicit,
     partition,
 )
-from somax._src.core.transforms import ModalTransform, StratificationProfile
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.transforms import (
+    ModalTransform,
+    StateAffine,
+    StratificationProfile,
+)
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    as_parameter,
+    frozen,
+    interval,
+    positive,
+    trainable_mask,
+)
 
 
 __all__ = [
@@ -81,11 +97,14 @@ __all__ = [
     "PeriodicHelmholtzCache",
     "PhysConsts",
     "Scaled",
+    "ScaledModel",
+    "Scales",
     "SeasonalWindForcing",
     "SimulationCheckpointer",
     "SomaxModel",
     "SpatialBasis",
     "State",
+    "StateAffine",
     "StratificationProfile",
     "Sum",
     "TemporalBasis",
@@ -97,13 +116,17 @@ __all__ = [
     "VectorSpatialBasis",
     "add_to",
     "add_vector_to",
+    "as_parameter",
     "build_diffrax_terms",
     "control_filter",
     "explicit",
+    "frozen",
     "geostrophic_currents",
     "implicit",
+    "interval",
     "matern_spectral_density",
     "partition",
+    "positive",
     "spatial_from_divfree",
     "spatial_from_eof",
     "spatial_from_fourier",
@@ -116,4 +139,5 @@ __all__ = [
     "sss_coastal",
     "sst_frontal",
     "tile_in_time",
+    "trainable_mask",
 ]

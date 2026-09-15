@@ -385,6 +385,26 @@ Base class for differentiable model parameters.
 ```text
 Fields on Params subclasses are visible to ``jax.grad`` by default.
 Use ``eqx.field(static=True)`` for non-differentiable parameters.
+
+Fields may also hold a ``paramax`` wrapper instead of a bare array.
+:func:`positive` and :func:`interval` store a constrained value in an
+unconstrained space, and :func:`frozen` hides a value from gradients.
+A wrapped field is reconstituted by ``paramax.unwrap`` at RHS time —
+:meth:`somax.SomaxModel.build_terms` and
+:meth:`somax.SomaxModel.diagnose` both call it — so model code always
+sees the constrained value and never needs to know about the wrapper.
+
+Gradients of a wrapped field are taken **with respect to the
+unconstrained value**, not the constrained one. For a
+``positive``-wrapped viscosity ``nu = softplus(r)`` the gradient lands
+on ``r``, so an optimiser stepping it can never drive ``nu`` negative.
+Chain-rule factors (``sigmoid(r)`` for ``positive``) mean the
+magnitudes differ from those of an unwrapped parameterisation; that
+is the point, and optimiser learning rates should be set accordingly.
+
+Example:
+    >>> params = MyParams(lateral_viscosity=positive(100.0))
+    >>> paramax.unwrap(params).lateral_viscosity  # 100.0
 ```
 ````
 
@@ -455,6 +475,68 @@ Args:
 ```
 ````
 
+### `ScaledModel`
+
+*class*
+
+```python
+ScaledModel(inner: 'SomaxModel', transform: 'StateAffine', time_scale: 'float' = 1.0) -> None
+```
+
+Integrate ``inner`` in transformed coordinates.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The wrapped model is a ``SomaxModel`` like any other: it integrates,
+steps, and reports diagnostics through the same interface. Every
+time passed to it — ``t0``, ``t1``, ``dt``, ``saveat`` — is in the
+*transformed* time unit, related to the inner model's by
+``t_inner = time_scale * t_outer``.
+
+Attributes:
+    inner: The model being wrapped. Its ``create()`` signature,
+        ``vector_field`` and parameters are untouched.
+    transform: The affine state map. ``forward`` takes an inner
+        state to wrapped coordinates.
+    time_scale: Inner time units per wrapped time unit, finite and
+        strictly positive. For a nondimensionalising wrapper this
+        is ``scales.T``; for a purely statistical one it stays
+        at 1.
+```
+````
+
+### `Scales`
+
+*class*
+
+```python
+Scales(L: 'float', U: 'float', H: 'float', f0: 'float', T: 'float', g: 'float' = 9.81, kind: 'ScaleKind' = 'advective') -> None
+```
+
+Characteristic scales of a run. All fields static.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Attributes:
+    L: Horizontal length scale [m].
+    U: Velocity scale [m/s].
+    H: Depth / layer-thickness scale [m].
+    f0: Reference Coriolis parameter [1/s]. For the planetary set
+        this is ``2 * Omega``, so that ``f(phi) = f0 * sin(phi)``
+        and the Rossby number keeps its usual definition.
+    T: Time scale [s]. Set by the constructor for the chosen family
+        rather than derived, because the families disagree about it.
+    g: Gravitational acceleration [m/s^2].
+    kind: Which canonical set this is — ``"advective"``,
+        ``"inertial"`` or ``"planetary"``. Recorded so that
+        transforms, factories and the CLI can dispatch on it.
+```
+````
+
 ### `SeasonalWindForcing`
 
 *class*
@@ -522,6 +604,16 @@ diffrax, ``jax.grad``, and downstream tools like fourdvarjax.
 Subclasses must implement:
     - ``vector_field``: the right-hand side of the ODE/PDE
     - ``apply_boundary_conditions``: boundary enforcement
+
+Constrained parameters (see :func:`somax.positive`) are unwrapped
+on the way into ``vector_field`` and ``diagnose``, so a constrained
+model behaves exactly like its plain equivalent however it is
+called — through ``integrate``, through ``build_terms``, or by
+evaluating the right-hand side directly, which is what the
+differentiable-model tooling does. Unwrapping happens per call
+rather than once up front so that gradients flow to the *stored*
+unconstrained values, and it is a no-op for a model whose
+parameters are plain arrays.
 ```
 ````
 
@@ -568,6 +660,64 @@ Base class for model state vectors.
 ```text
 All model states should subclass this to enable interoperability
 with the somax model contract and JAX transformations.
+
+Two optional class attributes describe the fields to
+:class:`~somax._src.core.transforms.StateAffine`. Both are consulted
+before the name-based fallbacks, and both are per-state because a
+field name does not determine either answer: ``h`` is a total
+thickness in the nonlinear shallow-water models but a height
+anomaly in the linear ones, and ``u`` is a C-grid velocity in the
+ocean models but a T-point scalar in the pde family.
+
+Attributes:
+    scale_kinds: Field name to semantic kind — one of
+        ``"velocity"``, ``"thickness"``, ``"height_anomaly"``,
+        ``"vorticity"``, ``"streamfunction"``. Fixes how
+        ``StateAffine.from_scales`` non-dimensionalises the field.
+    mask_locations: Field name to C-grid staggering — one of
+        ``"h"``, ``"u"``, ``"v"``, ``"xy_corner"``, ``"w"``. Picks
+        the mask that ``StateAffine.from_samples`` excludes dry
+        cells with.
+```
+````
+
+### `StateAffine`
+
+*class*
+
+```python
+StateAffine(loc: 'PyTree', scale: 'PyTree') -> None
+```
+
+Per-leaf affine map on a ``State`` pytree: ``y = (x - loc) / scale``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+One abstraction serves both jobs that need a change of state
+variables:
+
+* **Non-dimensionalisation** — ``loc`` and ``scale`` come from a
+  :class:`~somax._src.core.scales.Scales` via :meth:`from_scales`,
+  giving ``u' = u/U``, ``h' = (h - H)/dH``, ``q' = q/(U/L)``.
+* **Standardisation** — ``loc`` and ``scale`` are the sample mean
+  and standard deviation from :meth:`from_samples`, per field or
+  per gridpoint.
+
+They are the same map, so they compose (:meth:`compose`), invert,
+and can be used interchangeably by the DA flattening bridge, by
+ML input/output pipelines, and by ``ScaledModel``.
+
+Attributes:
+    loc: Pytree matching the state's structure; each leaf is
+        broadcastable against the corresponding field.
+    scale: Pytree of the same structure. Leaves must be non-zero.
+
+Notes:
+    ``loc`` and ``scale`` are ordinary pytrees, so a leaf may be a
+    scalar (one number for the whole field), a per-layer column of
+    shape ``(nl, 1, 1)``, or a full per-gridpoint array.
 ```
 ````
 
@@ -858,6 +1008,35 @@ Returns:
 ```
 ````
 
+### `as_parameter`
+
+*function*
+
+```python
+as_parameter(value: 'ArrayLike | Parameterize | NonTrainable') -> 'Any'
+```
+
+Coerce a factory argument into a ``Params`` leaf.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Model factories take plain numbers and convert them with
+``jnp.asarray``, which cannot convert a paramax wrapper — so
+``BarotropicQG.create(lateral_viscosity=positive(100.0))`` would
+fail, and a constrained model could only be built by surgery with
+``eqx.tree_at``. Wrappers are passed through untouched; everything
+else is converted as before.
+
+Args:
+    value: A number, array, or paramax wrapper.
+
+Returns:
+    The wrapper unchanged, or ``jnp.asarray(value)``.
+```
+````
+
 ### `build_diffrax_terms`
 
 *function*
@@ -933,6 +1112,33 @@ explicit(term: 'Term') -> 'Term'
 
 Tag ``term`` for the explicit stage of an IMEX integrator.
 
+### `frozen`
+
+*function*
+
+```python
+frozen(value: 'ArrayLike') -> 'NonTrainable'
+```
+
+Hide a parameter from gradients while keeping it a runtime value.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The leaf stays in the pytree but is cut out of the backward pass,
+so it behaves like an ``eqx.field(static=True)`` constant without
+having to be hashable or known at trace time. Its gradient comes
+back as exact zero rather than being absent.
+
+Args:
+    value: The value to freeze.
+
+Returns:
+    A ``NonTrainable`` wrapper that unwraps to ``value``.
+```
+````
+
 ### `geostrophic_currents`
 
 *function*
@@ -973,6 +1179,40 @@ implicit(term: 'Term') -> 'Term'
 ```
 
 Tag ``term`` for the implicit stage of an IMEX integrator.
+
+### `interval`
+
+*function*
+
+```python
+interval(value: 'ArrayLike', lower: 'float', upper: 'float') -> 'Parameterize'
+```
+
+Constrain a parameter to the open interval ``(lower, upper)``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The value is stored in logit space and reconstituted as
+``lower + (upper - lower) * sigmoid(raw)``. As with :func:`positive`,
+the bound is exact in arithmetic and saturating in floating point:
+far into either tail ``sigmoid`` reaches exactly 0 or 1, so the
+constrained value can land *on* a bound but never outside it.
+
+Args:
+    value: The initial constrained value, strictly inside the interval.
+    lower: Lower bound, exclusive. Must be finite.
+    upper: Upper bound, exclusive. Must be finite.
+
+Returns:
+    A ``Parameterize`` that unwraps to ``value``.
+
+Raises:
+    ValueError: If the bounds are not finite or not ordered, or
+        ``value`` lies outside the open interval.
+```
+````
 
 ### `matern_spectral_density`
 
@@ -1036,6 +1276,46 @@ Args:
 Returns:
     ``(explicit_part, implicit_part)``. Either element is ``None``
     when no summand of that kind is present.
+```
+````
+
+### `positive`
+
+*function*
+
+```python
+positive(value: 'ArrayLike') -> 'Parameterize'
+```
+
+Constrain a parameter to be strictly positive.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The value is stored in softplus space and reconstituted as
+``softplus(raw)`` by ``paramax.unwrap``, so gradient descent on the
+stored value cannot make it negative. Use it for quantities that are
+physically non-negative — lateral viscosity, bottom drag, wind
+amplitude — whenever they are being calibrated.
+
+The guarantee is exact in arithmetic and near-exact in floating
+point: ``softplus`` underflows to exactly ``0.0`` once the stored
+value falls below roughly ``-90`` in float32, so the constrained
+value is non-negative always and strictly positive everywhere an
+optimiser that has not already diverged will go. It is never
+negative.
+
+Args:
+    value: The initial constrained value. Must be finite and
+        strictly positive.
+
+Returns:
+    A ``Parameterize`` that unwraps to ``value``.
+
+Raises:
+    ValueError: If ``value`` is not strictly positive, which has no
+        representation in softplus space.
 ```
 ````
 
@@ -1444,6 +1724,40 @@ Returns:
     ``(tiled_spatial, temporal)`` with ``tiled_spatial`` of
     ``m_t * m_s`` columns and a matching
     :class:`GaussianWindowsInTime` gate.
+```
+````
+
+### `trainable_mask`
+
+*function*
+
+```python
+trainable_mask(tree: 'PyTree') -> 'PyTree'
+```
+
+Boolean pytree marking which leaves an optimiser may update.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+``NonTrainable`` removes a leaf from the *backward* pass, so its
+gradient is exact zero — but a zero gradient is not the same as no
+update. A decoupled-weight-decay optimiser such as ``optax.adamw``
+computes its update from the parameter value as well as the
+gradient, so applying one to a whole model still drifts a
+:func:`frozen` constant. Pass this mask to ``optax.masked`` (or use
+it with ``eqx.partition``) to leave those leaves genuinely alone.
+
+Args:
+    tree: Any pytree, typically a model.
+
+Returns:
+    A pytree of the same structure whose leaves are ``True`` for
+    trainable leaves and ``False`` under a ``NonTrainable``.
+
+Example:
+    >>> optimiser = optax.masked(optax.adamw(1e-3), trainable_mask(model))
 ```
 ````
 
@@ -2171,6 +2485,125 @@ Args:
 ```
 ````
 
+### `SphericalQG`
+
+*class*
+
+```python
+SphericalQG(params: 'SphericalQGParams', consts: 'SphericalQGPhysConsts', grid: 'SphericalGrid2D', diff: 'SphericalDifference2D', interp: 'Interpolation2D', laplacian: 'SphericalLaplacian2D', advection: 'SphericalAdvection2D', diffusion: 'SphericalDiffusion2D', mask: 'Mask2D | None', f_field: "Float[Array, 'Ny Nx']", wind_forcing: "Float[Array, 'Ny Nx']", method: 'str' = 'upwind1', cg_tol: 'float' = 1e-06, cg_max_steps: 'int' = 500) -> None
+```
+
+Barotropic quasi-geostrophic flow on a sphere.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Advects absolute vorticity ``q + f`` by the non-divergent flow
+recovered from the streamfunction::
+
+    dq/dt = -adv_sphere(q + f, u, v) + nu lap(q) - kappa q + tau curl
+
+with ``(u, v) = (-1/R dpsi/dlat, 1/(R cos(phi)) dpsi/dlon)`` and
+``psi`` from ``lap_sphere(psi) = q``.
+
+The planetary vorticity gradient is not a constant here. Advecting
+the *absolute* vorticity ``q + f(phi)`` with ``f = 2 Omega sin(phi)``
+reproduces ``beta = 2 Omega cos(phi)/R`` implicitly, so it varies
+from its maximum at the equator to zero at the poles rather than
+being frozen at a reference latitude.
+
+Inversion is iterative. The spherical Laplacian is not diagonal in
+any transform a lat-lon grid affords — the ``cos(phi)`` metric
+couples latitudes — so the DST route the Cartesian model uses does
+not apply, and the elliptic problem is solved by conjugate
+gradients against the ``SphericalLaplacian2D`` operator.
+
+Args:
+    params: Differentiable parameters.
+    consts: Frozen physical constants.
+    grid: Spherical Arakawa C-grid.
+    diff: Spherical difference operators.
+    interp: Interpolation operators.
+    laplacian: Spherical Laplacian, used both in the RHS and as the
+        operator the inversion solves against.
+    advection: Spherical scalar advection.
+    diffusion: Spherical harmonic diffusion.
+    mask: Optional land/ocean mask (``None`` = all-ocean).
+    f_field: Precomputed Coriolis field at T-points.
+    wind_forcing: Normalised wind-stress-curl pattern.
+    method: Advection reconstruction method.
+    cg_tol: Convergence tolerance for the PV inversion, used for
+        both the relative and the absolute criterion. The default
+        is chosen for float32: a tighter absolute tolerance never
+        trips, and CG runs to its step cap.
+    cg_max_steps: Iteration cap for the PV inversion.
+```
+````
+
+### `SphericalSWM`
+
+*class*
+
+```python
+SphericalSWM(params: 'SphericalSWMParams', consts: 'SphericalSWMPhysConsts', grid: 'SphericalGrid2D', diff: 'SphericalDifference2D', interp: 'Interpolation2D', vorticity: 'SphericalVorticity2D', advection: 'SphericalAdvection2D', diffusion: 'SphericalDiffusion2D', mask: 'Mask2D | None', f_field: "Float[Array, 'Ny Nx']", wind_stress_x: "Float[Array, 'Ny Nx']", wind_stress_y: "Float[Array, 'Ny Nx']", method: 'str' = 'upwind1') -> None
+```
+
+Shallow water on a sphere, vector-invariant form.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Solves the rotating shallow-water equations on a spherical Arakawa
+C-grid::
+
+    dh/dt = -div_sphere(h u)
+    du/dt = +q (h v)_bar - (1/(R cos(phi))) dP/dlon + nu lap(u) - kappa u
+    dv/dt = -q (h u)_bar - (1/R) dP/dlat            + nu lap(v) - kappa v
+
+with ``q = (zeta + f)/h`` the potential vorticity and
+``P = KE + g h`` the Bernoulli potential. Every horizontal
+derivative carries the spherical metric: the ``1/(R cos(phi))``
+factor in longitude and ``1/R`` in latitude, supplied by the
+finitevolx spherical operators.
+
+Coriolis is the full ``f(phi) = 2 Omega sin(phi)``, not a beta-plane
+expansion about a reference latitude. The planetary vorticity
+gradient ``beta = 2 Omega cos(phi)/R`` is then implicit in the field
+and varies correctly from equator to pole.
+
+Known limitation
+----------------
+Mass is conserved only to discretisation accuracy, not to machine
+precision as in the Cartesian :class:`NonlinearShallowWater2D`. The
+spherical flux divergence does not telescope exactly against
+``spherical_area_weights`` — the cell area it implicitly divides by
+differs from the one that function returns — so a balanced
+solid-body rotation loses of order ``1e-3`` of its mass over six
+hours. The drift is independent of the time step and only weakly
+dependent on resolution, which places it in the spatial operator.
+Tracked upstream as jejjohnson/finitevolX#247; until it is fixed,
+treat the mass diagnostic here as a drift signal rather than a
+conserved quantity.
+
+Args:
+    params: Differentiable parameters.
+    consts: Frozen physical constants.
+    grid: Spherical Arakawa C-grid.
+    diff: Spherical difference operators.
+    interp: Interpolation operators (staggering only, metric-free).
+    vorticity: Spherical vorticity / PV operator.
+    advection: Spherical scalar advection, for the mass equation.
+    diffusion: Spherical harmonic diffusion.
+    mask: Optional land/ocean mask (``None`` = all-ocean).
+    f_field: Precomputed Coriolis field at X-points.
+    wind_stress_x: Normalised zonal wind-stress pattern.
+    wind_stress_y: Normalised meridional wind-stress pattern.
+    method: Advection reconstruction method for the mass equation.
+```
+````
+
 ### `geostrophic_adjustment_2d`
 
 *function*
@@ -2321,6 +2754,14 @@ Each model carries dataclass companions for its state, differentiable parameters
 - `NonlinearSW2DPhysConsts` — Frozen physical constants for the 2D nonlinear shallow water model.
 - `NonlinearSW2DState` — State for the 2D nonlinear shallow water model.
 - `ReparamQGDiagnostics` — Diagnostics for the reparameterized QG model.
+- `SphericalQGDiagnostics` — Diagnostics for the spherical QG model.
+- `SphericalQGParams` — Differentiable parameters for the spherical QG model.
+- `SphericalQGPhysConsts` — Frozen physical constants for the spherical QG model.
+- `SphericalQGState` — State for the spherical barotropic QG model.
+- `SphericalSWMDiagnostics` — Diagnostics for the spherical shallow water model.
+- `SphericalSWMParams` — Differentiable parameters for the spherical shallow water model.
+- `SphericalSWMPhysConsts` — Frozen physical constants for the spherical shallow water model.
+- `SphericalSWMState` — State for the spherical shallow water model.
 
 ## Domain
 
@@ -2462,8 +2903,11 @@ it inspects the model / state and returns only the metrics that make
 sense. Non-fluid models (Lorenz, diffusion, …) and multilayer (3D) states
 yield an empty dict rather than an error.
 
-Scope: this targets **velocity-state Arakawa C-grid models** — those whose
-state carries 2D ``u`` / ``v`` (SWM, Burgers). **Vorticity / streamfunction
+Scope: this targets **Cartesian velocity-state Arakawa C-grid models** —
+those whose state carries 2D ``u`` / ``v`` (SWM, Burgers). Spherical
+models get their ``invariant_*`` entries, which their own ``diagnose``
+area-weights correctly, but not the field metrics, which assume a
+uniform ``dx * dy`` cell area. **Vorticity / streamfunction
 models** (``barotropic_qg``, the vorticity Navier-Stokes) are intentionally
 *not* covered: they evolve ``q`` / ``omega`` and never define a discrete
 velocity divergence (non-divergence is only an analytic property, so a
@@ -3084,11 +3528,14 @@ xarray / zarr helpers that round-trip model states and snapshots (requires the `
 These symbols live in `somax.io` and require the optional `sim` dependency group (`uv sync --group sim`):
 
 - `somax.io.append_to_dataset`
+- `somax.io.apply_scale_metadata`
 - `somax.io.dataset_to_state`
 - `somax.io.load_dataset`
 - `somax.io.save_dataset`
+- `somax.io.scales_attrs`
 - `somax.io.snapshots_to_dataset`
 - `somax.io.state_to_dataset`
+- `somax.io.transform_attrs`
 
 ## Data Assimilation
 
