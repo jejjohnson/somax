@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import pytest
+from finitevolx import build_coupling_matrix
 
 from somax.core import ModalTransform, StratificationProfile
+
+
+# MQGeometry 3-layer double-gyre stratification (Thiry et al. 2024) — unequal
+# layer thicknesses, which is what made the coupling matrix non-symmetric and
+# exposed the modal-decomposition bugs.
+_MQG_H = (400.0, 1100.0, 2600.0)
+_MQG_GP = (9.81, 0.025, 0.0125)
+_MQG_F0 = 9.375e-5
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +184,43 @@ class TestModalTransform:
             f0=1e-4,
         )
         assert jnp.all(jnp.isfinite(mt.eigenvalues))
+
+    def test_eigenvalues_non_negative(self):
+        """Regression (bug 1): the layer coupling matrix is positive
+        semi-definite, so every modal eigenvalue must be >= 0. A negative
+        gravest eigenvalue (from a symmetric eigensolver's round-off on the
+        non-symmetric A) flips the sign of the gravest-wavenumber denominators
+        in the Helmholtz PV inversion and diverges multilayer QG within ~2 weeks.
+        """
+        mt = ModalTransform.from_physics(H=_MQG_H, g_prime=_MQG_GP, f0=_MQG_F0)
+        assert jnp.all(mt.eigenvalues >= 0.0)
+
+    def test_transform_diagonalizes_coupling_matrix(self):
+        """Regression (bug 2): the modal transform must diagonalize the coupling
+        matrix A. For unequal layer thicknesses A is NOT symmetric, so a
+        symmetric eigensolver (``eigh``) returns eigenvectors that do not
+        diagonalize A — the modal PV inversion then silently solves the wrong
+        coupled elliptic problem (``Cl2m @ A @ Cm2l`` had off-diagonals as large
+        as the eigenvalues themselves).
+        """
+        mt = ModalTransform.from_physics(H=_MQG_H, g_prime=_MQG_GP, f0=_MQG_F0)
+        A = build_coupling_matrix(jnp.asarray(_MQG_H), jnp.asarray(_MQG_GP))
+        D = mt.Cl2m @ A @ mt.Cm2l
+        off_diagonal = D - jnp.diag(jnp.diagonal(D))
+        assert jnp.max(jnp.abs(off_diagonal)) < 1e-6
+        assert jnp.allclose(
+            jnp.sort(jnp.diagonal(D)), jnp.sort(mt.eigenvalues), atol=1e-6
+        )
+
+    def test_eigenvalues_match_general_eigensolver(self):
+        """Regression (bug 2): eigenvalues must match a *general* (non-symmetric)
+        eigensolver on A, not the symmetric ``eigh`` which decomposes the wrong
+        matrix for unequal layer thicknesses.
+        """
+        mt = ModalTransform.from_physics(H=_MQG_H, g_prime=_MQG_GP, f0=_MQG_F0)
+        A = build_coupling_matrix(jnp.asarray(_MQG_H), jnp.asarray(_MQG_GP))
+        ev_general = jnp.sort(jnp.real(jnp.linalg.eigvals(A)))
+        assert jnp.allclose(jnp.sort(mt.eigenvalues), ev_general, atol=1e-6)
 
     def test_from_stratification(self):
         strat = StratificationProfile.from_layers(

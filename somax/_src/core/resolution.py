@@ -355,7 +355,9 @@ def check_deformation_radius(
     modal_radii = getattr(modal, "rossby_radii", None) if modal is not None else None
     if modal_radii is not None:
         radii = np.asarray(jnp.asarray(modal_radii))
-        # The barotropic mode is infinite; keep only the finite internal modes.
+        # Take the smallest mode. With a free surface the barotropic radius
+        # is finite too (sqrt(gH)/f0, basin-scale), and only a rigid lid
+        # makes it infinite, so filter non-finite entries and then min().
         finite = radii[np.isfinite(radii)]
         if finite.size == 0:
             raise AssertionFailedError(

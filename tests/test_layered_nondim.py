@@ -215,18 +215,28 @@ class TestBaroclinicQGMapping:
         np.testing.assert_allclose(g_prime * H / f0**2, [1.0, 0.02], rtol=1e-5)
 
     def test_modal_radii_are_in_units_of_L(self, built):
-        """So they are directly comparable with dx, which is what the guard does."""
+        """So they are directly comparable with dx, which is what the guard does.
+
+        With a free surface (``g_prime[0]`` finite) every mode has a finite
+        radius: the gravest one is the external radius ``sqrt(g H) / f0``,
+        of order the basin, and the internal one is a small fraction of L.
+        """
         model, _ = built
-        radii = np.asarray(model.modal.rossby_radii)
-        internal = radii[np.isfinite(radii)]
-        assert internal.size == 1
-        assert 0.0 < internal[0] < 1.0
+        g_prime = np.asarray(model.strat.g_prime)
+        H = np.asarray(model.strat.H)
+        f0 = float(model.consts.f0)
+        radii = np.sort(np.asarray(model.modal.rossby_radii))[::-1]
+        assert radii.size == 2
+        assert np.all(np.isfinite(radii))
+        external = np.sqrt(g_prime[0] * H.sum()) / f0
+        assert radii[0] == pytest.approx(external, rel=1e-2)
+        assert 0.0 < radii[1] < 1.0
 
     def test_modal_radius_is_not_the_interface_burger(self):
         """The two conventions genuinely differ; the docs say so, so test it."""
         model, _ = BaroclinicQG.from_nondimensional(**self.KW)
         radii = np.asarray(model.modal.rossby_radii)
-        internal = float(radii[np.isfinite(radii)][0])
+        internal = float(radii.min())
         # sqrt of the second interface Burger number, the naive guess.
         assert internal != pytest.approx(np.sqrt(0.02), rel=1e-2)
 
@@ -243,7 +253,7 @@ class TestBaroclinicQGMapping:
         f0 = float(model.consts.f0)
         rigid_lid = np.sqrt(g_prime[1] * H[0] * H[1] / (f0**2 * (H[0] + H[1])))
         radii = np.asarray(model.modal.rossby_radii)
-        internal = float(radii[np.isfinite(radii)][0])
+        internal = float(radii.min())
         assert internal == pytest.approx(rigid_lid, rel=0.1)
         assert internal < rigid_lid
 
