@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import CartesianGrid2D, Difference2D, Mask2D, enforce_periodic
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, State
+from somax._src.core.scales import Scales
+from somax._src.core.types import Diagnostics, Params, State, as_parameter
+from somax._src.models._nondim import require_positive
 
 
 class Diffusion2DParams(Params):
@@ -29,6 +33,14 @@ class Diffusion2DState(State):
     """
 
     u: Array
+
+    # ``u`` here is a T-point scalar, not a C-grid velocity: it is the
+    # transported quantity, and the velocity is a separate coefficient.
+    # Its amplitude comes from the initial condition, so there is no
+    # scale for it in ``Scales`` and the nondimensionalisation leaves
+    # it alone rather than dividing it by ``U``.
+    scale_kinds: ClassVar[dict[str, str]] = {"u": "tracer"}
+    mask_locations: ClassVar[dict[str, str]] = {"u": "h"}
 
 
 class Diffusion2DDiagnostics(Diagnostics):
@@ -76,6 +88,50 @@ class Diffusion2D(SomaxModel):
         return Diffusion2DDiagnostics(energy=energy)
 
     @staticmethod
+    def from_nondimensional(
+        *,
+        nx: int = 64,
+        ny: int = 64,
+        aspect: float = 1.0,
+        **create_kw: Any,
+    ) -> tuple[Diffusion2D, Scales]:
+        r"""Build the model at unit scales instead of SI coefficients.
+
+        Non-dimensional form
+        --------------------
+        Diffusive scale set (:meth:`somax.Scales.diffusive`) with
+        ``L = kappa = 1``, so ``T = L**2/kappa = 1`` and the equation
+        reads ``d_t u = laplacian(u)``. Pure diffusion has no velocity
+        scale, so this scaling leaves no free dimensionless number:
+        every diffusion problem is the same problem once rescaled, and
+        only the grid and the initial condition remain to be chosen.
+
+
+        Args:
+            nx: Interior cells in x.
+            ny: Interior cells in y.
+            aspect: ``Ly / Lx``; the domain is ``Lx = 1``.
+            **create_kw: Forwarded to :meth:`create` (``mask``).
+
+        Returns:
+            ``(model, scales)``. ``scales.dt_from_cfl(C, (nx, ny),
+            extent=(1.0, aspect))`` gives a step in the same time unit;
+            pass both cell counts and the aspect ratio, since the bound
+            depends on the *smaller* spacing.
+        """
+        context = "Diffusion2D.from_nondimensional"
+        require_positive(context, aspect=aspect)
+        model = Diffusion2D.create(
+            nx=nx,
+            ny=ny,
+            Lx=1.0,
+            Ly=aspect,
+            nu=1.0,
+            **create_kw,
+        )
+        return model, Scales.diffusive(L=1.0, kappa=1.0)
+
+    @staticmethod
     def create(
         nx: int = 64,
         ny: int = 64,
@@ -98,6 +154,6 @@ class Diffusion2D(SomaxModel):
             A ``Diffusion2D`` model instance.
         """
         grid = CartesianGrid2D.from_interior(nx, ny, Lx, Ly)
-        params = Diffusion2DParams(nu=jnp.array(nu))
+        params = Diffusion2DParams(nu=as_parameter(nu))
         diff = Difference2D(grid=grid, mask=mask)
         return Diffusion2D(params=params, grid=grid, diff=diff, mask=mask)

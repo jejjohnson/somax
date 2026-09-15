@@ -21,18 +21,33 @@ from jaxtyping import Array, Float, PRNGKeyArray
 
 def state_to_vector(
     state: Any,
+    transform: Any | None = None,
 ) -> tuple[Float[Array, " N_x"], Callable[[Float[Array, " N_x"]], Any]]:
     """Flatten a state pytree to a 1-D vector plus its inverse.
 
     Args:
         state: A somax state pytree (e.g. an ``L96State`` or SWM state).
+        transform: Optional :class:`~somax.StateAffine`. When given, the
+            state is mapped into transformed coordinates before
+            flattening and ``unravel`` maps back, so the flat vector a
+            DA filter sees has comparable magnitudes across fields.
+            Without it, ``h ~ 1e3 m`` and ``u ~ 1e-1 m/s`` share one
+            vector and any scalar covariance over it is badly scaled.
 
     Returns:
         ``(vector, unravel)`` where ``vector`` is the concatenated 1-D state
         and ``unravel(vector)`` reconstructs the original pytree. ``unravel``
         is pure and safe to call under ``jit`` / ``vmap``.
     """
-    return ravel_pytree(state)
+    if transform is None:
+        return ravel_pytree(state)
+
+    vector, unravel_transformed = ravel_pytree(transform.forward(state))
+
+    def unravel(vec: Float[Array, " N_x"]) -> Any:
+        return transform.inverse(unravel_transformed(vec))
+
+    return vector, unravel
 
 
 def make_ensemble(
@@ -41,6 +56,7 @@ def make_ensemble(
     *,
     size: int,
     std: float,
+    transform: Any | None = None,
 ) -> Float[Array, "N_e N_x"]:
     """Build a Gaussian-perturbed flat ensemble around a base state.
 
@@ -52,11 +68,19 @@ def make_ensemble(
         key: PRNG key for the perturbations.
         size: Number of ensemble members ``N_e``.
         std: Standard deviation of the i.i.d. Gaussian perturbations.
+        transform: Optional :class:`~somax.StateAffine`. The
+            perturbation is applied in transformed coordinates, so one
+            ``std`` means the same thing for every field: in physical
+            space the members are spread by ``std * scale`` per field,
+            giving a covariance of ``std**2 diag(scale**2)`` instead of
+            an isotropic one that is meaningless across mixed units.
+            The returned ensemble is in transformed coordinates, matching
+            :func:`state_to_vector` called with the same transform.
 
     Returns:
         Flat ensemble of shape ``(size, N_x)`` suitable for a filterax
         filter's ``assimilate(init_ensemble, ...)``.
     """
-    vec, _ = ravel_pytree(state)
+    vec, _ = state_to_vector(state, transform)
     noise = std * jax.random.normal(key, (size, vec.size))
     return vec[None, :] + noise

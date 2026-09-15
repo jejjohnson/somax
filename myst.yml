@@ -18,6 +18,8 @@ project:
         - file: content/notes/basin_data_sources
         - file: content/notes/ecosystem_refactor_plan
         - file: content/notes/massh_gap_analysis
+        - file: content/notes/forcing_basis
+        - file: content/notes/nondimensional_runs
     - title: "Foundations (Phase 0)"
       children:
         - file: content/tutorials/arakawa_cgrid.ipynb
@@ -40,6 +42,10 @@ project:
         - file: content/tutorials/composable_models_terms_operators_cycles
         - file: content/tutorials/data_assimilation_etkf
         - file: content/tutorials/data_assimilation_4dvar
+        - file: content/tutorials/learned_prior_flowjax.ipynb
+    - title: "Double Gyre Gallery"
+      children:
+        - file: content/tutorials/doublegyre_barotropic_qg.ipynb
     - title: "13 Steps to Navier-Stokes"
       children:
         - file: content/tutorials/step01_linear_convection_1d

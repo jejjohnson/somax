@@ -32,6 +32,8 @@ stages:
           cache: false
       - configs/simulation/doublegyre_bc_qg.yaml:
           cache: false
+      - configs/simulation/doublegyre_bt_qg_nondim.yaml:
+          cache: false
 
   simulate-swm-jet:
     desc: 2-layer baroclinic-instability SWM (30-day, 64²).

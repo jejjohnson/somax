@@ -39,7 +39,14 @@ from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 import numpy as np
-from loguru import logger
+
+from somax._src.core.resolution import (
+    AssertionFailedError,
+    _warn,
+    check_deformation_radius,
+    check_munk_width,
+    check_stommel_width,
+)
 
 
 if TYPE_CHECKING:
@@ -49,10 +56,6 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------
 # Exception
 # ----------------------------------------------------------------------
-
-
-class AssertionFailedError(RuntimeError):
-    """Raised when an opt-in preflight or postflight assertion fails."""
 
 
 # ----------------------------------------------------------------------
@@ -103,7 +106,7 @@ def check_cfl(
             f"cfl: model {type(model).__name__!r} has no .grid attribute; "
             f"cannot infer dx"
         )
-    dx_min = float(min(grid.dx, grid.dy))
+    dx_min = _min_cell_width(grid, "cfl")
     dt = float(spec.timestepping.dt)
     cfl = wave_speed_m_per_s * dt / dx_min
     if cfl > max_cfl:
@@ -117,105 +120,166 @@ def check_cfl(
         )
 
 
-def check_deformation_radius(
-    spec: RunSpec,
+def _min_cell_width(grid: Any, check: str) -> float:
+    """Narrowest physical cell of a grid, Cartesian or spherical.
+
+    A ``SphericalGrid2D`` has no ``dx``: its zonal width is the
+    latitude-dependent ``R cos(lat) dlon``, so a check written against
+    the Cartesian attributes raises ``AttributeError`` instead of
+    reporting a stability verdict.
+
+    Computed here rather than read off ``grid.min_cell_width``: that
+    helper arrives with finitevolX#244 and somax still pins v0.0.41.
+    The cosine is clamped because ``cos(pi/2)`` is a small *negative*
+    number in float32, which would otherwise give a negative width and
+    hence a negative CFL bound.
+
+    Args:
+        grid: The model's grid.
+        check: Caller name, for the error message.
+
+    Returns:
+        The smallest interior cell width, in metres.
+
+    Raises:
+        AssertionFailedError: If the grid exposes neither spelling.
+    """
+    cos_lat = getattr(grid, "cos_lat_T", None)
+    if cos_lat is not None:
+        interior = np.asarray(jnp.asarray(cos_lat))[1:-1, 1:-1]
+        dx = float(np.min(np.maximum(interior, 0.0))) * float(grid.R) * float(grid.dlon)
+        dy = float(grid.R) * float(grid.dlat)
+        return min(dx, dy) if dx > 0.0 else dy
+    if hasattr(grid, "dx") and hasattr(grid, "dy"):
+        return float(min(grid.dx, grid.dy))
+    raise AssertionFailedError(
+        f"{check}: grid {type(grid).__name__!r} exposes neither dx/dy nor a "
+        f"spherical metric; cannot determine the cell width."
+    )
+
+
+def check_equatorial_deformation_radius(
+    spec: RunSpec | None,
     model: Any,
     *,
     n_cells_min: float = 2.0,
     n_cells_warn: float = 4.0,
 ) -> None:
-    """Pre-flight: the first baroclinic deformation radius is resolved.
+    """Pre-flight: the equatorial deformation radius is resolved.
 
-    Resolving the first internal deformation radius ``L_d = sqrt(g'H)/f0``
-    with at least ``n_cells_min`` grid cells is necessary for baroclinic
-    instability and mesoscale eddies (Hallberg 2013). FAIL when
-    ``L_d/dx < n_cells_min``; WARN when ``n_cells_min <= L_d/dx <
-    n_cells_warn``.
+    On a sphere the Coriolis parameter vanishes at the equator, so the
+    mid-latitude radius ``sqrt(gH)/f0`` diverges there and says nothing
+    useful. The finite scale that replaces it is the *equatorial*
+    deformation radius
 
-    Requires a stratified model exposing ``model.strat.g_prime`` /
-    ``model.strat.H`` and ``model.consts.f0`` (multilayer SWM, baroclinic /
-    reparameterized QG). Raises for models without that structure so a typo'd
-    config doesn't silently skip the check.
+    ``L_eq = sqrt(c / beta_eq)``,  ``c = sqrt(g H)``,
+    ``beta_eq = 2 Omega / a``,
+
+    which is the trapping width of the equatorial waveguide — Kelvin,
+    Yanai and equatorial Rossby waves all live inside it. A grid that
+    cannot span it does not have an equatorial waveguide at all.
+
+    In terms of the Burger number ``Bu = gH/(2 Omega a)**2`` this is
+    just ``L_eq/a = Bu**(1/4)``, so the check is scale-free and reads
+    the same on a nondimensional sphere as on Earth.
+
+    The comparison uses the *widest* interior cell rather than the
+    narrowest. Zonal cells are widest at the equator, which is exactly
+    where the waveguide sits, so the coarsest cell is the one that has
+    to resolve it.
+
+    Requires a spherical shallow-water-shaped model exposing
+    ``consts.gravity``, ``consts.H0``, ``consts.omega``,
+    ``consts.radius`` and a spherical ``grid``. Raises for models
+    without that structure so a typo'd config doesn't silently skip the
+    check. Barotropic spherical QG is rigid-lid and has no gravity
+    wave, so it is rejected rather than checked.
 
     Args:
-        spec: The validated RunSpec (unused; present for signature symmetry).
+        spec: The validated RunSpec (unused; present for registry
+            signature symmetry, and ``None`` when called from a
+            ``from_nondimensional`` factory).
         model: The constructed model instance.
-        n_cells_min: Minimum ``L_d/dx`` below which to FAIL. Defaults to 2.0.
-        n_cells_warn: ``L_d/dx`` below which to WARN. Defaults to 4.0.
+        n_cells_min: ``L_eq/dx`` below which to FAIL.
+        n_cells_warn: ``L_eq/dx`` below which to WARN.
 
     Raises:
-        AssertionFailedError: If the model lacks stratification/Coriolis, or
-            if ``L_d/dx < n_cells_min``.
+        AssertionFailedError: If the model is not a spherical
+            shallow-water model, if a required constant is
+            non-positive, or if the waveguide is unresolved.
     """
-    strat = getattr(model, "strat", None)
+    del spec
     consts = getattr(model, "consts", None)
     grid = getattr(model, "grid", None)
-    if strat is None or grid is None or consts is None:
+    if consts is None or grid is None:
         raise AssertionFailedError(
-            f"deformation_radius: model {type(model).__name__!r} lacks "
-            f"strat/consts/grid; this check applies to stratified models "
-            f"(multilayer SWM, baroclinic/reparameterized QG)."
+            f"equatorial_deformation_radius: model {type(model).__name__!r} "
+            f"lacks consts/grid; this check applies to spherical "
+            f"shallow-water models."
         )
-    g_prime = getattr(strat, "g_prime", None)
-    H = getattr(strat, "H", None)
-    f0 = getattr(consts, "f0", None)
-    if g_prime is None or H is None or f0 is None:
+    missing = [
+        name
+        for name in ("gravity", "H0", "omega", "radius")
+        if getattr(consts, name, None) is None
+    ]
+    if missing or getattr(grid, "cos_lat_T", None) is None:
         raise AssertionFailedError(
-            f"deformation_radius: model {type(model).__name__!r} does not "
-            f"expose strat.g_prime / strat.H / consts.f0; cannot compute L_d."
+            f"equatorial_deformation_radius: model {type(model).__name__!r} "
+            f"does not expose consts.gravity / H0 / omega / radius on a "
+            f"spherical grid (missing {missing or ['grid.cos_lat_T']}); "
+            f"cannot compute L_eq. Barotropic QG is rigid-lid and has no "
+            f"gravity-wave deformation radius — drop this check for it."
         )
-    f0_abs = abs(float(f0))
-    if f0_abs == 0.0:
-        raise AssertionFailedError(
-            "deformation_radius: consts.f0 is zero; L_d is undefined on an "
-            "f-plane with no rotation."
-        )
-    # Prefer the model's vertical-mode deformation radii when available: the
-    # first internal radius comes from the vertical-mode eigenproblem, not
-    # just one interface's sqrt(g'_k H_k)/f0 (which can substantially
-    # overestimate the baroclinic radius for a thin upper layer). Fall back to
-    # the per-interface estimate only when the modal transform is absent.
-    modal = getattr(model, "modal", None)
-    modal_radii = getattr(modal, "rossby_radii", None) if modal is not None else None
-    if modal_radii is not None:
-        radii = np.asarray(jnp.asarray(modal_radii))
-        # The barotropic mode is infinite; keep only the finite internal modes.
-        finite = radii[np.isfinite(radii)]
-        if finite.size == 0:
+    g = float(consts.gravity)
+    depth = float(consts.H0)
+    omega = abs(float(consts.omega))
+    radius = float(consts.radius)
+    for name, value in (("gravity", g), ("H0", depth), ("omega", omega)):
+        if value <= 0.0:
             raise AssertionFailedError(
-                "deformation_radius: model exposes no finite internal "
-                "deformation radius (modal.rossby_radii are all non-finite)."
+                f"equatorial_deformation_radius: consts.{name} is "
+                f"{value:.4g}; L_eq is undefined without a gravity wave and "
+                f"a rotating planet."
             )
-        Ld = float(np.min(finite))
-        source = "modal.rossby_radii"
-    else:
-        # Per-interface estimate sqrt(g'_k H_k)/f0; smallest internal mode.
-        g_prime_arr = np.asarray(jnp.asarray(g_prime))
-        H_arr = np.asarray(jnp.asarray(H))
-        radii = np.sqrt(g_prime_arr * H_arr) / f0_abs
-        internal = radii[1:] if radii.shape[0] > 1 else radii
-        Ld = float(np.min(internal))
-        source = "sqrt(g'H)/f0 estimate"
-    dx_min = float(min(grid.dx, grid.dy))
-    ratio = Ld / dx_min
+    wave_speed = np.sqrt(g * depth)
+    beta_eq = 2.0 * omega / radius
+    Leq = float(np.sqrt(wave_speed / beta_eq))
+
+    dx_max = _max_spherical_cell_width(grid)
+    ratio = Leq / dx_max
     if ratio < n_cells_min:
         raise AssertionFailedError(
-            f"deformation_radius check FAILED: L_d/dx = {ratio:.2f} < "
-            f"{n_cells_min}\n"
-            f"  L_d   = {Ld:.0f} m (smallest internal deformation radius, "
-            f"from {source})\n"
-            f"  dx    = {dx_min:.0f} m\n"
-            f"  → eddies will be suppressed; refine the grid or pick an "
-            f"eddy-permitting configuration."
+            f"equatorial_deformation_radius check FAILED: L_eq/dx = "
+            f"{ratio:.2f} < {n_cells_min}\n"
+            f"  L_eq = {Leq:.4g} (= sqrt(c/beta_eq), c={wave_speed:.4g}, "
+            f"beta_eq={beta_eq:.4g})\n"
+            f"  dx   = {dx_max:.4g} (widest interior cell)\n"
+            f"  → the equatorial waveguide is unresolved; refine the grid "
+            f"or raise the equivalent depth."
         )
     if ratio < n_cells_warn:
-        logger.warning(
-            "deformation radius marginally resolved: L_d/dx = {:.2f} "
-            "(L_d={:.0f} m, dx={:.0f} m)",
+        _warn(
+            "equatorial deformation radius marginally resolved: "
+            "L_eq/dx = {:.2f} (L_eq={:.4g}, dx={:.4g})",
             ratio,
-            Ld,
-            dx_min,
+            Leq,
+            dx_max,
         )
+
+
+def _max_spherical_cell_width(grid: Any) -> float:
+    """Widest interior cell of a spherical grid, in metres.
+
+    Computed here rather than read off ``grid.max_cell_width``: that
+    helper arrives with finitevolX#244 and somax still pins v0.0.41.
+    The cosine is clamped at zero because in float32 ``cos(pi/2)`` is a
+    small *negative* number, which would otherwise flip the sign of a
+    polar cell width.
+    """
+    cos_lat = np.asarray(jnp.asarray(grid.cos_lat_T))[1:-1, 1:-1]
+    dx = float(np.max(np.maximum(cos_lat, 0.0))) * float(grid.R) * float(grid.dlon)
+    dy = float(grid.R) * float(grid.dlat)
+    return max(dx, dy)
 
 
 def check_pv_inversion(
@@ -249,12 +313,22 @@ def check_pv_inversion(
         AssertionFailedError: If the model is not a barotropic QG model, or if
             the round-trip residual exceeds ``tol``.
     """
-    invert = getattr(model, "_invert_pv", None)
-    diff = getattr(model, "diff", None)
-    if invert is None or diff is None or not hasattr(diff, "laplacian"):
+    # Two spellings of the same pair. The Cartesian model keeps the
+    # inversion private and its Laplacian on the difference operator;
+    # the spherical one exposes ``invert_pv`` and carries a separate
+    # ``laplacian`` operator, because the spherical Laplacian is not a
+    # method of the difference stencils. Both are barotropic QG, so
+    # both get the check.
+    invert = getattr(model, "_invert_pv", None) or getattr(model, "invert_pv", None)
+    laplacian = getattr(model, "laplacian", None)
+    if laplacian is None:
+        diff = getattr(model, "diff", None)
+        laplacian = getattr(diff, "laplacian", None) if diff is not None else None
+    if invert is None or laplacian is None:
         raise AssertionFailedError(
-            f"pv_inversion: model {type(model).__name__!r} has no _invert_pv / "
-            f"diff.laplacian; this check applies to barotropic QG."
+            f"pv_inversion: model {type(model).__name__!r} exposes no PV "
+            f"inversion and Laplacian pair (_invert_pv/invert_pv with "
+            f"diff.laplacian or laplacian); this check applies to barotropic QG."
         )
     # Build the factory initial state for this scenario x model pair.
     from somax._src.cli._factories import build
@@ -276,7 +350,7 @@ def check_pv_inversion(
             f"the bare Laplacian round-trip cannot reproduce."
         )
     psi = invert(q)
-    q_hat = diff.laplacian(psi)
+    q_hat = laplacian(psi)
     # Compare on the interior (drop the one-cell ghost halo the BC owns).
     interior = (slice(1, -1), slice(1, -1))
     num = float(jnp.linalg.norm((q_hat - q)[interior]))
@@ -338,7 +412,10 @@ def check_static_stability(spec: RunSpec, model: Any) -> None:
 PREFLIGHT_ASSERTIONS: dict[str, Callable[..., None]] = {
     "cfl": check_cfl,
     "deformation_radius": check_deformation_radius,
+    "equatorial_deformation_radius": check_equatorial_deformation_radius,
+    "munk_width": check_munk_width,
     "pv_inversion": check_pv_inversion,
+    "stommel_width": check_stommel_width,
     "static_stability": check_static_stability,
 }
 

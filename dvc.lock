@@ -5,30 +5,34 @@ stages:
     deps:
     - path: configs/_authoring
       hash: md5
-      md5: ee84580f018c1313dba6ea9cf20ac1a4.dir
-      size: 8539
-      nfiles: 6
+      md5: 8a3b12da0e6162ad598c8850d84673ba.dir
+      size: 13644
+      nfiles: 7
     - path: scripts/build_configs.py
       hash: md5
-      md5: 6354e102388fdabc9b86aeceacdca18b
-      size: 1959
+      md5: 4f403bb4db845a3ddb162eb45675ce5a
+      size: 2071
     outs:
     - path: configs/simulation/doublegyre_bc_qg.yaml
       hash: md5
-      md5: 954cac8cdcc5a07d44b0bfeb6ea5278e
-      size: 803
+      md5: 3041995fae748fac7558b743fcee88a4
+      size: 882
     - path: configs/simulation/doublegyre_bt_qg.yaml
       hash: md5
-      md5: 3b7f7453edd367604ae2e63fc02ce1c6
-      size: 679
+      md5: b75ef8ee788677e6587e485755c92d88
+      size: 933
+    - path: configs/simulation/doublegyre_bt_qg_nondim.yaml
+      hash: md5
+      md5: 88d3a002652fd9ba1ab2752a618e2e35
+      size: 791
     - path: configs/simulation/spinup_bc_qg.yaml
       hash: md5
-      md5: adc4e76c0404cd16d2e3b22a9ead406b
-      size: 808
+      md5: 1cca9e0453d07a780c2602d8426b5012
+      size: 887
     - path: configs/simulation/swm_jet.yaml
       hash: md5
-      md5: 58e4890ee26310ced237554ea26191cc
-      size: 791
+      md5: dc39f15d2f1b883f5df1ea9f724a965d
+      size: 949
   simulate-swm-jet:
     cmd: somax-sim run --config configs/simulation/swm_jet.yaml --output-dir 
       data/simulations/swm_jet

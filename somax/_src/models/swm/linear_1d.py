@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import jax.numpy as jnp
 from finitevolx import CartesianGrid1D, Difference1D, Interpolation1D, Mask1D
 from jaxtyping import Array, PyTree
 
 from somax._src.core.model import SomaxModel
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
 
 
 class LinearSW1DState(State):
@@ -23,6 +25,11 @@ class LinearSW1DState(State):
     h: Array
     u: Array
     v: Array
+
+    # ``h`` is the perturbation, so it is already centred on zero.
+    scale_kinds: ClassVar[dict[str, str]] = {"h": "height_anomaly"}
+    # The 1-D Coriolis partner sits at T-points.
+    mask_locations: ClassVar[dict[str, str]] = {"v": "h"}
 
 
 class LinearSW1DParams(Params):
@@ -178,8 +185,8 @@ class LinearShallowWater1D(SomaxModel):
         """
         grid = CartesianGrid1D.from_interior(nx, Lx)
         params = LinearSW1DParams(
-            lateral_viscosity=jnp.array(lateral_viscosity),
-            bottom_drag=jnp.array(bottom_drag),
+            lateral_viscosity=as_parameter(lateral_viscosity),
+            bottom_drag=as_parameter(bottom_drag),
         )
         consts = LinearSW1DPhysConsts(gravity=g, f0=f0, H0=H0)
         diff = Difference1D(grid=grid, mask=mask)

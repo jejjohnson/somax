@@ -21,10 +21,12 @@ Monitor                      Severity
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from typing import Any
 
 import numpy as np
+import paramax
 
 from somax._src.monitor.base import BaseMonitor
 from somax._src.monitor.protocol import ChunkInfo, MonitorVerdict
@@ -33,10 +35,11 @@ from somax._src.monitor.protocol import ChunkInfo, MonitorVerdict
 def _state_field_arrays(state: Any) -> dict[str, np.ndarray]:
     """Best-effort map of state field name -> numpy array (eqx.Module)."""
     out: dict[str, np.ndarray] = {}
-    fields = getattr(state, "__dataclass_fields__", None)
-    if not fields:
+    if not dataclasses.is_dataclass(type(state)):
         return out
-    for name in fields:
+    # Not ``__dataclass_fields__``: it also lists the ``ClassVar``
+    # metadata a state declares, which are dicts rather than arrays.
+    for name in (f.name for f in dataclasses.fields(type(state))):
         try:
             value = getattr(state, name)
             arr = np.asarray(value)
@@ -121,7 +124,7 @@ class EnergyGrowthMonitor(BaseMonitor):
         # early-warning still fires for models that do not override
         # invariants() (Lorenz, linear SWM, Navier-Stokes, Burgers, ...).
         try:
-            diag = model.diagnose(state)
+            diag = paramax.unwrap(model).diagnose(state)
         except Exception:
             return None
         try:
@@ -188,7 +191,7 @@ class ConservationDriftMonitor(BaseMonitor):
 
     def _invariants(self, model: Any, state: Any) -> dict[str, float]:
         try:
-            raw = model.diagnose(state).invariants()
+            raw = paramax.unwrap(model).diagnose(state).invariants()
         except Exception:
             return {}
         # Reduce each invariant to a scalar total (per-layer vectors are

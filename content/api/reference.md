@@ -11,6 +11,36 @@ changes; a CI smoke test keeps the committed page in sync.
 
 The base types, model contract, term algebra, forcing, stratification, elliptic caches, and checkpointing that every component builds on (re-exported at the top level as ``somax`` and ``somax.core``).
 
+### `BasisForcing`
+
+*class*
+
+```python
+BasisForcing(coeffs: "Float[Array, ' m']", spatial: 'SpatialBasis', temporal: 'TemporalBasis', grid_shape: 'tuple[int, ...]') -> None
+```
+
+Reduced-order forcing: a fixed space-time frame driven by a coefficient vector.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The only learnable leaf is :attr:`coeffs` (the DA control); the dictionary,
+the temporal gate, and the prior std are fixed. ``__call__`` returns a field
+shaped to the model grid; :class:`ForcingTerm` lifts it onto a state
+component as a tendency.
+
+``SeasonalWindForcing`` is the special case of a one-column dictionary
+(``Phi = tau0_pattern[:, None]``) with a one-mode :class:`FourierInTime`.
+
+Attributes:
+    coeffs: Learnable control of shape ``(m,)`` (visible to ``jax.grad``).
+    spatial: Fixed spatial dictionary and prior std.
+    temporal: Fixed temporal gate.
+    grid_shape: Field shape ``domain.Nx`` used to reshape the flat synthesis.
+```
+````
+
 ### `Compose`
 
 *class*
@@ -48,6 +78,25 @@ ConstantForcing(field: 'Array') -> None
 ```
 
 Time-independent forcing field.
+
+### `ConstantInTime`
+
+*class*
+
+```python
+ConstantInTime(m: 'int') -> None
+```
+
+Time-independent gate: ``b(t) = ones(m)`` (the ``Phi_t = I`` case).
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Attributes:
+    m: Number of atoms.
+```
+````
 
 ### `Diagnostics`
 
@@ -107,6 +156,91 @@ Base class for forcing terms.
 Forcing objects are callable modules that return a forcing field
 given a time and grid. They compose with somax models via the
 ``forcing`` attribute.
+```
+````
+
+### `ForcingTerm`
+
+*class*
+
+```python
+ForcingTerm(forcing: 'ForcingProtocol', place: 'Callable[[PyTree, Array], PyTree]', grid: 'eqx.Module | None' = None) -> None
+```
+
+Lift a :class:`ForcingProtocol` field into the term algebra as a tendency.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Resolves the contract mismatch between a forcing
+(``(t, grid) -> field``) and a model right-hand-side term
+(``(t, state, args) -> tendency``). ``place`` writes the field onto the
+target state component, returning a tendency pytree that is zero everywhere
+else — the generalisation of QG's ``dq = dq.at[0].add(tau0 * wind_forcing)``.
+
+Attributes:
+    forcing: The forcing whose field is lifted.
+    place: A ``(zeros_tendency, field) -> tendency`` placement, typically
+        from :func:`add_to`.
+    grid: Optional grid passed to the forcing as its ``grid`` argument, so
+        grid-dependent forcings (those evaluating from ``grid.coords``) work
+        inside the term algebra — the term carries the grid the RHS does not
+        supply. ``None`` (the default) suits forcings that ignore ``grid``
+        (``BasisForcing``, ``ConstantForcing``, ``SeasonalWindForcing``).
+```
+````
+
+### `FourierInTime`
+
+*class*
+
+```python
+FourierInTime(freqs: "Float[Array, ' m']", phases: "Float[Array, ' m']") -> None
+```
+
+Cosine temporal gate ``b_a(t) = cos(omega_a t + phase_a)``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+A one-mode instance reproduces the temporal part of
+:class:`~somax._src.core.forcing.SeasonalWindForcing`. The frequencies and
+phases are fixed (not part of the control); they are stored as array leaves
+but excluded from gradients by :func:`control_filter`.
+
+Attributes:
+    freqs: Angular frequencies ``omega`` of shape ``(m,)``.
+    phases: Phase offsets of shape ``(m,)``.
+```
+````
+
+### `GaussianWindowsInTime`
+
+*class*
+
+```python
+GaussianWindowsInTime(centers: "Float[Array, ' m']", widths: "Float[Array, ' m']") -> None
+```
+
+Localized temporal gate ``b_a(t) = exp(-(t - tau_a)^2 / (2 T_a^2))``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Wraps geonnax :func:`~geonnax.basis.gaussian_window_features`: each atom is
+a soft Gaussian window centred at ``centers[a]`` with width ``widths[a]``,
+the localized counterpart to
+:class:`~somax._src.core.basis.FourierInTime`. The centres and widths are
+fixed geometry (not part of the control); they are stored as array leaves
+but excluded from gradients by
+:func:`~somax._src.core.basis.control_filter`.
+
+Attributes:
+    centers: Window centres ``tau_a`` of shape ``(m,)``.
+    widths: Window widths ``T_a`` of shape ``(m,)``.
 ```
 ````
 
@@ -250,6 +384,26 @@ Base class for differentiable model parameters.
 ```text
 Fields on Params subclasses are visible to ``jax.grad`` by default.
 Use ``eqx.field(static=True)`` for non-differentiable parameters.
+
+Fields may also hold a ``paramax`` wrapper instead of a bare array.
+:func:`positive` and :func:`interval` store a constrained value in an
+unconstrained space, and :func:`frozen` hides a value from gradients.
+A wrapped field is reconstituted by ``paramax.unwrap`` at RHS time —
+:meth:`somax.SomaxModel.build_terms` and
+:meth:`somax.SomaxModel.diagnose` both call it — so model code always
+sees the constrained value and never needs to know about the wrapper.
+
+Gradients of a wrapped field are taken **with respect to the
+unconstrained value**, not the constrained one. For a
+``positive``-wrapped viscosity ``nu = softplus(r)`` the gradient lands
+on ``r``, so an optimiser stepping it can never drive ``nu`` negative.
+Chain-rule factors (``sigmoid(r)`` for ``positive``) mean the
+magnitudes differ from those of an unwrapped parameterisation; that
+is the point, and optimiser learning rates should be set accordingly.
+
+Example:
+    >>> params = MyParams(lateral_viscosity=positive(100.0))
+    >>> paramax.unwrap(params).lateral_viscosity  # 100.0
 ```
 ````
 
@@ -320,6 +474,68 @@ Args:
 ```
 ````
 
+### `ScaledModel`
+
+*class*
+
+```python
+ScaledModel(inner: 'SomaxModel', transform: 'StateAffine', time_scale: 'float' = 1.0) -> None
+```
+
+Integrate ``inner`` in transformed coordinates.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The wrapped model is a ``SomaxModel`` like any other: it integrates,
+steps, and reports diagnostics through the same interface. Every
+time passed to it — ``t0``, ``t1``, ``dt``, ``saveat`` — is in the
+*transformed* time unit, related to the inner model's by
+``t_inner = time_scale * t_outer``.
+
+Attributes:
+    inner: The model being wrapped. Its ``create()`` signature,
+        ``vector_field`` and parameters are untouched.
+    transform: The affine state map. ``forward`` takes an inner
+        state to wrapped coordinates.
+    time_scale: Inner time units per wrapped time unit, finite and
+        strictly positive. For a nondimensionalising wrapper this
+        is ``scales.T``; for a purely statistical one it stays
+        at 1.
+```
+````
+
+### `Scales`
+
+*class*
+
+```python
+Scales(L: 'float', U: 'float', H: 'float', f0: 'float', T: 'float', g: 'float' = 9.81, kind: 'ScaleKind' = 'advective') -> None
+```
+
+Characteristic scales of a run. All fields static.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Attributes:
+    L: Horizontal length scale [m].
+    U: Velocity scale [m/s].
+    H: Depth / layer-thickness scale [m].
+    f0: Reference Coriolis parameter [1/s]. For the planetary set
+        this is ``2 * Omega``, so that ``f(phi) = f0 * sin(phi)``
+        and the Rossby number keeps its usual definition.
+    T: Time scale [s]. Set by the constructor for the chosen family
+        rather than derived, because the families disagree about it.
+    g: Gravitational acceleration [m/s^2].
+    kind: Which canonical set this is — ``"advective"``,
+        ``"inertial"`` or ``"planetary"``. Recorded so that
+        transforms, factories and the CLI can dispatch on it.
+```
+````
+
 ### `SeasonalWindForcing`
 
 *class*
@@ -387,6 +603,43 @@ diffrax, ``jax.grad``, and downstream tools like fourdvarjax.
 Subclasses must implement:
     - ``vector_field``: the right-hand side of the ODE/PDE
     - ``apply_boundary_conditions``: boundary enforcement
+
+Constrained parameters (see :func:`somax.positive`) are unwrapped
+on the way into ``vector_field`` and ``diagnose``, so a constrained
+model behaves exactly like its plain equivalent however it is
+called — through ``integrate``, through ``build_terms``, or by
+evaluating the right-hand side directly, which is what the
+differentiable-model tooling does. Unwrapping happens per call
+rather than once up front so that gradients flow to the *stored*
+unconstrained values, and it is a no-op for a model whose
+parameters are plain arrays.
+```
+````
+
+### `SpatialBasis`
+
+*class*
+
+```python
+SpatialBasis(Phi: "Float[Array, ' Ngrid m']", std: "Float[Array, ' m']") -> None
+```
+
+A precomputed spatial dictionary plus the per-mode prior std.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+``Phi`` holds the basis functions sampled on the (flattened) grid, one per
+column. In production it is produced by evaluating a geonnax basis on a
+``Domain``; here it is any precomputed array, so the basis math stays out of
+somax. ``std`` is the prior standard deviation per mode (``Lambda^{1/2}``),
+supplied by the prior layer (a kernel spectral density of eigenvalues for a
+spectral basis, or a prescribed / wavenumber law for a frame).
+
+Attributes:
+    Phi: Dictionary of shape ``(Ngrid, m)`` on the flattened grid.
+    std: Per-mode prior std of shape ``(m,)``.
 ```
 ````
 
@@ -406,6 +659,64 @@ Base class for model state vectors.
 ```text
 All model states should subclass this to enable interoperability
 with the somax model contract and JAX transformations.
+
+Two optional class attributes describe the fields to
+:class:`~somax._src.core.transforms.StateAffine`. Both are consulted
+before the name-based fallbacks, and both are per-state because a
+field name does not determine either answer: ``h`` is a total
+thickness in the nonlinear shallow-water models but a height
+anomaly in the linear ones, and ``u`` is a C-grid velocity in the
+ocean models but a T-point scalar in the pde family.
+
+Attributes:
+    scale_kinds: Field name to semantic kind — one of
+        ``"velocity"``, ``"thickness"``, ``"height_anomaly"``,
+        ``"vorticity"``, ``"streamfunction"``. Fixes how
+        ``StateAffine.from_scales`` non-dimensionalises the field.
+    mask_locations: Field name to C-grid staggering — one of
+        ``"h"``, ``"u"``, ``"v"``, ``"xy_corner"``, ``"w"``. Picks
+        the mask that ``StateAffine.from_samples`` excludes dry
+        cells with.
+```
+````
+
+### `StateAffine`
+
+*class*
+
+```python
+StateAffine(loc: 'PyTree', scale: 'PyTree') -> None
+```
+
+Per-leaf affine map on a ``State`` pytree: ``y = (x - loc) / scale``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+One abstraction serves both jobs that need a change of state
+variables:
+
+* **Non-dimensionalisation** — ``loc`` and ``scale`` come from a
+  :class:`~somax._src.core.scales.Scales` via :meth:`from_scales`,
+  giving ``u' = u/U``, ``h' = (h - H)/dH``, ``q' = q/(U/L)``.
+* **Standardisation** — ``loc`` and ``scale`` are the sample mean
+  and standard deviation from :meth:`from_samples`, per field or
+  per gridpoint.
+
+They are the same map, so they compose (:meth:`compose`), invert,
+and can be used interchangeably by the DA flattening bridge, by
+ML input/output pipelines, and by ``ScaledModel``.
+
+Attributes:
+    loc: Pytree matching the state's structure; each leaf is
+        broadcastable against the corresponding field.
+    scale: Pytree of the same structure. Leaves must be non-zero.
+
+Notes:
+    ``loc`` and ``scale`` are ordinary pytrees, so a leaf may be a
+    scalar (one number for the whole field), a per-layer column of
+    shape ``(nl, 1, 1)``, or a full per-gridpoint array.
 ```
 ````
 
@@ -455,6 +766,26 @@ sums so ``(a + b) + c`` and ``a + (b + c)`` yield the same flat tree).
 
 Args:
     terms: The summands. Leaves are added leaf-wise across the pytree.
+```
+````
+
+### `TemporalBasis`
+
+*class*
+
+```python
+TemporalBasis() -> None
+```
+
+Maps a scalar time to per-atom temporal weights ``b(t)``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Subclasses implement :meth:`weights`. In production these wrap geonnax
+temporal features; the two below are implemented directly so the slice has
+no external dependency.
 ```
 ````
 
@@ -545,6 +876,166 @@ Example:
 ```
 ````
 
+### `TransformedForcing`
+
+*class*
+
+```python
+TransformedForcing(base: 'ForcingProtocol', inverse: 'Callable[[Array], Array]') -> None
+```
+
+Apply a pointwise transform to a base forcing (e.g. log-space synthesis).
+
+````{admonition} Details
+:class: dropdown
+
+```text
+For lognormal variables (ocean colour) synthesise in log space and map back
+with the inverse, keeping the field positive.
+
+Attributes:
+    base: The forcing whose output is transformed.
+    inverse: Pointwise map applied to the base output (e.g. ``10 ** z``).
+```
+````
+
+### `VectorBasisForcing`
+
+*class*
+
+```python
+VectorBasisForcing(coeffs: "Float[Array, ' m']", spatial: 'VectorSpatialBasis', temporal: 'TemporalBasis', grid_shape: 'tuple[int, ...]') -> None
+```
+
+Reduced-order *vector* forcing: a fixed vector frame driven by coeffs.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The vector analogue of :class:`BasisForcing`. A single coefficient vector
+drives all components jointly (so a divergence-free dictionary yields a
+divergence-free forcing), and ``__call__`` returns a component-major field
+``(ncomp, *grid_shape)`` that :class:`ForcingTerm` places with
+:func:`add_vector_to`.
+
+Attributes:
+    coeffs: Learnable control of shape ``(m,)``.
+    spatial: Fixed vector dictionary and prior std.
+    temporal: Fixed temporal gate.
+    grid_shape: Field shape ``domain.Nx`` used to reshape each component.
+```
+````
+
+### `VectorSpatialBasis`
+
+*class*
+
+```python
+VectorSpatialBasis(Phi: "Float[Array, ' Ngrid m ncomp']", std: "Float[Array, ' m']") -> None
+```
+
+A precomputed vector dictionary plus the per-mode prior std.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Like :class:`SpatialBasis` but every atom is an ``ncomp``-vector field, so
+``Phi`` carries a trailing component axis. ``synthesize`` contracts the mode
+axis and keeps the components, giving a ``(Ngrid, ncomp)`` field.
+
+Attributes:
+    Phi: Dictionary of shape ``(Ngrid, m, ncomp)`` on the flattened grid.
+    std: Per-mode prior std of shape ``(m,)``.
+```
+````
+
+### `add_to`
+
+*function*
+
+```python
+add_to(component: 'str', layer: 'int | None' = None) -> 'Callable[[PyTree, Array], PyTree]'
+```
+
+Build a placement that adds a field onto one named state component.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Mirrors the QG/SWM convention of writing forcing onto a single tendency
+component (and optionally a single layer), e.g. ``dq[0] += field``.
+
+Args:
+    component: Name of the state attribute to add the field to (e.g. ``"q"``).
+    layer: Optional layer index for a stacked component; ``None`` adds to
+        the whole component.
+
+Returns:
+    A ``place(zeros, field) -> tendency`` callable for :class:`ForcingTerm`.
+```
+````
+
+### `add_vector_to`
+
+*function*
+
+```python
+add_vector_to(components: 'tuple[str, ...]', layer: 'int | None' = None) -> 'Callable[[PyTree, Array], PyTree]'
+```
+
+Build a placement that adds a component-major field onto named components.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The vector counterpart of :func:`add_to`: ``field[i]`` is written onto
+``components[i]`` (e.g. the ``(u, v)`` velocity components), optionally at a
+single layer. Used as the ``place`` of a :class:`ForcingTerm` wrapping a
+:class:`VectorBasisForcing`.
+
+Args:
+    components: State attribute names, one per field component, in order.
+    layer: Optional layer index for stacked components.
+
+Returns:
+    A ``place(zeros, field) -> tendency`` callable, with ``field`` shaped
+    ``(len(components), *grid)``.
+```
+````
+
+### `as_parameter`
+
+*function*
+
+```python
+as_parameter(value: 'ArrayLike | Parameterize | NonTrainable') -> 'Any'
+```
+
+Coerce a factory argument into a ``Params`` leaf.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Model factories take plain numbers and convert them with
+``jnp.asarray``, which cannot convert a paramax wrapper — so
+``BarotropicQG.create(lateral_viscosity=positive(100.0))`` would
+fail, and a constrained model could only be built by surgery with
+``eqx.tree_at``. Wrappers are passed through untouched; everything
+else is converted as before.
+
+Args:
+    value: A number, array, or paramax wrapper.
+
+Returns:
+    The wrapper unchanged, or ``jnp.asarray(value)``.
+```
+````
+
 ### `build_diffrax_terms`
 
 *function*
@@ -582,6 +1073,34 @@ Raises:
 ```
 ````
 
+### `control_filter`
+
+*function*
+
+```python
+control_filter(forcing: 'BasisForcing') -> 'BasisForcing'
+```
+
+Boolean filter selecting only ``coeffs`` for gradient updates.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Use with :func:`equinox.partition` so optimisers update the control vector
+only, leaving the (large) dictionary, the temporal centres/widths, and the
+prior std fixed::
+
+    diff, static = eqx.partition(forcing, control_filter(forcing))
+
+Args:
+    forcing: The forcing whose ``coeffs`` should be the trainable leaves.
+
+Returns:
+    A like-structured pytree of booleans, ``True`` only at ``coeffs``.
+```
+````
+
 ### `explicit`
 
 *function*
@@ -592,6 +1111,64 @@ explicit(term: 'Term') -> 'Term'
 
 Tag ``term`` for the explicit stage of an IMEX integrator.
 
+### `frozen`
+
+*function*
+
+```python
+frozen(value: 'ArrayLike') -> 'NonTrainable'
+```
+
+Hide a parameter from gradients while keeping it a runtime value.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The leaf stays in the pytree but is cut out of the backward pass,
+so it behaves like an ``eqx.field(static=True)`` constant without
+having to be hashable or known at trace time. Its gradient comes
+back as exact zero rather than being absent.
+
+Args:
+    value: The value to freeze.
+
+Returns:
+    A ``NonTrainable`` wrapper that unwraps to ``value``.
+```
+````
+
+### `geostrophic_currents`
+
+*function*
+
+```python
+geostrophic_currents(domain: 'Domain', *, num_basis_per_dim: 'int | tuple[int, ...]' = 8, length_scale: 'float' = 1.0, nu: 'float' = 1.5, variance: 'float' = 1.0) -> 'VectorBasisForcing'
+```
+
+Vector preset: incompressible ``(u, v)`` current-error forcing.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+A divergence-free velocity frame (geonnax ``divfree_basis``) with a Matérn
+kinetic-energy prior, constant in time. Lift it onto a model's velocity
+components with ``ForcingTerm(forcing, place=add_vector_to(("u", "v")))``.
+
+Args:
+    domain: A 2D model domain.
+    num_basis_per_dim: Per-axis number of 1D stream-function modes.
+    length_scale: Matérn length scale of the prior.
+    nu: Matérn smoothness of the prior.
+    variance: Marginal variance of the prior.
+
+Returns:
+    A :class:`~somax._src.core.basis.VectorBasisForcing` with zero initial
+    coefficients.
+```
+````
+
 ### `implicit`
 
 *function*
@@ -601,6 +1178,79 @@ implicit(term: 'Term') -> 'Term'
 ```
 
 Tag ``term`` for the implicit stage of an IMEX integrator.
+
+### `interval`
+
+*function*
+
+```python
+interval(value: 'ArrayLike', lower: 'float', upper: 'float') -> 'Parameterize'
+```
+
+Constrain a parameter to the open interval ``(lower, upper)``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The value is stored in logit space and reconstituted as
+``lower + (upper - lower) * sigmoid(raw)``. As with :func:`positive`,
+the bound is exact in arithmetic and saturating in floating point:
+far into either tail ``sigmoid`` reaches exactly 0 or 1, so the
+constrained value can land *on* a bound but never outside it.
+
+Args:
+    value: The initial constrained value, strictly inside the interval.
+    lower: Lower bound, exclusive. Must be finite.
+    upper: Upper bound, exclusive. Must be finite.
+
+Returns:
+    A ``Parameterize`` that unwraps to ``value``.
+
+Raises:
+    ValueError: If the bounds are not finite or not ordered, or
+        ``value`` lies outside the open interval.
+```
+````
+
+### `matern_spectral_density`
+
+*function*
+
+```python
+matern_spectral_density(sqrt_lambda: "Float[Array, ' m']", *, variance: 'float' = 1.0, length_scale: 'float' = 1.0, nu: 'float' = 1.5, ndim: 'int' = 2) -> "Float[Array, ' m']"
+```
+
+Matérn power spectral density ``S(omega)`` at ``omega = sqrt_lambda``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The Hilbert-space-GP prior variance of a Laplacian eigenmode with eigenvalue
+``lambda`` is ``S(sqrt(lambda))`` (Solin & Särkkä 2020), so pairing this with
+:func:`spatial_from_fourier` builds a reduced-rank Matérn / SPDE field. With
+``kappa = sqrt(2 nu) / length_scale`` the density is
+
+``S(omega) = variance * c * (kappa^2 + omega^2) ** -(nu + ndim/2)``,
+
+``c = 2^ndim pi^(ndim/2) Gamma(nu + ndim/2) (2 nu)^nu /
+(Gamma(nu) length_scale^(2 nu))``.
+
+geonnax deliberately keeps kernel spectral densities in the consuming
+library, so this closed-form (kernel-class-free) helper lives here.
+
+Args:
+    sqrt_lambda: Square-root Laplacian eigenvalues ``omega`` of shape ``(m,)``.
+    variance: Marginal variance ``sigma^2``.
+    length_scale: Matérn length scale ``ell``.
+    nu: Smoothness ``nu``.
+    ndim: Spatial dimension ``d``.
+
+Returns:
+    Per-mode variance of shape ``(m,)``.
+```
+````
 
 ### `partition`
 
@@ -625,6 +1275,488 @@ Args:
 Returns:
     ``(explicit_part, implicit_part)``. Either element is ``None``
     when no summand of that kind is present.
+```
+````
+
+### `positive`
+
+*function*
+
+```python
+positive(value: 'ArrayLike') -> 'Parameterize'
+```
+
+Constrain a parameter to be strictly positive.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The value is stored in softplus space and reconstituted as
+``softplus(raw)`` by ``paramax.unwrap``, so gradient descent on the
+stored value cannot make it negative. Use it for quantities that are
+physically non-negative — lateral viscosity, bottom drag, wind
+amplitude — whenever they are being calibrated.
+
+The guarantee is exact in arithmetic and near-exact in floating
+point: ``softplus`` underflows to exactly ``0.0`` once the stored
+value falls below roughly ``-90`` in float32, so the constrained
+value is non-negative always and strictly positive everywhere an
+optimiser that has not already diverged will go. It is never
+negative.
+
+Args:
+    value: The initial constrained value. Must be finite and
+        strictly positive.
+
+Returns:
+    A ``Parameterize`` that unwraps to ``value``.
+
+Raises:
+    ValueError: If ``value`` is not strictly positive, which has no
+        representation in softplus space.
+```
+````
+
+### `spatial_from_divfree`
+
+*function*
+
+```python
+spatial_from_divfree(domain: 'Domain', *, num_basis_per_dim: 'int | tuple[int, ...]', length_scale: 'float' = 1.0, nu: 'float' = 1.5, variance: 'float' = 1.0) -> 'VectorSpatialBasis'
+```
+
+Build a :class:`VectorSpatialBasis` of divergence-free velocity atoms.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Evaluates geonnax :func:`~geonnax.basis.divfree_basis` on ``domain.coords``
+(centred on the box) — incompressible ``(u, v)`` atoms, the skew gradients of
+the box stream functions, for parameterising near-geostrophic current error.
+The per-mode prior follows the Matérn spectral density of the stream-function
+eigenvalues (a kinetic-energy spectral law).
+
+Args:
+    domain: A 2D model domain.
+    num_basis_per_dim: Per-axis number of 1D stream-function modes.
+    length_scale: Matérn length scale of the prior.
+    nu: Matérn smoothness of the prior.
+    variance: Marginal variance of the prior.
+
+Returns:
+    A :class:`VectorSpatialBasis` whose ``Phi`` is ``(Ngrid, m, 2)``.
+
+Raises:
+    ValueError: If the domain is not 2D.
+```
+````
+
+### `spatial_from_eof`
+
+*function*
+
+```python
+spatial_from_eof(data: "Float[Array, 'T N']", n_modes: 'int', *, center: 'bool' = True) -> 'SpatialBasis'
+```
+
+Build a :class:`SpatialBasis` from empirical orthogonal functions (PCA).
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Evaluates geonnax :func:`~geonnax.basis.eof_basis` on a ``(T, Ngrid)`` data
+matrix (e.g. a stack of anomaly snapshots) and uses the leading EOFs as the
+dictionary — the data-driven reduced basis (DINEOF). The prior std is the
+per-mode sample standard deviation ``sigma_a / sqrt(T - 1)``.
+
+Args:
+    data: Data matrix of shape ``(T, Ngrid)``.
+    n_modes: Number of leading EOFs to keep.
+    center: Subtract the sample mean before the SVD.
+
+Returns:
+    A :class:`SpatialBasis` over the leading EOFs.
+```
+````
+
+### `spatial_from_fourier`
+
+*function*
+
+```python
+spatial_from_fourier(domain: 'Domain', *, num_basis_per_dim: 'int | tuple[int, ...]', length_scale: 'float' = 1.0, nu: 'float' = 1.5, variance: 'float' = 1.0) -> 'SpatialBasis'
+```
+
+Build a :class:`SpatialBasis` from the box-Laplacian (HSGP) eigenbasis.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Evaluates geonnax :func:`~geonnax.basis.fourier_basis` on ``domain.coords``
+(shifted to the centred box ``[-L, L]^ndim``) and sets the per-mode prior
+std to the Matérn spectral density at the eigen-wavenumbers — the
+reduced-rank Matérn / SPDE construction. This is the principled smooth-field
+prior for variables like SST.
+
+Args:
+    domain: The model domain.
+    num_basis_per_dim: Per-axis number of 1D modes (``int`` broadcasts).
+    length_scale: Matérn length scale.
+    nu: Matérn smoothness.
+    variance: Marginal variance.
+
+Returns:
+    A :class:`SpatialBasis` with the Matérn HSGP prior std.
+```
+````
+
+### `spatial_from_gabor`
+
+*function*
+
+```python
+spatial_from_gabor(domain: 'Domain', *, n_scales: 'int', base_scale: 'float', slope: 'float' = 4.0, amplitude: 'float' = 1.0, oversample: 'float' = 1.0) -> 'SpatialBasis'
+```
+
+Build a :class:`SpatialBasis` from a geonnax dyadic radial-Gabor frame.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Evaluates :func:`~geonnax.basis.gabor_frame_grid` on ``domain.coords`` and
+fills the per-mode prior std from the frame's per-atom wavenumbers using the
+steep mesoscale spectral law ``sigma_a = sqrt(amplitude * k_a ** -slope)``,
+which places most variance at large scales (small wavenumber) — the
+weighting behind multiscale SSH mapping.
+
+Args:
+    domain: The model domain; its ``coords`` (``(Ngrid, ndim)``) are the
+        evaluation points and its static ``xmin`` / ``xmax`` the frame box.
+    n_scales: Number of dyadic scales in the frame.
+    base_scale: Finest envelope scale ``L_0`` (in domain units).
+    slope: Spectral slope of the wavenumber prior law (``~4`` for SSH).
+    amplitude: Overall prior variance scale.
+    oversample: Centre density per scale (spacing ``L_s / oversample``).
+
+Returns:
+    A :class:`SpatialBasis` whose ``Phi`` is the frame synthesis matrix and
+    whose ``std`` follows the wavenumber law.
+```
+````
+
+### `spatial_from_graph_laplacian`
+
+*function*
+
+```python
+spatial_from_graph_laplacian(adjacency: "Float[Array, 'V V']", n_modes: 'int', *, normalized: 'bool' = True, regularization: 'float' = 0.001, smoothness: 'float' = 2.0) -> 'SpatialBasis'
+```
+
+Build a :class:`SpatialBasis` from graph-Laplacian eigenvectors.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Evaluates geonnax :func:`~geonnax.basis.graph_laplacian_eigpairs` and uses
+the low-frequency eigenvectors as the dictionary — the natural basis on an
+irregular / masked grid (e.g. an ocean basin with land removed), where the
+adjacency encodes the connectivity. The GMRF-style prior std decays with the
+eigenvalue, ``std = (lambda + regularization) ** (-smoothness / 2)``, so
+smooth (low-frequency) modes carry the most variance.
+
+Args:
+    adjacency: Symmetric non-negative adjacency of shape ``(V, V)`` over the
+        ``V`` (unmasked) grid nodes.
+    n_modes: Number of low-frequency eigenpairs to keep.
+    normalized: Use the symmetric normalized Laplacian if ``True``.
+    regularization: Added to eigenvalues to bound the zero-mode variance.
+    smoothness: Exponent of the eigenvalue decay in the prior.
+
+Returns:
+    A :class:`SpatialBasis` whose ``Phi`` is ``(V, n_modes)``.
+```
+````
+
+### `spatial_from_rbf`
+
+*function*
+
+```python
+spatial_from_rbf(domain: 'Domain', centers: "Float[Array, 'm ndim']", widths: "Float[Array, ' m']", *, kernel: 'str' = 'gaussian', std: "Float[Array, ' m'] | float" = 1.0) -> 'SpatialBasis'
+```
+
+Build a :class:`SpatialBasis` from a geonnax placeable radial basis.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Evaluates :func:`~geonnax.basis.rbf_basis` on ``domain.coords``, placing one
+column per ``(center, width)`` pair — put atoms where the physics is
+localized (a river mouth, a front) and leave the open ocean untouched. A
+radial basis has no eigendecomposition, so the prior std is *prescribed* per
+centre (the geometry half of the basis contract), defaulting to ones.
+
+Args:
+    domain: The model domain; its ``coords`` are the evaluation points.
+    centers: Atom centres of shape ``(m, ndim)``.
+    widths: Per-atom width of shape ``(m,)`` (Gaussian length scale or
+        Wendland support radius).
+    kernel: ``"gaussian"`` (smooth global bump) or ``"wendland_c2"`` /
+        ``"wendland_c4"`` (compact support).
+    std: Prescribed per-centre prior std; a scalar is broadcast to ``(m,)``.
+
+Returns:
+    A :class:`SpatialBasis` over the placed radial atoms.
+```
+````
+
+### `spatial_from_spherical_rbf`
+
+*function*
+
+```python
+spatial_from_spherical_rbf(domain: 'Domain', centers_lonlat: "Float[Array, 'm 2']", widths: "Float[Array, ' m']", *, kernel: 'str' = 'gaussian', std: "Float[Array, ' m'] | float" = 1.0, degrees: 'bool' = True) -> 'SpatialBasis'
+```
+
+Build a :class:`SpatialBasis` from a geodesic (on-sphere) radial basis.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Maps the domain's ``(lon, lat)`` ``coords`` and the ``(lon, lat)`` atom
+centres onto the unit sphere, then evaluates geonnax
+:func:`~geonnax.basis.spherical_rbf_basis` in great-circle distance — placed
+atoms whose support is a geodesic cap, for global / regional ocean fields.
+The prior std is prescribed per centre.
+
+Args:
+    domain: A 2D ``(lon, lat)`` domain; ``coords`` are the evaluation points.
+    centers_lonlat: Atom centres as ``(lon, lat)`` of shape ``(m, 2)``.
+    widths: Per-atom geodesic width (radians) of shape ``(m,)``.
+    kernel: ``"gaussian"`` or ``"wendland_c2"`` / ``"wendland_c4"``.
+    std: Prescribed per-centre prior std; a scalar is broadcast.
+    degrees: If ``True`` (default), ``coords`` and ``centers_lonlat`` are in
+        degrees and converted to radians before mapping to the sphere.
+
+Returns:
+    A :class:`SpatialBasis` over the placed geodesic atoms.
+
+Raises:
+    ValueError: If the domain is not 2D.
+```
+````
+
+### `spatial_from_wavelet`
+
+*function*
+
+```python
+spatial_from_wavelet(domain: 'Domain', *, wavelet: 'str' = 'haar', levels: 'int | None' = None, std: "Float[Array, ' m'] | float" = 1.0) -> 'SpatialBasis'
+```
+
+Build a :class:`SpatialBasis` from the orthonormal 2D wavelet basis.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Evaluates geonnax :func:`~geonnax.basis.wavelet_basis_2d` for the domain's
+``(Ny, Nx)`` grid (both must be powers of two) — a critically-sampled,
+non-redundant multiscale dictionary, the orthonormal counterpart to the
+Gabor frame. The orthonormal basis has no intrinsic spectrum, so the prior
+std is prescribed (defaulting to ones).
+
+Args:
+    domain: A 2D model domain with power-of-two ``Nx``.
+    wavelet: ``"haar"``, ``"db2"``, or ``"db4"``.
+    levels: Decomposition levels (defaults to the full cascade).
+    std: Prescribed per-mode prior std; a scalar is broadcast.
+
+Returns:
+    A :class:`SpatialBasis` whose ``Phi`` is ``(Ngrid, Ngrid)`` orthonormal.
+
+Raises:
+    ValueError: If the domain is not 2D.
+```
+````
+
+### `ssh_geostrophic`
+
+*function*
+
+```python
+ssh_geostrophic(domain: 'Domain', *, n_scales: 'int' = 6, base_scale: 'float' = 20000.0, slope: 'float' = 4.0, amplitude: 'float' = 2e-06, oversample: 'float' = 1.0, windows: "tuple[Float[Array, ' m_t'], Float[Array, ' m_t']] | None" = None) -> 'BasisForcing'
+```
+
+SSH geostrophic preset: a radial-Gabor frame with a wavenumber-law prior.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The overcomplete multiscale Gabor frame is the workhorse behind sea-surface
+-height mapping; the prior follows the steep mesoscale wavenumber law
+``sigma^2 ~ k ** -slope`` (``slope`` near four). By default the forcing is
+constant in time (the static-coefficient case that the existing ``jax.grad``
+parameter path handles); pass ``windows`` to spread it over Gaussian time
+windows for the time-distributed (weak-constraint) case.
+
+Args:
+    domain: The model domain.
+    n_scales: Number of dyadic scales in the frame.
+    base_scale: Finest envelope scale ``L_0`` (in domain units).
+    slope: Spectral slope of the wavenumber prior law.
+    amplitude: Overall prior variance scale.
+    oversample: Centre density per scale.
+    windows: Optional ``(centers, widths)`` for the temporal gate; ``None``
+        keeps the forcing constant in time.
+
+Returns:
+    A :class:`~somax._src.core.basis.BasisForcing` with zero initial
+    coefficients, ready to drop into a model RHS via
+    :class:`~somax._src.core.basis.ForcingTerm`.
+```
+````
+
+### `sss_coastal`
+
+*function*
+
+```python
+sss_coastal(domain: 'Domain', centers: "Float[Array, 'm ndim']", widths: "Float[Array, ' m']", *, kernel: 'str' = 'wendland_c2', std: "Float[Array, ' m'] | float" = 1.0, windows: "tuple[Float[Array, ' m_t'], Float[Array, ' m_t']] | None" = None) -> 'BasisForcing'
+```
+
+Coastal SSS preset: placeable radial atoms with a prescribed prior.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Sea-surface-salinity forcing localised where the physics is — radial atoms
+placed at coastlines / river mouths rather than spread over the open ocean.
+Uses a compactly supported Wendland kernel by default so each atom is
+exactly zero past its width. As with :func:`ssh_geostrophic`, ``windows``
+switches from the constant-in-time to the time-distributed regime.
+
+Args:
+    domain: The model domain.
+    centers: Atom centres of shape ``(m, ndim)`` (e.g. river-mouth locations).
+    widths: Per-atom width of shape ``(m,)``.
+    kernel: Radial kernel name (compact-support Wendland by default).
+    std: Prescribed per-centre prior std; a scalar is broadcast.
+    windows: Optional ``(centers, widths)`` for the temporal gate.
+
+Returns:
+    A :class:`~somax._src.core.basis.BasisForcing` over the placed atoms.
+```
+````
+
+### `sst_frontal`
+
+*function*
+
+```python
+sst_frontal(domain: 'Domain', *, num_basis_per_dim: 'int | tuple[int, ...]' = 12, length_scale: 'float' = 1.0, nu: 'float' = 1.5, variance: 'float' = 1.0, windows: "tuple[Float[Array, ' m_t'], Float[Array, ' m_t']] | None" = None) -> 'BasisForcing'
+```
+
+SST preset: a smooth Matérn (HSGP) field over the box-Laplacian eigenbasis.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+A principled smooth-field prior for sea-surface temperature: the box
+eigenbasis weighted by the Matérn spectral density. Constant in time by
+default; pass ``windows`` for the time-distributed regime.
+
+Args:
+    domain: The model domain.
+    num_basis_per_dim: Per-axis number of 1D modes.
+    length_scale: Matérn length scale.
+    nu: Matérn smoothness.
+    variance: Marginal variance.
+    windows: Optional ``(centers, widths)`` Gaussian temporal gate.
+
+Returns:
+    A :class:`~somax._src.core.basis.BasisForcing`.
+```
+````
+
+### `tile_in_time`
+
+*function*
+
+```python
+tile_in_time(spatial: 'SpatialBasis', centers: "Float[Array, ' m_t']", widths: "Float[Array, ' m_t']") -> 'tuple[SpatialBasis, GaussianWindowsInTime]'
+```
+
+Lift a spatial dictionary into a separable space-time frame.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Realises the separable construction ``Phi = Phi_t (x) Phi_s`` through the
+per-atom :class:`~somax._src.core.basis.BasisForcing` interface (whose
+temporal weights are 1:1 with the dictionary columns): each spatial atom is
+repeated once per temporal window, and each repeat is gated by that window.
+The resulting field is ``eps(x, t) = sum_{p,j} w_{p,j} phi_j(x) chi_p(t)``.
+
+The repeats are laid out in temporal-major blocks — column ``p * m_s + j``
+holds spatial atom ``j`` gated by window ``p`` — so the returned spatial
+``std`` and the temporal ``centers`` / ``widths`` line up with the columns.
+
+Args:
+    spatial: The space-only dictionary (``m_s`` atoms).
+    centers: Temporal window centres of shape ``(m_t,)``.
+    widths: Temporal window widths of shape ``(m_t,)``.
+
+Returns:
+    ``(tiled_spatial, temporal)`` with ``tiled_spatial`` of
+    ``m_t * m_s`` columns and a matching
+    :class:`GaussianWindowsInTime` gate.
+```
+````
+
+### `trainable_mask`
+
+*function*
+
+```python
+trainable_mask(tree: 'PyTree') -> 'PyTree'
+```
+
+Boolean pytree marking which leaves an optimiser may update.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+``NonTrainable`` removes a leaf from the *backward* pass, so its
+gradient is exact zero — but a zero gradient is not the same as no
+update. A decoupled-weight-decay optimiser such as ``optax.adamw``
+computes its update from the parameter value as well as the
+gradient, so applying one to a whole model still drifts a
+:func:`frozen` constant. Pass this mask to ``optax.masked`` (or use
+it with ``eqx.partition``) to leave those leaves genuinely alone.
+
+Args:
+    tree: Any pytree, typically a model.
+
+Returns:
+    A pytree of the same structure whose leaves are ``True`` for
+    trainable leaves and ``False`` under a ``NonTrainable``.
+
+Example:
+    >>> optimiser = optax.masked(optax.adamw(1e-3), trainable_mask(model))
 ```
 ````
 
@@ -1352,6 +2484,125 @@ Args:
 ```
 ````
 
+### `SphericalQG`
+
+*class*
+
+```python
+SphericalQG(params: 'SphericalQGParams', consts: 'SphericalQGPhysConsts', grid: 'SphericalGrid2D', diff: 'SphericalDifference2D', interp: 'Interpolation2D', laplacian: 'SphericalLaplacian2D', advection: 'SphericalAdvection2D', diffusion: 'SphericalDiffusion2D', mask: 'Mask2D | None', f_field: "Float[Array, 'Ny Nx']", wind_forcing: "Float[Array, 'Ny Nx']", method: 'str' = 'upwind1', cg_tol: 'float' = 1e-06, cg_max_steps: 'int' = 500) -> None
+```
+
+Barotropic quasi-geostrophic flow on a sphere.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Advects absolute vorticity ``q + f`` by the non-divergent flow
+recovered from the streamfunction::
+
+    dq/dt = -adv_sphere(q + f, u, v) + nu lap(q) - kappa q + tau curl
+
+with ``(u, v) = (-1/R dpsi/dlat, 1/(R cos(phi)) dpsi/dlon)`` and
+``psi`` from ``lap_sphere(psi) = q``.
+
+The planetary vorticity gradient is not a constant here. Advecting
+the *absolute* vorticity ``q + f(phi)`` with ``f = 2 Omega sin(phi)``
+reproduces ``beta = 2 Omega cos(phi)/R`` implicitly, so it varies
+from its maximum at the equator to zero at the poles rather than
+being frozen at a reference latitude.
+
+Inversion is iterative. The spherical Laplacian is not diagonal in
+any transform a lat-lon grid affords — the ``cos(phi)`` metric
+couples latitudes — so the DST route the Cartesian model uses does
+not apply, and the elliptic problem is solved by conjugate
+gradients against the ``SphericalLaplacian2D`` operator.
+
+Args:
+    params: Differentiable parameters.
+    consts: Frozen physical constants.
+    grid: Spherical Arakawa C-grid.
+    diff: Spherical difference operators.
+    interp: Interpolation operators.
+    laplacian: Spherical Laplacian, used both in the RHS and as the
+        operator the inversion solves against.
+    advection: Spherical scalar advection.
+    diffusion: Spherical harmonic diffusion.
+    mask: Optional land/ocean mask (``None`` = all-ocean).
+    f_field: Precomputed Coriolis field at T-points.
+    wind_forcing: Normalised wind-stress-curl pattern.
+    method: Advection reconstruction method.
+    cg_tol: Convergence tolerance for the PV inversion, used for
+        both the relative and the absolute criterion. The default
+        is chosen for float32: a tighter absolute tolerance never
+        trips, and CG runs to its step cap.
+    cg_max_steps: Iteration cap for the PV inversion.
+```
+````
+
+### `SphericalSWM`
+
+*class*
+
+```python
+SphericalSWM(params: 'SphericalSWMParams', consts: 'SphericalSWMPhysConsts', grid: 'SphericalGrid2D', diff: 'SphericalDifference2D', interp: 'Interpolation2D', vorticity: 'SphericalVorticity2D', advection: 'SphericalAdvection2D', diffusion: 'SphericalDiffusion2D', mask: 'Mask2D | None', f_field: "Float[Array, 'Ny Nx']", wind_stress_x: "Float[Array, 'Ny Nx']", wind_stress_y: "Float[Array, 'Ny Nx']", method: 'str' = 'upwind1') -> None
+```
+
+Shallow water on a sphere, vector-invariant form.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+Solves the rotating shallow-water equations on a spherical Arakawa
+C-grid::
+
+    dh/dt = -div_sphere(h u)
+    du/dt = +q (h v)_bar - (1/(R cos(phi))) dP/dlon + nu lap(u) - kappa u
+    dv/dt = -q (h u)_bar - (1/R) dP/dlat            + nu lap(v) - kappa v
+
+with ``q = (zeta + f)/h`` the potential vorticity and
+``P = KE + g h`` the Bernoulli potential. Every horizontal
+derivative carries the spherical metric: the ``1/(R cos(phi))``
+factor in longitude and ``1/R`` in latitude, supplied by the
+finitevolx spherical operators.
+
+Coriolis is the full ``f(phi) = 2 Omega sin(phi)``, not a beta-plane
+expansion about a reference latitude. The planetary vorticity
+gradient ``beta = 2 Omega cos(phi)/R`` is then implicit in the field
+and varies correctly from equator to pole.
+
+Known limitation
+----------------
+Mass is conserved only to discretisation accuracy, not to machine
+precision as in the Cartesian :class:`NonlinearShallowWater2D`. The
+spherical flux divergence does not telescope exactly against
+``spherical_area_weights`` — the cell area it implicitly divides by
+differs from the one that function returns — so a balanced
+solid-body rotation loses of order ``1e-3`` of its mass over six
+hours. The drift is independent of the time step and only weakly
+dependent on resolution, which places it in the spatial operator.
+Tracked upstream as jejjohnson/finitevolX#247; until it is fixed,
+treat the mass diagnostic here as a drift signal rather than a
+conserved quantity.
+
+Args:
+    params: Differentiable parameters.
+    consts: Frozen physical constants.
+    grid: Spherical Arakawa C-grid.
+    diff: Spherical difference operators.
+    interp: Interpolation operators (staggering only, metric-free).
+    vorticity: Spherical vorticity / PV operator.
+    advection: Spherical scalar advection, for the mass equation.
+    diffusion: Spherical harmonic diffusion.
+    mask: Optional land/ocean mask (``None`` = all-ocean).
+    f_field: Precomputed Coriolis field at X-points.
+    wind_stress_x: Normalised zonal wind-stress pattern.
+    wind_stress_y: Normalised meridional wind-stress pattern.
+    method: Advection reconstruction method for the mass equation.
+```
+````
+
 ### `geostrophic_adjustment_2d`
 
 *function*
@@ -1502,6 +2753,14 @@ Each model carries dataclass companions for its state, differentiable parameters
 - `NonlinearSW2DPhysConsts` — Frozen physical constants for the 2D nonlinear shallow water model.
 - `NonlinearSW2DState` — State for the 2D nonlinear shallow water model.
 - `ReparamQGDiagnostics` — Diagnostics for the reparameterized QG model.
+- `SphericalQGDiagnostics` — Diagnostics for the spherical QG model.
+- `SphericalQGParams` — Differentiable parameters for the spherical QG model.
+- `SphericalQGPhysConsts` — Frozen physical constants for the spherical QG model.
+- `SphericalQGState` — State for the spherical barotropic QG model.
+- `SphericalSWMDiagnostics` — Diagnostics for the spherical shallow water model.
+- `SphericalSWMParams` — Differentiable parameters for the spherical shallow water model.
+- `SphericalSWMPhysConsts` — Frozen physical constants for the spherical shallow water model.
+- `SphericalSWMState` — State for the spherical shallow water model.
 
 ## Domain
 
@@ -1643,8 +2902,11 @@ it inspects the model / state and returns only the metrics that make
 sense. Non-fluid models (Lorenz, diffusion, …) and multilayer (3D) states
 yield an empty dict rather than an error.
 
-Scope: this targets **velocity-state Arakawa C-grid models** — those whose
-state carries 2D ``u`` / ``v`` (SWM, Burgers). **Vorticity / streamfunction
+Scope: this targets **Cartesian velocity-state Arakawa C-grid models** —
+those whose state carries 2D ``u`` / ``v`` (SWM, Burgers). Spherical
+models get their ``invariant_*`` entries, which their own ``diagnose``
+area-weights correctly, but not the field metrics, which assume a
+uniform ``dx * dy`` cell area. **Vorticity / streamfunction
 models** (``barotropic_qg``, the vorticity Navier-Stokes) are intentionally
 *not* covered: they evolve ``q`` / ``omega`` and never define a discrete
 velocity divergence (non-divergence is only an analytic property, so a
@@ -2265,11 +3527,14 @@ xarray / zarr helpers that round-trip model states and snapshots (requires the `
 These symbols live in `somax.io` and require the optional `sim` dependency group (`uv sync --group sim`):
 
 - `somax.io.append_to_dataset`
+- `somax.io.apply_scale_metadata`
 - `somax.io.dataset_to_state`
 - `somax.io.load_dataset`
 - `somax.io.save_dataset`
+- `somax.io.scales_attrs`
 - `somax.io.snapshots_to_dataset`
 - `somax.io.state_to_dataset`
+- `somax.io.transform_attrs`
 
 ## Data Assimilation
 

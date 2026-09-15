@@ -61,12 +61,23 @@ class SomaxForwardModel(eqx.Module):
         dt: Fixed integration window read by the variational solver's rollout.
         t0: Absolute start time of the window, passed to ``model.step`` on
             every substep (not advanced per substep). Defaults to ``0.0``.
+        transform: Optional :class:`~somax.StateAffine`. Set it when the
+            flat vectors come from ``state_to_vector`` with a transform;
+            without it the adapter hands the model transformed values as
+            if they were physical ones.
     """
 
     model: Any
     template: Any
     dt: float = eqx.field(static=True)
     t0: float = eqx.field(static=True, default=0.0)
+    #: Optional :class:`~somax.StateAffine`. Set it when the flat
+    #: vectors come from ``state_to_vector``/``make_ensemble`` with a
+    #: transform: without it the adapter would hand the model
+    #: transformed values as if they were physical ones, advancing a
+    #: near-zero standardised thickness as a real layer depth and
+    #: corrupting the first forecast.
+    transform: Any = None
 
     def step(
         self,
@@ -80,7 +91,11 @@ class SomaxForwardModel(eqx.Module):
         """
         _, unravel = ravel_pytree(self.template)
         x = unravel(state)
+        if self.transform is not None:
+            x = self.transform.inverse(x)
         x_next = self.model.step(x, dt, t0=self.t0)
+        if self.transform is not None:
+            x_next = self.transform.forward(x_next)
         flat, _ = ravel_pytree(x_next)
         return flat
 

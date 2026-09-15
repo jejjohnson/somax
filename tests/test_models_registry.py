@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import inspect
 
+import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from somax._src.cli.models_registry import (
@@ -106,27 +108,71 @@ class TestMaskSupport:
         )
 
 
-# Phase-3 (#77) populated the six cartesian models; the two spherical
-# models stay stubs until Phase 5 (#73). Keep the stub list explicit so
-# accidentally unstubbing a model fails loudly here.
-_STUB_MODELS = {"spherical_swm", "spherical_qg"}
+# Phase-3 (#77) populated the six cartesian models; #73 populated the
+# two spherical ones, so nothing in the registry is a stub any more.
+_STUB_MODELS: set[str] = set()
 
-_PHASE3_MODELS = EXPECTED_MODELS - _STUB_MODELS
+_SPHERICAL_MODELS = {"spherical_swm", "spherical_qg"}
+
+_PHASE3_MODELS = EXPECTED_MODELS - _STUB_MODELS - _SPHERICAL_MODELS
 
 
-class TestStubsRaiseWithMeaningfulMessage:
-    @pytest.mark.parametrize("name", sorted(_STUB_MODELS))
-    def test_stub_build_raises_not_implemented(self, name):
-        entry = MODELS[name]
-        # The stub build takes (bundle, params); we can pass ``None, {}``
-        # because it raises before touching either.
-        with pytest.raises(NotImplementedError) as exc_info:
-            entry.build(None, {})
-        msg = str(exc_info.value)
-        assert name in msg, f"stub message for {name!r} lacks its own name"
-        assert "phase" in msg.lower() or "blocked" in msg.lower(), (
-            f"stub message for {name!r} doesn't mention phase/blocker"
+def _spherical_bundle():
+    """A minimal spherical-cap bundle for the spherical model entries."""
+    from somax._src.cli.scenarios._types import (
+        Constants,
+        ForcingFields,
+        Geometry,
+        InitialConditionSpec,
+        ScenarioBundle,
+    )
+
+    return ScenarioBundle(
+        name="test_spherical_cap",
+        geometry=Geometry(
+            kind="spherical_cap",
+            nx=16,
+            ny=8,
+            lon_bounds=(0.0, 360.0),
+            lat_bounds=(-70.0, -40.0),
+        ),
+        constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+        forcing=ForcingFields(),
+        initial_condition=InitialConditionSpec(type="at_rest"),
+    )
+
+
+class TestNothingIsStubbed:
+    def test_no_model_is_still_a_stub(self):
+        """#73 was the last one; the list is kept so re-stubbing is loud."""
+        assert not _STUB_MODELS
+
+    @pytest.mark.parametrize("name", sorted(_SPHERICAL_MODELS))
+    def test_spherical_models_build(self, name):
+        """They used to raise NotImplementedError; now they build.
+
+        The bundle is constructed here rather than taken from the
+        ``southern_ocean`` scenario, which is still stubbed on the
+        scenario side (#79). This keeps the model entry testable
+        without waiting for it.
+        """
+        built = MODELS[name].build(_spherical_bundle(), {})
+        assert built.model is not None
+        assert built.state0 is not None
+
+    @pytest.mark.parametrize("name", sorted(_SPHERICAL_MODELS))
+    def test_spherical_models_reject_a_cartesian_geometry(self, name):
+        """Without lon/lat bounds there is no sphere to build on."""
+        from somax._src.cli.scenarios import SCENARIOS
+
+        bundle = SCENARIOS["double_gyre"].build(
+            {
+                "grid": {"nx": 8, "ny": 8, "Lx": 1.0e6, "Ly": 1.0e6},
+                "initial_condition": {"type": "at_rest"},
+            }
         )
+        with pytest.raises(ValueError, match="lon_bounds"):
+            MODELS[name].build(bundle, {})
 
     @pytest.mark.parametrize("name", sorted(_PHASE3_MODELS))
     def test_phase3_models_are_not_stubs(self, name):
@@ -281,3 +327,348 @@ class TestBuildSignatureIsUniform:
         assert len(sig.parameters) == 2, (
             f"{name!r}.build should take (bundle, params) — two args"
         )
+
+
+class TestSphericalAdaptersHonourTheConfig:
+    """The spherical entries dropped several configured values."""
+
+    def bundle(self, *, mask=None, g=9.81):
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        return ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+                mask=mask,
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11, g=g),
+            forcing=ForcingFields(),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+        )
+
+    def test_scenario_gravity_reaches_the_model(self):
+        built = MODELS["spherical_swm"].build(self.bundle(g=3.71), {})
+        assert float(built.model.consts.gravity) == pytest.approx(3.71)
+
+    def test_the_default_gravity_is_unchanged(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert float(built.model.consts.gravity) == pytest.approx(9.81)
+
+    def test_depth_comes_from_model_params(self):
+        """``ModelSpec.stratification`` is empty for a single layer."""
+        built = MODELS["spherical_swm"].build(self.bundle(), {"params": {"H0": 250.0}})
+        assert float(built.model.consts.H0) == pytest.approx(250.0)
+
+    def test_the_initial_state_uses_that_depth(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {"params": {"H0": 250.0}})
+        assert float(jnp.max(built.state0.h)) == pytest.approx(250.0)
+
+    def test_a_stratification_block_still_works(self):
+        built = MODELS["spherical_swm"].build(
+            self.bundle(), {"stratification": {"H0": 400.0}}
+        )
+        assert float(built.model.consts.H0) == pytest.approx(400.0)
+
+    def test_the_advection_method_is_forwarded(self):
+        built = MODELS["spherical_swm"].build(
+            self.bundle(), {"params": {"method": "upwind3"}}
+        )
+        assert built.model.method == "upwind3"
+
+    @pytest.mark.parametrize(
+        ("key", "value"), [("cg_tol", 1e-8), ("cg_max_steps", 123)]
+    )
+    def test_the_qg_solver_knobs_are_forwarded(self, key, value):
+        built = MODELS["spherical_qg"].build(self.bundle(), {"params": {key: value}})
+        assert getattr(built.model, key) == value
+
+    def test_a_raw_scenario_mask_is_converted(self):
+        """``Geometry.mask`` is a bare array; the operators want Mask2D."""
+        import numpy as np
+        from finitevolx import Mask2D
+
+        wet = np.ones((8, 16), dtype=float)
+        wet[2:4, 3:6] = 0.0
+        built = MODELS["spherical_swm"].build(self.bundle(mask=jnp.asarray(wet)), {})
+        assert isinstance(built.model.mask, Mask2D)
+
+    def test_the_converted_mask_is_ghost_padded(self):
+        import numpy as np
+
+        wet = np.ones((8, 16), dtype=float)
+        wet[2:4, 3:6] = 0.0
+        built = MODELS["spherical_swm"].build(self.bundle(mask=jnp.asarray(wet)), {})
+        assert built.model.mask.h.shape == (
+            built.model.grid.Ny,
+            built.model.grid.Nx,
+        )
+
+    def test_a_masked_model_still_evaluates(self):
+        """The failure the conversion prevents: operators read mask.u/.v."""
+        import numpy as np
+
+        from somax.models import SphericalSWMState
+
+        wet = np.ones((8, 16), dtype=float)
+        wet[2:4, 3:6] = 0.0
+        built = MODELS["spherical_swm"].build(self.bundle(mask=jnp.asarray(wet)), {})
+        model = built.model
+        tendency = model.vector_field(0.0, built.state0)
+        assert isinstance(tendency, SphericalSWMState)
+        assert np.isfinite(np.asarray(tendency.h)).all()
+
+    def test_no_mask_is_still_allowed(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert built.model.mask is None
+
+
+class TestCliStubListMatchesTheRegistry:
+    """``list-models`` has its own stub set; it must not go stale."""
+
+    def test_nothing_is_tagged_stub_any_more(self):
+        from somax._src.cli.app import _STUB_MODELS as cli_stubs
+
+        assert cli_stubs == frozenset()
+
+    def test_the_two_lists_agree(self):
+        from somax._src.cli.app import _STUB_MODELS as cli_stubs
+
+        assert set(cli_stubs) == _STUB_MODELS
+
+
+class TestSphericalAdaptersConsumeScenarioForcing:
+    """A supplied forcing field must actually reach the model.
+
+    Reading only the scalar ``forcing_params`` left a scenario that
+    supplies its own fields running on the default analytic pattern —
+    usually at zero amplitude, so unforced.
+    """
+
+    def bundle(self, tau_x=None, tau_y=None):
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        return ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+            forcing=ForcingFields(tau_x=tau_x, tau_y=tau_y),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+        )
+
+    #: The *physical* T-grid, as ``ForcingFields`` is documented. The
+    #: model's state is ghosted, ``(ny + 2, nx + 2)``; handing this
+    #: test the ghosted shape directly would conceal the padding.
+    PHYSICAL = (8, 16)
+    GHOSTED = (10, 18)
+
+    def pattern(self, shape=None):
+        import numpy as np
+
+        return jnp.asarray(np.full(shape or self.PHYSICAL, 0.25))
+
+    def test_the_swm_uses_a_supplied_zonal_stress(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.pattern()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_stress_x), 0.25)
+
+    def test_the_swm_uses_a_supplied_meridional_stress(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_y=self.pattern()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_stress_y), 0.25)
+
+    def test_the_analytic_profile_is_still_the_default(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert float(np.abs(np.asarray(built.model.wind_stress_x)).max()) > 0.0
+        assert not np.allclose(np.asarray(built.model.wind_stress_x), 0.25)
+
+    def test_the_qg_uses_a_supplied_curl(self):
+        built = MODELS["spherical_qg"].build(self.bundle(tau_x=self.pattern()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_forcing), 0.25)
+
+    def test_the_qg_analytic_profile_is_still_the_default(self):
+        built = MODELS["spherical_qg"].build(self.bundle(), {})
+        assert not np.allclose(np.asarray(built.model.wind_forcing), 0.25)
+
+
+class TestSphericalInitialStateRespectsTheMask:
+    """Filling ``h`` with ``H0`` everywhere leaves water over land.
+
+    The masked operators never touch those cells, so the value persists
+    into the saved states and into ``diagnose``, where it counts
+    towards mass and potential energy.
+    """
+
+    def built(self, masked):
+        import numpy as np
+
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        mask = None
+        if masked:
+            wet = np.ones((8, 16), dtype=float)
+            wet[2:4, 3:6] = 0.0
+            mask = jnp.asarray(wet)
+        bundle = ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+                mask=mask,
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+            forcing=ForcingFields(),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+        )
+        return MODELS["spherical_swm"].build(bundle, {})
+
+    def test_dry_cells_start_dry(self):
+        built = self.built(masked=True)
+        dry = np.asarray(built.model.mask.h) == 0.0
+        assert dry.any()
+        np.testing.assert_allclose(np.asarray(built.state0.h)[dry], 0.0)
+
+    def test_wet_cells_start_at_the_configured_depth(self):
+        built = self.built(masked=True)
+        wet = np.asarray(built.model.mask.h) != 0.0
+        np.testing.assert_allclose(
+            np.asarray(built.state0.h)[wet], float(built.model.consts.H0)
+        )
+
+    def test_an_unmasked_scenario_is_filled_everywhere(self):
+        built = self.built(masked=False)
+        np.testing.assert_allclose(
+            np.asarray(built.state0.h), float(built.model.consts.H0)
+        )
+
+    def test_the_mass_diagnostic_excludes_land(self):
+        masked = self.built(masked=True)
+        unmasked = self.built(masked=False)
+        assert float(masked.model.diagnose(masked.state0).mass) < float(
+            unmasked.model.diagnose(unmasked.state0).mass
+        )
+
+
+class TestSphericalForcingIsPutOnTheModelGrid:
+    """``ForcingFields`` are physical; the model's state is ghosted.
+
+    A field passed through unpadded fails on the shape as soon as it
+    is added to a tendency, and a supplied field multiplied by the
+    analytic default amplitude of zero leaves the run unforced.
+    """
+
+    PHYSICAL = (8, 16)
+    GHOSTED = (10, 18)
+
+    def bundle(self, *, tau_x=None, tau_y=None, forcing_params=None):
+        from somax._src.cli.scenarios._types import (
+            Constants,
+            ForcingFields,
+            Geometry,
+            InitialConditionSpec,
+            ScenarioBundle,
+        )
+
+        kwargs = {}
+        if forcing_params is not None:
+            kwargs["forcing_params"] = forcing_params
+        return ScenarioBundle(
+            name="test_sphere",
+            geometry=Geometry(
+                kind="spherical_cap",
+                nx=16,
+                ny=8,
+                lon_bounds=(0.0, 360.0),
+                lat_bounds=(-70.0, -40.0),
+            ),
+            constants=Constants(f0=-1.2e-4, beta=1.0e-11),
+            forcing=ForcingFields(tau_x=tau_x, tau_y=tau_y),
+            initial_condition=InitialConditionSpec(type="at_rest"),
+            **kwargs,
+        )
+
+    def physical(self, value=0.25):
+        return jnp.asarray(np.full(self.PHYSICAL, value))
+
+    def test_a_physical_field_is_padded_to_the_state_shape(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        assert np.asarray(built.model.wind_stress_x).shape == self.GHOSTED
+
+    def test_the_padded_field_keeps_its_values(self):
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        np.testing.assert_allclose(np.asarray(built.model.wind_stress_x), 0.25)
+
+    def test_the_padded_forcing_can_be_added_to_a_tendency(self):
+        """The failure this prevents: a shape error on the first step."""
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        tendency = built.model.vector_field(0.0, built.state0)
+        assert np.asarray(tendency.u).shape == self.GHOSTED
+
+    def test_an_already_ghosted_field_is_left_alone(self):
+        ghosted = jnp.asarray(np.full(self.GHOSTED, 0.25))
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=ghosted), {})
+        assert np.asarray(built.model.wind_stress_x).shape == self.GHOSTED
+
+    def test_a_wrongly_shaped_field_is_rejected(self):
+        odd = jnp.asarray(np.zeros((5, 5)))
+        with pytest.raises(ValueError, match="expected the physical grid"):
+            MODELS["spherical_swm"].build(self.bundle(tau_x=odd), {})
+
+    def test_a_supplied_field_is_not_scaled_away(self):
+        """An empty ``forcing_params`` used to mean amplitude zero."""
+        built = MODELS["spherical_swm"].build(self.bundle(tau_x=self.physical()), {})
+        assert float(built.model.params.wind_amplitude) == pytest.approx(1.0)
+
+    def test_an_explicit_amplitude_still_wins(self):
+        built = MODELS["spherical_swm"].build(
+            self.bundle(tau_x=self.physical(), forcing_params={"wind_amplitude": 3.0}),
+            {},
+        )
+        assert float(built.model.params.wind_amplitude) == pytest.approx(3.0)
+
+    def test_the_analytic_default_is_still_zero_without_fields(self):
+        built = MODELS["spherical_swm"].build(self.bundle(), {})
+        assert float(built.model.params.wind_amplitude) == pytest.approx(0.0)
+
+    def test_the_qg_curl_is_padded_too(self):
+        built = MODELS["spherical_qg"].build(self.bundle(tau_x=self.physical()), {})
+        assert np.asarray(built.model.wind_forcing).shape == self.GHOSTED
+
+    def test_the_qg_rejects_a_meridional_stress(self):
+        """It advances a vorticity tendency; there is no second slot."""
+        with pytest.raises(ValueError, match="no use for 'tau_y'"):
+            MODELS["spherical_qg"].build(self.bundle(tau_y=self.physical()), {})
+
+    def test_the_qg_no_longer_advertises_tau_y(self):
+        assert MODELS["spherical_qg"].supports.forcing == ("tau_x",)
+
+    def test_the_swm_still_advertises_both(self):
+        assert MODELS["spherical_swm"].supports.forcing == ("tau_x", "tau_y")

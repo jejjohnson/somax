@@ -1,3 +1,17 @@
+from somax._src.core.basis import (
+    BasisForcing,
+    ConstantInTime,
+    ForcingTerm,
+    FourierInTime,
+    SpatialBasis,
+    TemporalBasis,
+    TransformedForcing,
+    VectorBasisForcing,
+    VectorSpatialBasis,
+    add_to,
+    add_vector_to,
+    control_filter,
+)
 from somax._src.core.checkpoint import SimulationCheckpointer
 from somax._src.core.forcing import (
     ConstantForcing,
@@ -5,6 +19,23 @@ from somax._src.core.forcing import (
     InterpolatedForcing,
     NoForcing,
     SeasonalWindForcing,
+)
+from somax._src.core.forcing_bank import (
+    GaussianWindowsInTime,
+    geostrophic_currents,
+    matern_spectral_density,
+    spatial_from_divfree,
+    spatial_from_eof,
+    spatial_from_fourier,
+    spatial_from_gabor,
+    spatial_from_graph_laplacian,
+    spatial_from_rbf,
+    spatial_from_spherical_rbf,
+    spatial_from_wavelet,
+    ssh_geostrophic,
+    sss_coastal,
+    sst_frontal,
+    tile_in_time,
 )
 from somax._src.core.helmholtz import (
     DirichletHelmholtzCache,
@@ -14,6 +45,8 @@ from somax._src.core.helmholtz import (
     PeriodicHelmholtzCache,
 )
 from somax._src.core.model import SomaxModel, TermModel
+from somax._src.core.scaled import ScaledModel
+from somax._src.core.scales import Scales
 from somax._src.core.terms import (
     Compose,
     Scaled,
@@ -25,16 +58,35 @@ from somax._src.core.terms import (
     implicit,
     partition,
 )
-from somax._src.core.transforms import ModalTransform, StratificationProfile
-from somax._src.core.types import Diagnostics, Params, PhysConsts, State
+from somax._src.core.transforms import (
+    ModalTransform,
+    StateAffine,
+    StratificationProfile,
+)
+from somax._src.core.types import (
+    Diagnostics,
+    Params,
+    PhysConsts,
+    State,
+    as_parameter,
+    frozen,
+    interval,
+    positive,
+    trainable_mask,
+)
 
 
 __all__ = [
+    "BasisForcing",
     "Compose",
     "ConstantForcing",
+    "ConstantInTime",
     "Diagnostics",
     "DirichletHelmholtzCache",
     "ForcingProtocol",
+    "ForcingTerm",
+    "FourierInTime",
+    "GaussianWindowsInTime",
     "HelmholtzCache",
     "InterpolatedForcing",
     "ModalTransform",
@@ -45,17 +97,47 @@ __all__ = [
     "PeriodicHelmholtzCache",
     "PhysConsts",
     "Scaled",
+    "ScaledModel",
+    "Scales",
     "SeasonalWindForcing",
     "SimulationCheckpointer",
     "SomaxModel",
+    "SpatialBasis",
     "State",
+    "StateAffine",
     "StratificationProfile",
     "Sum",
+    "TemporalBasis",
     "Term",
     "TermFn",
     "TermModel",
+    "TransformedForcing",
+    "VectorBasisForcing",
+    "VectorSpatialBasis",
+    "add_to",
+    "add_vector_to",
+    "as_parameter",
     "build_diffrax_terms",
+    "control_filter",
     "explicit",
+    "frozen",
+    "geostrophic_currents",
     "implicit",
+    "interval",
+    "matern_spectral_density",
     "partition",
+    "positive",
+    "spatial_from_divfree",
+    "spatial_from_eof",
+    "spatial_from_fourier",
+    "spatial_from_gabor",
+    "spatial_from_graph_laplacian",
+    "spatial_from_rbf",
+    "spatial_from_spherical_rbf",
+    "spatial_from_wavelet",
+    "ssh_geostrophic",
+    "sss_coastal",
+    "sst_frontal",
+    "tile_in_time",
+    "trainable_mask",
 ]

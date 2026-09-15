@@ -16,12 +16,12 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --group dev --group sim --group da
+        run: uv sync --group dev --group sim --group da --extra flows
       - name: Run fast tests with coverage
         # Slow + integration tests (grad-through, somax-sim end-to-end)
         # are excluded here and run in the manual `full-tests` workflow.
@@ -34,7 +34,7 @@ jobs:
           path: coverage.xml
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
