@@ -83,11 +83,13 @@ spatial constants exactly.
 
 ```python
 c_phys = c_area / self.area
-c_flux_y = area_y * self.h_flux_y(c_phys, V_surf[..., 1:-1])     # WENO upwind at faces
+c_flux_y = area_y * self.h_flux_y(c_phys, V_surf[..., 1:-1])  # WENO upwind at faces
 c_flux_x = area_x * self.h_flux_x(c_phys, U_surf[..., 1:-1, :])
-dt_c_fluxdiv = -div_nofluxbc(c_flux_x, c_flux_y)                 # flux-div form (has spurious term)
-vel_div_area = div_nofluxbc(area_x*U_surf[...,1:-1,:], area_y*V_surf[...,1:-1])
-return (dt_c_fluxdiv + c_phys*vel_div_area) * self.masks.h       # cancel c·div(u) → pure advection
+dt_c_fluxdiv = -div_nofluxbc(c_flux_x, c_flux_y)  # flux-div form (has spurious term)
+vel_div_area = div_nofluxbc(area_x * U_surf[..., 1:-1, :], area_y * V_surf[..., 1:-1])
+return (
+    dt_c_fluxdiv + c_phys * vel_div_area
+) * self.masks.h  # cancel c·div(u) → pure advection
 ```
 
 Two more notes MASSH bakes in and somax should replicate:
@@ -203,9 +205,12 @@ A QG variant (`tracer_qg`, wrapping `multilayer_qg` / `barotropic_qg`) can **ski
 
 ```python
 from somax.models import TracerSWM
+
 model = TracerSWM.create(nx=128, ny=128, n_trac=2, diff_coef_trac=100.0)  # SST, SSS
 # state0 built via the registry's _build, or constructed directly as TracerSWMState(...)
-sol = model.integrate(state0, t0=0.0, t1=5*86400.0, dt=300.0)   # diffrax; AD-differentiable in c0
+sol = model.integrate(
+    state0, t0=0.0, t1=5 * 86400.0, dt=300.0
+)  # diffrax; AD-differentiable in c0
 # or: state1 = model.step(state0, dt)
 ```
 
@@ -273,15 +278,19 @@ not a new model written from scratch.
 ```python
 # somax/_src/core/forcing_bank.py — alongside ssh_geostrophic / sss_coastal
 def tidal_constituents(
-    spatial: SpatialBasis,                 # a_w / b_w patterns as dictionary columns
-    omegas: tuple[float, ...],             # M2, S2, K1, ... [rad/s]
+    spatial: SpatialBasis,  # a_w / b_w patterns as dictionary columns
+    omegas: tuple[float, ...],  # M2, S2, K1, ... [rad/s]
 ) -> BasisForcing:
     """Sum_w Re[(a_w + i b_w) e^{i w t}] as a BasisForcing: FourierInTime with
     phases (0, pi/2) per constituent, tiled against ``spatial`` via tile_in_time."""
 
+
 # a registry entry mirroring linear_swm, attaching the forcing with ForcingTerm:
 INTERNAL_TIDE_SWM = ModelEntry(
-    name="internal_tide_swm", family="swm", layers=1, coordinates="cartesian",
+    name="internal_tide_swm",
+    family="swm",
+    layers=1,
+    coordinates="cartesian",
     supports=SupportFlags(masks=True, spherical=False, forcing=("tidal",)),
     build=_build,
 )
@@ -347,10 +356,12 @@ def step_tgl(model, state, dstate, dt):
     _, dy = jax.jvp(lambda s: model.step(s, dt), (state,), (dstate,))
     return dy
 
+
 def step_adj(model, state, cotangent, dt):
     """Adjoint: jax.vjp of the model's diffrax step applied to a cotangent."""
     _, vjp = jax.vjp(lambda s: model.step(s, dt), state)
     return vjp(cotangent)[0]
+
 
 def adjoint_test(model, state, dt, *, key, scale=1e-4, atol=1e-6) -> float:
     """Verify <M' dx, y> == <dx, M* y> on random pytree perturbations.
@@ -378,8 +389,9 @@ the usual reverse-mode cost.
 
 ```python
 from somax.models import adjoint_test, step_adj
+
 res = adjoint_test(model, state0, dt, key=jax.random.PRNGKey(0))
-assert res < 1e-6                                  # gate before running 4DVar
+assert res < 1e-6  # gate before running 4DVar
 dstate_T = step_adj(model, state0, cotangent, dt)  # gradient seed
 ```
 
