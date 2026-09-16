@@ -302,10 +302,11 @@ Precomputed layer-to-mode and mode-to-layer transforms.
 :class: dropdown
 
 ```text
-Computed from physical parameters (H, g_prime, f0) via
-eigendecomposition of the layer coupling matrix A (delegated
-to ``finitevolx.build_coupling_matrix`` and
-``finitevolx.decompose_vertical_modes``).
+Computed from physical parameters (H, g_prime, f0) via the
+eigendecomposition of the layer coupling matrix A (built by
+``finitevolx.build_coupling_matrix``). A is non-symmetric for unequal
+layer thicknesses, so it is diagonalized through its symmetric similarity
+(see :meth:`from_physics`) rather than with a symmetric eigensolver.
 
 Attributes:
     Cl2m: Layer-to-mode projection matrix.
