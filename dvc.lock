@@ -5,26 +5,38 @@ stages:
     deps:
     - path: configs/_authoring
       hash: md5
-      md5: 8a3b12da0e6162ad598c8850d84673ba.dir
-      size: 13644
-      nfiles: 7
+      md5: 06c37264b84c2f86f11eb2ab703b3e30.dir
+      size: 26684
+      nfiles: 10
     - path: scripts/build_configs.py
       hash: md5
-      md5: 4f403bb4db845a3ddb162eb45675ce5a
-      size: 2071
+      md5: 319993a724528e6395b2a646a8ca2585
+      size: 2388
     outs:
     - path: configs/simulation/doublegyre_bc_qg.yaml
       hash: md5
       md5: 3041995fae748fac7558b743fcee88a4
       size: 882
+    - path: configs/simulation/doublegyre_bc_qg_hires.yaml
+      hash: md5
+      md5: 2d0e698e2bf700243c03e023af3ad4f2
+      size: 883
     - path: configs/simulation/doublegyre_bt_qg.yaml
       hash: md5
       md5: b75ef8ee788677e6587e485755c92d88
       size: 933
+    - path: configs/simulation/doublegyre_bt_qg_hires.yaml
+      hash: md5
+      md5: 2a204bb8be0e9215fd22dd9191d5ebe0
+      size: 940
     - path: configs/simulation/doublegyre_bt_qg_nondim.yaml
       hash: md5
       md5: 88d3a002652fd9ba1ab2752a618e2e35
       size: 791
+    - path: configs/simulation/doublegyre_swm_hires.yaml
+      hash: md5
+      md5: 316cc3768f1a7520b9d4203f3da1d51a
+      size: 989
     - path: configs/simulation/spinup_bc_qg.yaml
       hash: md5
       md5: 1cca9e0453d07a780c2602d8426b5012
