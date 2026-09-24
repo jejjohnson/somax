@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.15](https://github.com/jejjohnson/somax/compare/somax-v0.0.14...somax-v0.0.15) (2026-09-18)
+
+
+### Features
+
+* **configs:** add 256² double-gyre baselines and fix the multilayer modal inversion ([#158](https://github.com/jejjohnson/somax/issues/158)) ([f63aa73](https://github.com/jejjohnson/somax/commit/f63aa738d8786210e4391d9e38a649c525113313))
+
+
+### Documentation
+
+* **notes:** add fact-checked MASSH gap-analysis note ([#142](https://github.com/jejjohnson/somax/issues/142)) ([efa5bbb](https://github.com/jejjohnson/somax/commit/efa5bbb37daa46cdcb654eb79603c16ad89cf175))
+
 ## [0.0.14](https://github.com/jejjohnson/somax/compare/somax-v0.0.13...somax-v0.0.14) (2026-09-12)
 
 
