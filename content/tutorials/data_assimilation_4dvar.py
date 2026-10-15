@@ -36,10 +36,10 @@
 # 3. How the 4DVar analysis pulls a poor background toward the truth
 #
 # ```{note}
-# This tutorial needs the optional `da` dependency group, which provides
+# This tutorial needs the optional `da` extra, which provides
 # `vardax` and `gaussx`:
 #
-#     uv sync --group da
+#     uv sync --extra da
 # ```
 
 # %% [markdown]
