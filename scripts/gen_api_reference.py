@@ -17,7 +17,7 @@ a documentation artifact, not a build-time step), so regenerate and commit when
 the public API changes. A CI smoke test (``tests/test_api_reference.py``)
 asserts the committed page is in sync with the current public API.
 
-The optional ``somax.da`` surface (which needs the ``da`` dependency group) is
+The optional ``somax.da`` surface (which needs the ``da`` extra) is
 documented from its ``__all__`` without importing it, so the page builds
 whether or not ``filterax`` / ``vardax`` are installed.
 """
@@ -90,16 +90,17 @@ SECTIONS: list[tuple[str, str, str]] = [
         "somax.da",
         "Data Assimilation",
         "Adapters wiring somax models into the filterax / vardax DA stack "
-        "(requires the optional ``da`` dependency group).",
+        "(requires the optional ``da`` extra).",
     ),
 ]
 
-# Modules that may be absent in a minimal install (optional dependency
-# groups). They are documented from their ``__all__`` parsed statically from
-# source, so the page generates whether or not the deps are installed.
+# Modules that may be absent in a minimal install: (source, name, how it is
+# installed — a dependency group or an extra). They are documented from their
+# ``__all__`` parsed statically from source, so the page generates whether or
+# not the deps are installed.
 _OPTIONAL_MODULES = {
-    "somax.io": ("somax/io.py", "sim"),
-    "somax.da": ("somax/da.py", "da"),
+    "somax.io": ("somax/io.py", "sim", "group"),
+    "somax.da": ("somax/da.py", "da", "extra"),
 }
 
 # Suffixes that mark a model's data companions — listed compactly rather than
@@ -200,15 +201,16 @@ def _render_optional_listing(module_name: str) -> list[str]:
 
     The names are read **statically from source**, never by importing the
     module, so the generated page is byte-identical regardless of whether the
-    optional dependency (the ``sim`` / ``da`` group) happens to be installed
+    optional dependency (the ``sim`` group, the ``da`` extra) happens to be installed
     in the environment running the generator. (Importing when available and
     falling back otherwise would make the output env-dependent and break the
     committed-page sync test across machines / CI.)
     """
-    rel_path, group = _OPTIONAL_MODULES[module_name]
+    rel_path, dep, how = _OPTIONAL_MODULES[module_name]
+    kind = "dependency group" if how == "group" else "extra"
     lines = [
         f"These symbols live in `{module_name}` and require the optional "
-        f"`{group}` dependency group (`uv sync --group {group}`):",
+        f"`{dep}` {kind} (`uv sync --{how} {dep}`):",
         "",
     ]
     for name in sorted(_all_from_source(rel_path)):

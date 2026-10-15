@@ -24,7 +24,7 @@ autonomous models; ``t0`` sets the (single) window start, not a per-substep
 clock.
 
 Importing this module requires the ``da`` dependency group (``uv sync
---group da``), which provides ``vardax``.
+--extra da``), which provides ``vardax``.
 """
 
 from __future__ import annotations

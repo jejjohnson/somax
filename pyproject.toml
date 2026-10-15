@@ -58,6 +58,16 @@ somax-sim = "somax._src.cli.app:main"
 flows = [
     "flowjax",
 ]
+da = [
+    # Data-assimilation integration (Phase 4). Pre-alpha and git-pinned (no
+    # releases yet). filterax (4a) drives ensemble filters; vardax (4b) drives
+    # variational 4DVar. Both pull gaussx transitively (see the gaussx override
+    # under [tool.uv]). Required by ``somax.da``, which imports them at
+    # module level, so they are an extra, not a dependency group; install with
+    # ``uv sync --extra da``.
+    "filterax @ git+https://github.com/jejjohnson/filterax@28c1070",
+    "vardax @ git+https://github.com/jejjohnson/vardax@a00b1ae",
+]
 
 [dependency-groups]
 dev = [
@@ -71,15 +81,6 @@ lint = [
 ]
 typecheck = [
     "ty==0.0.49",
-]
-da = [
-    # Data-assimilation integration (Phase 4). Pre-alpha and git-pinned (no
-    # releases yet). filterax (4a) drives ensemble filters; vardax (4b) drives
-    # variational 4DVar. Both pull gaussx transitively (see the gaussx override
-    # under [tool.uv]). Required by ``somax.da``; install with
-    # ``uv sync --group da``.
-    "filterax @ git+https://github.com/jejjohnson/filterax@28c1070",
-    "vardax @ git+https://github.com/jejjohnson/vardax@a00b1ae",
 ]
 sim = [
     "hydra-core>=1.3.3",

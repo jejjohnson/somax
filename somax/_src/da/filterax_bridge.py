@@ -6,7 +6,7 @@ with ``eqx.filter_vmap``), whereas a somax model advances a *pytree* state
 with ``step(state, dt, *, t0=...)``. :class:`SomaxDynamics` bridges the two.
 
 Importing this module requires the ``da`` dependency group (``uv sync
---group da``), which provides ``filterax``.
+--extra da``), which provides ``filterax``.
 """
 
 from __future__ import annotations
