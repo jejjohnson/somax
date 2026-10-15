@@ -77,6 +77,10 @@ ALLOWED: dict[str, str] = {
     "xtremax": "xtremax",
 }
 
+#: imports left undeclared on purpose, kept in step with geostack:
+#: distribution -> reason
+UNDECLARED_OK: dict[str, str] = {}
+
 
 def _norm(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
@@ -157,7 +161,7 @@ def test_stack_imports_are_declared(dist: str) -> None:
     for f in _files(PACKAGES[dist][1]):
         for top, how, line in _imports(f):
             target = ALLOWED.get(top)
-            if target is None or target == dist or how == "typing":
+            if target in (None, dist) or how == "typing" or target in UNDECLARED_OK:
                 continue
             if target not in base | extras:
                 found.append(
