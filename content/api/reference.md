@@ -2984,7 +2984,7 @@ Returns:
 *function*
 
 ```python
-rollout_loss(model: 'Any', state0: 'PyTree', ref_traj: 'PyTree', *, dt: 'float', stride: 'int' = 1, loss: 'Callable[[PyTree, PyTree], Array]' = <function state_mse at 0x7fac436342c0>, t0: 'float' = 0.0, checkpoint: 'bool' = True) -> 'Array'
+rollout_loss(model: 'Any', state0: 'PyTree', ref_traj: 'PyTree', *, dt: 'float', stride: 'int' = 1, loss: 'Callable[[PyTree, PyTree], Array] | None' = None, t0: 'float' = 0.0, checkpoint: 'bool' = True) -> 'Array'
 ```
 
 Mean per-snapshot loss of a rollout against a reference trajectory.
@@ -3010,7 +3010,8 @@ Args:
         ``stride`` steps after s₀.
     dt: Step size.
     stride: Steps between reference snapshots (k).
-    loss: Per-snapshot loss l(state, ref_state); default `state_mse`.
+    loss: Per-snapshot loss l(state, ref_state); ``None`` is
+        `state_mse`.
     t0: Start time.
     checkpoint: Rematerialise each block on the backward pass.
 

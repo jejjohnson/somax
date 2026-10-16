@@ -115,7 +115,7 @@ def rollout_loss(
     *,
     dt: float,
     stride: int = 1,
-    loss: Callable[[PyTree, PyTree], Array] = state_mse,
+    loss: Callable[[PyTree, PyTree], Array] | None = None,
     t0: float = 0.0,
     checkpoint: bool = True,
 ) -> Array:
@@ -138,7 +138,8 @@ def rollout_loss(
             ``stride`` steps after s₀.
         dt: Step size.
         stride: Steps between reference snapshots (k).
-        loss: Per-snapshot loss l(state, ref_state); default `state_mse`.
+        loss: Per-snapshot loss l(state, ref_state); ``None`` is
+            `state_mse`.
         t0: Start time.
         checkpoint: Rematerialise each block on the backward pass.
 
@@ -161,4 +162,5 @@ def rollout_loss(
         t0=t0,
         checkpoint=checkpoint,
     )
-    return jnp.mean(jax.vmap(loss)(pred, ref_traj))
+    per_snapshot = state_mse if loss is None else loss
+    return jnp.mean(jax.vmap(per_snapshot)(pred, ref_traj))
