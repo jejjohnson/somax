@@ -61,6 +61,12 @@ SECTIONS: list[tuple[str, str, str]] = [
         "Bridge that exposes somax models as ``pipekit.Operator`` stages.",
     ),
     (
+        "somax.train",
+        "Training",
+        "Jit-native rollouts (one ``jax.lax.scan``) and the rollout loss for "
+        "training closures and estimating constants through a model.",
+    ),
+    (
         "somax.eval",
         "Evaluation Metrics",
         "Reference-free field diagnostics computed on a model's own grid.",
