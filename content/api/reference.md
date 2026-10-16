@@ -2844,6 +2844,43 @@ Args:
 ```
 ````
 
+### `OperatorTerm`
+
+*class*
+
+```python
+OperatorTerm(op: 'Any', inputs: Any, outputs: Any = None, kind_: 'Kind' = 'explicit') -> None
+```
+
+Lift a pipekit operator into the :class:`Term` algebra.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+``tendency = zeros_like(state)`` with ``op``'s result(s) written into
+``outputs``; fields not listed get zero tendency.
+
+Calling convention: a pipekit ``Graph`` is called with keywords
+(``graph(**{name: field})``, so ``inputs`` must name its inputs); any
+other operator positionally (``op(*fields)``, in ``inputs`` order).
+
+Result → fields:
+
+- an array: written to the single entry of ``outputs``;
+- a tuple / list: written to ``outputs`` in order (lengths must match);
+- a dict (e.g. a ``Graph``): written by key; ``outputs`` may be
+  ``None`` (every key is a state field) or a subset to keep.
+
+Args:
+    op: The operator (``JaxOperator``, ``Graph``, ``JaxModelOp``, …).
+    inputs: State field names fed to ``op``.
+    outputs: State field names the result is written to (see above).
+    kind_: IMEX label (``"explicit"`` or ``"implicit"``), so
+        :func:`~somax._src.core.terms.partition` routes the term.
+```
+````
+
 ### `SomaxModelOp`
 
 *class*

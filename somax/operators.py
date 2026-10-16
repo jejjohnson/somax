@@ -10,10 +10,12 @@ somax.operators`` pulls it in.
 
 from __future__ import annotations
 
+from somax._src.operator_term import OperatorTerm
 from somax._src.operators import Burgers2DOp, SomaxModelOp
 
 
 __all__ = [
     "Burgers2DOp",
+    "OperatorTerm",
     "SomaxModelOp",
 ]
