@@ -11,6 +11,7 @@ from __future__ import annotations
 import diffrax as dfx
 import equinox as eqx
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from somax._src.core.model import SomaxModel, TermModel
@@ -191,3 +192,91 @@ def test_grad_through_nu():
     grads = grad_fn(model)
     assert jnp.isfinite(grads.nu)
     assert grads.nu != 0.0
+
+
+# ----------------------------------------------------------------------
+# Differentiable physical constants (g, H0, f)
+# ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def x64():
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
+    try:
+        yield
+    finally:
+        jax.config.update("jax_enable_x64", False)
+
+
+def _with(model, *, g=None, H0=None, f_scale=None):
+    """``model`` with the gravity-wave constants / Coriolis field replaced."""
+    coriolis = next(t for t in model.terms.terms if isinstance(t, LinearSWMCoriolis))
+    if g is not None:
+        model = eqx.tree_at(lambda m: m.terms.terms[0].g, model, jnp.asarray(g))
+    if H0 is not None:
+        model = eqx.tree_at(lambda m: m.terms.terms[0].H0, model, jnp.asarray(H0))
+    if f_scale is not None:
+        model = eqx.tree_at(
+            lambda m: m.terms.terms[1].f_field, model, coriolis.f_field * f_scale
+        )
+    return model
+
+
+def test_constants_are_leaves_and_read_back():
+    _, term = _matched_models()
+    assert eqx.is_array(term.g) and eqx.is_array(term.H0)
+    assert float(term.g) == pytest.approx(9.81)
+    assert float(term.H0) == pytest.approx(100.0)
+    assert term.f_field.shape == (term.grid.Ny, term.grid.Nx)
+
+
+@pytest.mark.parametrize("name", ["g", "H0", "f"])
+def test_gradient_wrt_physical_constants_matches_finite_differences(x64, name):
+    _, model = _matched_models()
+    s0 = model.apply_boundary_conditions(_gaussian_bump(model))
+
+    def loss(m):
+        s = m.step(s0, 1800.0)
+        return jnp.sum(s.h**2) + jnp.sum(s.u**2) + jnp.sum(s.v**2)
+
+    grads = eqx.filter_grad(loss)(model)
+    if name == "g":
+        x0, ad = 9.81, grads.terms.terms[0].g
+
+        def perturbed(x):
+            return _with(model, g=x)
+    elif name == "H0":
+        x0, ad = 100.0, grads.terms.terms[0].H0
+
+        def perturbed(x):
+            return _with(model, H0=x)
+    else:  # d/dc J(c f) at c = 1, i.e. <dJ/df, f>
+        x0 = 1.0
+        ad = jnp.vdot(grads.terms.terms[1].f_field, model.terms.terms[1].f_field)
+
+        def perturbed(x):
+            return _with(model, f_scale=x)
+
+    eps = 1e-4 * abs(x0)
+    fd = (loss(perturbed(x0 + eps)) - loss(perturbed(x0 - eps))) / (2 * eps)
+    assert abs(float(fd)) > 0
+    np.testing.assert_allclose(ad, fd, rtol=1e-3)
+
+
+def test_changing_a_constant_does_not_retrace():
+    import jax
+
+    _, model = _matched_models()
+    s0 = model.apply_boundary_conditions(_gaussian_bump(model))
+    traces = []
+
+    @eqx.filter_jit
+    def step(m, s):
+        traces.append(1)
+        return m.step(s, 600.0)
+
+    jax.block_until_ready(step(model, s0))
+    jax.block_until_ready(step(_with(model, g=10.0, H0=80.0), s0))
+    assert len(traces) == 1

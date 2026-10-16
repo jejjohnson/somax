@@ -542,7 +542,7 @@ Attributes:
 *class*
 
 ```python
-SeasonalWindForcing(tau0: 'Array', omega: 'float', phase: 'float' = 0.0) -> None
+SeasonalWindForcing(tau0: 'Array', omega: Any, phase: Any = 0.0) -> None
 ```
 
 Sinusoidal wind forcing with learnable amplitude.
@@ -556,8 +556,8 @@ differentiable amplitude field visible to ``jax.grad``.
 
 Args:
     tau0: Learnable amplitude array (visible to ``jax.grad``).
-    omega: Angular frequency (static, e.g. ``2 * pi / T``).
-    phase: Phase offset in radians (static).
+    omega: Angular frequency, e.g. ``2 * pi / T`` (differentiable leaf).
+    phase: Phase offset in radians (differentiable leaf).
 ```
 ````
 

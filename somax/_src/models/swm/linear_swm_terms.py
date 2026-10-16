@@ -15,10 +15,12 @@ which compose into the RHS::
 
     rhs = gravity_wave + coriolis + nu * diffusion + (-kappa) * drag
 
-The differentiable parameters enter as
-:class:`~somax._src.core.terms.Scaled` coefficients (``nu`` on diffusion,
-``-kappa`` on drag), so they stay JAX leaves; ``g``/``H0``/``f`` are
-frozen constants baked into their kernels.
+Every physical parameter is a JAX leaf, so ``eqx.filter_grad`` reaches it:
+``nu`` and ``-kappa`` enter as :class:`~somax._src.core.terms.Scaled`
+coefficients, ``g`` and ``H0`` are array fields of the gravity-wave kernel,
+and the Coriolis field ``f(y)`` is an array field of the Coriolis kernel.
+Freeze any of them with ``jax.lax.stop_gradient`` or an ``eqx.partition``
+filter spec.
 
 Two of the four terms are stiff — the gravity-wave operator (fast surface
 waves) and the Laplacian diffusion — making this a richer IMEX showcase
@@ -58,15 +60,20 @@ class LinearSWMGravityWave(Term):
     ``dv/dt = -g * dh/dy``. The fast surface-wave operator; the natural
     candidate for the implicit stage of a semi-implicit scheme.
 
+    ``g`` and ``H0`` are array leaves (a Python float is converted on
+    construction, weakly typed so the tendency keeps the state's dtype), so
+    ``∂J/∂g`` and ``∂J/∂H0`` are available and changing their values does
+    not retrace a jitted step.
+
     Args:
         diff: finitevolx C-grid difference operator.
-        g: Gravitational acceleration (frozen).
-        H0: Mean layer depth (frozen).
+        g: Gravitational acceleration (differentiable leaf).
+        H0: Mean layer depth (differentiable leaf).
     """
 
     diff: Difference2D
-    g: float = eqx.field(static=True)
-    H0: float = eqx.field(static=True)
+    g: Array = eqx.field(converter=jnp.asarray)
+    H0: Array = eqx.field(converter=jnp.asarray)
 
     def __call__(
         self, t: float, state: LinearSW2DState, args: PyTree | None = None
@@ -203,6 +210,21 @@ class LinearSWM2DTermModel(TermModel):
         return LinearSW2DState(h=h, u=u, v=v)
 
     @property
+    def g(self) -> Array:
+        """Gravitational acceleration, read back from the gravity-wave kernel."""
+        return _kernel_of(self.terms, LinearSWMGravityWave).g
+
+    @property
+    def H0(self) -> Array:
+        """Mean layer depth, read back from the gravity-wave kernel."""
+        return _kernel_of(self.terms, LinearSWMGravityWave).H0
+
+    @property
+    def f_field(self) -> Array:
+        """Coriolis parameter field, read back from the Coriolis kernel."""
+        return _kernel_of(self.terms, LinearSWMCoriolis).f_field
+
+    @property
     def nu(self) -> Array:
         """Lateral viscosity, read back from the diffusion kernel's coeff."""
         return _coeff_of(self.terms, LinearSWMDiffusion)
@@ -279,6 +301,24 @@ class LinearSWM2DTermModel(TermModel):
             bc=bc,
         )
         return LinearSWM2DTermModel.from_model(base, imex=imex)
+
+
+def _kernel_of(root: Term, kernel_cls: type) -> Term:
+    """Return the first ``kernel_cls`` kernel among the summands of ``root``."""
+
+    def _find(term: Term) -> Term | None:
+        if isinstance(term, kernel_cls):
+            return term
+        if isinstance(term, Scaled | _Kinded):
+            return _find(term.term)
+        return None
+
+    summands = root.terms if isinstance(root, Sum) else (root,)
+    for summand in summands:
+        found = _find(summand)
+        if found is not None:
+            return found
+    raise ValueError(f"no {kernel_cls.__name__} kernel found in term tree")
 
 
 def _coeff_of(root: Term, kernel_cls: type) -> Array:
