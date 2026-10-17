@@ -196,9 +196,33 @@ sigma = grid.Nx * grid.dx / 12
 h0 = jnp.exp(-0.5 * (((X - cx) / sigma) ** 2 + ((Y - cy) / sigma) ** 2))
 state0 = LinearSW2DState(h=h0, u=jnp.zeros_like(h0), v=jnp.zeros_like(h0))
 
+# `Cycle` is a host-side Python loop: right for runs that inspect the state
+# between steps (the somax-sim runner does), wrong under jit, where it
+# unrolls every step. The jit-native twin is `somax.train.rollout` below.
 cycle = Cycle(step_op=op, n_steps=120, save_history=True, history_stride=20)
 final_state, _ = cycle(state0, None)
 print("steps recorded in history:", len(cycle.history))
+
+
+# %% [markdown]
+# ### The jit-native twin: `somax.train.rollout`
+#
+# For anything differentiated end to end (training a closure, estimating a
+# constant), step the model inside one `jax.lax.scan` instead. Compile time
+# stays flat in the number of steps, and `checkpoint=True` keeps the
+# backward pass's memory at O(n_steps / save_every + save_every).
+# `somax.train.rollout_loss` builds the training objective on top of it.
+
+# %%
+from somax.train import rollout
+
+
+traj = rollout(model, state0, dt=op.dt, n_steps=120, save_every=20)
+print("scan trajectory:", traj.h.shape)
+print(
+    "matches the Cycle's final state:",
+    bool(jnp.allclose(traj.h[-1], final_state.h, rtol=1e-5, atol=1e-8)),
+)
 
 
 # %%

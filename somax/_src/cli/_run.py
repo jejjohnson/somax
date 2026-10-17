@@ -1049,6 +1049,10 @@ def _chunked_integrate_with_diagnostics(
         snapshot_ordinal=0,
         save_states=[state0],
     )
+    # Host-side on purpose: a Python-loop Cycle lets monitors, logging,
+    # the non-finite abort and checkpoints run between jitted chunks. For
+    # anything differentiated end to end use somax.train.rollout (one
+    # jax.lax.scan), not a Cycle under jit (it unrolls n_steps times).
     cycle = Cycle(step_op=step, n_steps=n_diag_intervals)
 
     t_chunks_start = time.perf_counter()

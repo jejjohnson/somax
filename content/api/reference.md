@@ -2917,6 +2917,122 @@ Args:
 ```
 ````
 
+## Training
+
+Jit-native rollouts (one ``jax.lax.scan``) and the rollout loss for training closures and estimating constants through a model.
+
+### `ModelStep`
+
+*class*
+
+```python
+ModelStep(model: 'Any', dt: 'float') -> None
+```
+
+One model step as a carrier-only operator: ``(t, s) ↦ (t + Δt, step(s))``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+The model is a field, so every leaf of the model (term coefficients,
+physical constants, the weights of an ``OperatorTerm`` closure) is a
+leaf of the step and reachable by ``eqx.filter_grad``.
+
+Args:
+    model: A somax model (anything with ``step(state, dt, t0=...)``).
+    dt: Step size.
+```
+````
+
+### `rollout`
+
+*function*
+
+```python
+rollout(model: 'Any', state0: 'PyTree', *, dt: 'float', n_steps: 'int', save_every: 'int' = 1, include_initial: 'bool' = False, t0: 'float' = 0.0, checkpoint: 'bool' = False) -> 'PyTree'
+```
+
+Step ``model`` ``n_steps`` times in one ``jax.lax.scan``.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+``sₖ = stepᵏ(s₀)``, recorded every ``save_every`` steps.
+
+Args:
+    model: A somax model (``step(state, dt, t0=...)``).
+    state0: Initial state.
+    dt: Step size.
+    n_steps: Number of steps; a multiple of ``save_every``.
+    save_every: Record every ``save_every``-th state.
+    include_initial: Also record ``s₀`` first.
+    t0: Start time.
+    checkpoint: Rematerialise each ``save_every`` block on the backward
+        pass (memory O(n_steps / save_every + save_every) instead of
+        O(n_steps)).
+
+Returns:
+    The states, stacked along a new leading axis:
+    ``[n_steps // save_every (+1), ...]`` per leaf.
+```
+````
+
+### `rollout_loss`
+
+*function*
+
+```python
+rollout_loss(model: 'Any', state0: 'PyTree', ref_traj: 'PyTree', *, dt: 'float', stride: 'int' = 1, loss: 'Callable[[PyTree, PyTree], Array] | None' = None, t0: 'float' = 0.0, checkpoint: 'bool' = True) -> 'Array'
+```
+
+Mean per-snapshot loss of a rollout against a reference trajectory.
+
+````{admonition} Details
+:class: dropdown
+
+```text
+L(θ) = (1/T) ∑ₜ l(s_{tk}(θ), sʳᵉᶠₜ),  t = 1 … T,  k = ``stride``
+
+where s_{tk} = stepᵗᵏ(s₀) and ``ref_traj`` holds sʳᵉᶠ₁ … sʳᵉᶠ_T stacked
+on a leading axis (s₀ excluded). Differentiate it with
+``eqx.filter_grad(lambda m: rollout_loss(m, ...))(model)``.
+
+Observe the whole window, not only its end: a final-snapshot loss of a
+wave model has many local minima (a wave a full period ahead or behind
+matches as well), while a trajectory loss pins the phase.
+
+Args:
+    model: A somax model (``step(state, dt, t0=...)``).
+    state0: Initial state s₀.
+    ref_traj: Reference states ``[T, ...]`` per leaf, one every
+        ``stride`` steps after s₀.
+    dt: Step size.
+    stride: Steps between reference snapshots (k).
+    loss: Per-snapshot loss l(state, ref_state); ``None`` is
+        `state_mse`.
+    t0: Start time.
+    checkpoint: Rematerialise each block on the backward pass.
+
+Returns:
+    The scalar loss L.
+
+Raises:
+    ValueError: if ``ref_traj``'s leaves disagree on their length.
+```
+````
+
+### `state_mse`
+
+*function*
+
+```python
+state_mse(pred: 'PyTree', ref: 'PyTree') -> 'Array'
+```
+
+l(s, sʳᵉᶠ) = ∑_fields mean((s - sʳᵉᶠ)²) over the array leaves.
+
 ## Evaluation Metrics
 
 Reference-free field diagnostics computed on a model's own grid.
