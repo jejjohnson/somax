@@ -225,7 +225,9 @@ def qg_balance_residual(
     Args:
         model: The constructed barotropic QG model.
         state: A state carrying a 2-D PV field ``q``.
-        interior: Drop the one-cell ghost halo before reducing. Defaults True.
+        interior: Reduce over the inversion's unknowns only (the interior,
+            less the X-point wall row / column for ``"dst"`` / ``"dct"``).
+            Defaults True.
         eps: Small constant guarding the normalisation.
 
     Returns:
@@ -234,10 +236,22 @@ def qg_balance_residual(
     q = state.q
     psi = model._invert_pv(q)
     q_hat = model.diff.laplacian(psi)
-    trim = _INTERIOR if interior else (...,)
+    trim = _inversion_unknowns(model) if interior else (...,)
     resid = (q_hat - q)[trim]
     ref = q[trim]
     return jnp.linalg.norm(resid) / (jnp.linalg.norm(ref) + eps)
+
+
+def _inversion_unknowns(model: Any) -> tuple[slice, slice]:
+    """The cells a rectangular spectral inversion solves for.
+
+    finitevolX puts psi on X points: ``"dst"`` / ``"dct"`` solve on
+    ``[1:-2, 1:-2]`` with the wall on node ``N-2``, ``"fft"`` on
+    ``[1:-1, 1:-1]``. Only there does ``laplacian(invert(q)) == q`` hold.
+    """
+    if getattr(model, "poisson_bc", "dst") in ("dst", "dct"):
+        return (slice(1, -2), slice(1, -2))
+    return _INTERIOR
 
 
 def _is_fluid_state(state: State) -> bool:
