@@ -24,8 +24,8 @@ Shared bridge:
 - :func:`state_to_vector` / :func:`make_ensemble` convert somax pytree states
   to the flat vectors / ensembles both stacks expect.
 
-Importing this module requires the optional ``da`` dependency group
-(``uv sync --group da``), which provides ``filterax`` and ``vardax`` (and,
+Importing this module requires the optional ``da`` extra
+(``uv sync --extra da``), which provides ``filterax`` and ``vardax`` (and,
 transitively, ``gaussx``). It is kept out of ``somax``'s top-level
 ``__init__`` so plain ``import somax`` never needs the DA stack.
 """

@@ -3694,9 +3694,9 @@ These symbols live in `somax.io` and require the optional `sim` dependency group
 
 ## Data Assimilation
 
-Adapters wiring somax models into the filterax / vardax DA stack (requires the optional ``da`` dependency group).
+Adapters wiring somax models into the filterax / vardax DA stack (requires the optional ``da`` extra).
 
-These symbols live in `somax.da` and require the optional `da` dependency group (`uv sync --group da`):
+These symbols live in `somax.da` and require the optional `da` extra (`uv sync --extra da`):
 
 - `somax.da.SomaxDynamics`
 - `somax.da.SomaxForwardModel`

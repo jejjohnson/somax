@@ -29,10 +29,10 @@
 # 3. How the analysis tracks the truth far better than a free forecast
 #
 # ```{note}
-# This tutorial needs the optional `da` dependency group, which provides
+# This tutorial needs the optional `da` extra, which provides
 # `filterax` (and, transitively, `gaussx`):
 #
-#     uv sync --group da
+#     uv sync --extra da
 # ```
 
 # %% [markdown]

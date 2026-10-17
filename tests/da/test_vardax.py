@@ -9,7 +9,7 @@ The hard assertion uses the *non-advective* (linear) Lorenz-96 system: strong
 4DVar over the fully chaotic model is genuinely fragile inside the outer
 minimiser (a long rollout from a poor ``x_0`` can blow up), so the chaotic
 case is reserved for the docs tutorial under a fixed, vetted configuration.
-Requires the ``da`` dependency group; skipped otherwise.
+Requires the ``da`` extra; skipped otherwise.
 """
 
 from __future__ import annotations
