@@ -19,6 +19,7 @@ from jaxtyping import Array, Float, PyTree
 
 from somax._src.core.model import SomaxModel
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
+from somax._src.models._diagnostic_ops import fvx_ops, grid_spec, masked
 
 
 class LinearSW2DState(State):
@@ -163,14 +164,19 @@ class LinearShallowWater2D(SomaxModel):
         return LinearSW2DState(h=h, u=u, v=v)
 
     def diagnose(self, state: PyTree) -> LinearSW2DDiagnostics:
-        """Compute energy and relative vorticity."""
-        g = self.consts.gravity
-        H0 = self.consts.H0
+        """Compute energy and relative vorticity (finitevolX Tier-B ops).
+
+        E = ∑ (H0 KE + ½ g h²) ΔA with KE = ½(ū² + v̄²) at T-points; equal
+        to ½ ∑ (g h² + H0 (u² + v²)) ΔA once the ghost ring holds the
+        boundary condition (periodic or wall).
+        """
+        fp = fvx_ops()
+        G = grid_spec(self.grid)
         h, u, v = state.h, state.u, state.v
-        s = (slice(1, -1), slice(1, -1))
-        cell_area = self.grid.dx * self.grid.dy
-        energy = 0.5 * jnp.sum(g * h[s] ** 2 + H0 * (u[s] ** 2 + v[s] ** 2)) * cell_area
-        zeta = self.diff.curl(u, v)
+        ke = fp.KineticEnergy(grid=G)(u, v)  # T
+        ape = fp.AvailablePE(grid=G, g_prime=self.consts.gravity)(h)  # T
+        energy = fp.TotalEnergy(grid=G)(self.consts.H0 * ke, ape)
+        zeta = masked(self.mask, "X", fp.RelativeVorticity(grid=G)(u, v))
         return LinearSW2DDiagnostics(energy=energy, relative_vorticity=zeta)
 
     @staticmethod

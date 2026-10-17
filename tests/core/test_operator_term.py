@@ -309,3 +309,30 @@ def test_output_mapping_errors_are_explicit():
         OperatorTerm(op=Lambda(lambda u: {"w": u}), inputs=("u",), outputs=("u",))(
             0.0, s
         )
+
+
+def test_a_finitevolx_tier_b_graph_matches_gravity_plus_coriolis():
+    """The epic's target: finitevolx.pipekit ops wired as a Graph, one Term."""
+    import finitevolx.pipekit as fp
+
+    model = _model()
+    gravity, coriolis = _summands(model)
+    G = fp.as_grid_spec(model.grid)
+    g, H0 = float(gravity.g), float(gravity.H0)
+    h, u, v = Input("h"), Input("u"), Input("v")
+    cor = CoriolisOp(coriolis=coriolis.coriolis, f=coriolis.f_field)(u, v)
+    gx = fp.Difference(grid=G, axis="x", src="T", dst="U")(h)
+    gy = fp.Difference(grid=G, axis="y", src="T", dst="V")(h)
+    graph = Graph(
+        inputs={"h": h, "u": u, "v": v},
+        outputs={
+            "h": fp.LinComb(coeffs=(-H0,))(fp.Divergence(grid=G)(u, v)),
+            "u": fp.LinComb(coeffs=(-g, 1.0))(gx, fp.Pick(index=0)(cor)),
+            "v": fp.LinComb(coeffs=(-g, 1.0))(gy, fp.Pick(index=1)(cor)),
+        },
+    )
+    term = OperatorTerm(op=graph, inputs=("h", "u", "v"))
+    s = _state(model)
+    want = (gravity + coriolis)(0.0, s)
+    for x, y in zip(jax.tree.leaves(term(0.0, s)), jax.tree.leaves(want), strict=True):
+        np.testing.assert_allclose(x, y, rtol=1e-6, atol=1e-12)

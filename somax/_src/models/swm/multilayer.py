@@ -29,6 +29,7 @@ from somax._src.core.scales import Scales
 from somax._src.core.transforms import ModalTransform, StratificationProfile
 from somax._src.core.types import Diagnostics, Params, PhysConsts, State, as_parameter
 from somax._src.guards import guard_finite, guard_positive
+from somax._src.models._diagnostic_ops import fvx_ops, grid_spec, masked
 from somax._src.models._nondim import (
     burger_to_g_prime,
     reject_derived_kwargs,
@@ -271,30 +272,27 @@ class MultilayerShallowWater2D(SomaxModel):
 
     def diagnose(self, state: PyTree) -> MultilayerSW2DDiagnostics:
         """Compute energy, enstrophy, PV, vorticity, and KE per layer."""
+        # Tier-B ops take [nl, Ny, Nx] directly; the reductions keep the
+        # layer axis, so every quantity below is per layer.
+        fp = fvx_ops()
+        G = grid_spec(self.grid)
         h, u, v = state.h, state.u, state.v
-        g_prime = self.strat.g_prime
-        s = (slice(None), slice(1, -1), slice(1, -1))
-
-        ke = multilayer(kinetic_energy)(u, v)
-        zeta = multilayer(self.vorticity.relative_vorticity)(u, v)
-        q = multilayer(self.vorticity.potential_vorticity)(u, v, h, self.f_field_ml)
-        h_on_X = multilayer(self.interp.T_to_X)(h)
-
-        cell_area = self.grid.dx * self.grid.dy
-
-        # Energy per layer: KE + PE
-        ke_sum = jnp.sum(ke[s], axis=(-2, -1)) * cell_area
-        pe_sum = 0.5 * g_prime * jnp.sum(h[s] ** 2, axis=(-2, -1)) * cell_area
-        energy_per_layer = ke_sum + pe_sum
-
-        # Potential enstrophy per layer: 0.5 * q^2 * h
-        enstrophy_per_layer = (
-            0.5 * jnp.sum(q[s] ** 2 * h_on_X[s], axis=(-2, -1)) * cell_area
+        g_prime = jnp.asarray(self.strat.g_prime)[:, None, None]  # [nl, 1, 1]
+        integral = fp.DomainIntegral(grid=G)  # [nl, Ny, Nx] -> [nl]
+        ke = fp.KineticEnergy(grid=G)(u, v)
+        zeta = masked(self.mask, "X", fp.RelativeVorticity(grid=G)(u, v))
+        q = masked(
+            self.mask, "X", fp.PotentialVorticity(grid=G)(u, v, h, self.f_field_ml)
         )
-
+        h_on_X = masked(self.mask, "X", fp.Interp(grid=G, src="T", dst="X")(h))
+        # Energy per layer: KE + PE
+        ape = fp.AvailablePE(grid=G, g_prime=g_prime)(h)
+        energy_per_layer = fp.TotalEnergy(grid=G)(ke, ape)
+        # Potential enstrophy per layer: 0.5 * q^2 * h
+        enstrophy_per_layer = integral(0.5 * q**2 * h_on_X)
         # Mass/volume per layer (flux-form invariant) and the q^3 Casimir.
-        mass_per_layer = jnp.sum(h[s], axis=(-2, -1)) * cell_area
-        casimir_q3_per_layer = jnp.sum(q[s] ** 3 * h_on_X[s], axis=(-2, -1)) * cell_area
+        mass_per_layer = integral(h)
+        casimir_q3_per_layer = integral(q**3 * h_on_X)
 
         return MultilayerSW2DDiagnostics(
             energy=energy_per_layer,

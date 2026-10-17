@@ -3194,7 +3194,9 @@ PV field.
 Args:
     model: The constructed barotropic QG model.
     state: A state carrying a 2-D PV field ``q``.
-    interior: Drop the one-cell ghost halo before reducing. Defaults True.
+    interior: Reduce over the inversion's unknowns only (the interior,
+        less the X-point wall row / column for ``"dst"`` / ``"dct"``).
+        Defaults True.
     eps: Small constant guarding the normalisation.
 
 Returns:

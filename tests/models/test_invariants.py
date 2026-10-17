@@ -7,6 +7,7 @@ stay in the fast PR lane.
 from __future__ import annotations
 
 import jax.numpy as jnp
+import pytest
 
 from somax._src.models.qg.barotropic import BarotropicQG, BarotropicQGState
 from somax._src.models.swm.multilayer import (
@@ -60,7 +61,9 @@ class TestMultilayerInvariants:
         s = (slice(None), slice(1, -1), slice(1, -1))
         cell_area = model.grid.dx * model.grid.dy
         expected = float(jnp.sum(state.h[s]) * cell_area)
-        assert float(jnp.sum(diag.mass)) == jnp.asarray(expected)
+        # diagnose() integrates with finitevolX's area_sum, sum(dA * h), which
+        # rounds differently from sum(h) * dA in float32 (rel. ~5e-8).
+        assert float(jnp.sum(diag.mass)) == pytest.approx(expected, rel=1e-6)
 
 
 class TestNonlinearSWInvariants:
