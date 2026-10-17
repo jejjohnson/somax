@@ -48,13 +48,13 @@ class SeasonalWindForcing(ForcingProtocol):
 
     Args:
         tau0: Learnable amplitude array (visible to ``jax.grad``).
-        omega: Angular frequency (static, e.g. ``2 * pi / T``).
-        phase: Phase offset in radians (static).
+        omega: Angular frequency, e.g. ``2 * pi / T`` (differentiable leaf).
+        phase: Phase offset in radians (differentiable leaf).
     """
 
     tau0: Array
-    omega: float = eqx.field(static=True)
-    phase: float = eqx.field(static=True, default=0.0)
+    omega: Array = eqx.field(converter=jnp.asarray)
+    phase: Array = eqx.field(converter=jnp.asarray, default=0.0)
 
     def __call__(self, t: float, grid: eqx.Module) -> Array:
         """Evaluate seasonal forcing at time ``t``."""
