@@ -30,6 +30,7 @@ from somax._src.core.types import (
     State,
     as_parameter,
 )
+from somax._src.models._diagnostic_ops import fvx_ops, grid_spec, masked
 from somax._src.models._nondim import (
     reject_derived_kwargs,
     require_non_negative,
@@ -242,25 +243,22 @@ class NonlinearShallowWater2D(SomaxModel):
 
     def diagnose(self, state: PyTree) -> NonlinearSW2DDiagnostics:
         """Compute energy, enstrophy, PV, vorticity, and KE fields."""
-        g = self.consts.gravity
+        fp = fvx_ops()
+        G = grid_spec(self.grid)
         h, u, v = state.h, state.u, state.v
-        s = (slice(1, -1), slice(1, -1))
-
-        ke = kinetic_energy(u, v)
-        zeta = self.vorticity.relative_vorticity(u, v)
-        q = self.vorticity.potential_vorticity(u, v, h, self.f_field)
-
-        cell_area = self.grid.dx * self.grid.dy
-
+        integral = fp.DomainIntegral(grid=G)  # sum over the interior, times dx dy
+        ke = fp.KineticEnergy(grid=G)(u, v)  # T
+        zeta = masked(self.mask, "X", fp.RelativeVorticity(grid=G)(u, v))
+        q = masked(self.mask, "X", fp.PotentialVorticity(grid=G)(u, v, h, self.f_field))
         # Total energy: KE + PE
-        energy = cell_area * jnp.sum(ke[s] + 0.5 * g * h[s] ** 2)
+        ape = fp.AvailablePE(grid=G, g_prime=self.consts.gravity)(h)
+        energy = fp.TotalEnergy(grid=G)(ke, ape)
         # Potential enstrophy: 0.5 * q^2 * h
-        h_on_X = self.interp.T_to_X(h)
-        enstrophy = 0.5 * cell_area * jnp.sum(q[s] ** 2 * h_on_X[s])
-
+        h_on_X = masked(self.mask, "X", fp.Interp(grid=G, src="T", dst="X")(h))
+        enstrophy = integral(0.5 * q**2 * h_on_X)
         # Mass/volume (flux-form invariant) and the q^3 Casimir.
-        mass = cell_area * jnp.sum(h[s])
-        casimir_q3 = cell_area * jnp.sum(q[s] ** 3 * h_on_X[s])
+        mass = integral(h)
+        casimir_q3 = integral(q**3 * h_on_X)
 
         return NonlinearSW2DDiagnostics(
             energy=energy,

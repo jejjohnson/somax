@@ -26,6 +26,7 @@ from somax._src.core.types import (
     State,
     as_parameter,
 )
+from somax._src.models._diagnostic_ops import fvx_ops, grid_spec, masked
 from somax._src.models._nondim import (
     require_non_negative,
     require_positive,
@@ -190,20 +191,23 @@ class BarotropicQG(SomaxModel):
 
     def diagnose(self, state: PyTree) -> BarotropicQGDiagnostics:
         """Compute streamfunction, velocity, KE, and enstrophy."""
+        fp = fvx_ops()
+        G = grid_spec(self.grid)
         q = state.q
         psi = self._invert_pv(q)
-
         # Geostrophic velocity: u = -dpsi/dy, v = dpsi/dx
-        u = -self.diff.diff_y_T_to_V(psi)
-        v = self.diff.diff_x_T_to_U(psi)
-
-        s = (slice(1, -1), slice(1, -1))
-        u_T = self.interp.V_to_T(u)
-        v_T = self.interp.U_to_T(v)
-        cell_area = self.grid.dx * self.grid.dy
-        ke = 0.5 * jnp.sum(u_T[s] ** 2 + v_T[s] ** 2) * cell_area
-        zeta = self.diff.laplacian(psi)
-        enstrophy = 0.5 * jnp.sum(q[s] ** 2) * cell_area
+        u = masked(
+            self.mask, "V", -fp.Difference(grid=G, axis="y", src="T", dst="V")(psi)
+        )
+        v = masked(
+            self.mask, "U", fp.Difference(grid=G, axis="x", src="T", dst="U")(psi)
+        )
+        u_T = masked(self.mask, "T", fp.Interp(grid=G, src="V", dst="T")(u))
+        v_T = masked(self.mask, "T", fp.Interp(grid=G, src="U", dst="T")(v))
+        integral = fp.DomainIntegral(grid=G)  # sum over the interior, times dx dy
+        ke = integral(0.5 * (u_T**2 + v_T**2))
+        zeta = masked(self.mask, "T", fp.Laplacian(grid=G)(psi))
+        enstrophy = integral(0.5 * q**2)
 
         return BarotropicQGDiagnostics(
             psi=psi,
