@@ -39,6 +39,9 @@ dependencies = [
     "spectraldiffx>=0.0.10",
     "pipekit",
     "pipekit-cycle",
+    # JAX carrier for pipekit: JaxOperator, pytree Graph / Sequential,
+    # ScanCycle / Rollout (somax.operators.OperatorTerm, somax.train).
+    "pipekit-jax",
     # Pure-function basis zoo. Supplies the spatial dictionaries (Gabor / radial
     # frames, box-Laplacian & graph-Laplacian eigenbases, wavelet, EOF, and
     # divergence-free vector bases) and temporal features that the reduced-order
@@ -128,6 +131,7 @@ spectraldiffx = { git = "https://github.com/jejjohnson/spectraldiffx.git", tag =
 # Both come from the same repo, so a single ref keeps them in lockstep.
 pipekit = { git = "https://github.com/jejjohnson/pipekit.git", subdirectory = "packages/pipekit" }
 pipekit-cycle = { git = "https://github.com/jejjohnson/pipekit.git", subdirectory = "packages/pipekit-cycle" }
+pipekit-jax = { git = "https://github.com/jejjohnson/pipekit.git", subdirectory = "packages/pipekit-jax" }
 
 [tool.ruff]
 target-version = "py312"

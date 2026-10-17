@@ -280,8 +280,14 @@ class TestTransforms:
         model = build()
         state = solid_body_rotation(model)
         jitted = eqx.filter_jit(lambda m, s: m.vector_field(0.0, s))
+        # Solid-body rotation is balanced: the eager tendency is exactly 0
+        # where the jitted one keeps a fused-roundoff residual (~4e-9), so a
+        # pure rtol fails on those zeros.
         np.testing.assert_allclose(
-            jitted(model, state).u, model.vector_field(0.0, state).u, rtol=1e-6
+            jitted(model, state).u,
+            model.vector_field(0.0, state).u,
+            rtol=1e-6,
+            atol=1e-7,
         )
 
     def test_grad_reaches_the_parameters(self):
