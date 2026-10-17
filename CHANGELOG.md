@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.16](https://github.com/jejjohnson/somax/compare/somax-v0.0.15...somax-v0.0.16) (2026-10-17)
+
+
+### Features
+
+* **core:** add OperatorTerm to use any pipekit operator or graph as a term ([#219](https://github.com/jejjohnson/somax/issues/219)) ([04bb2eb](https://github.com/jejjohnson/somax/commit/04bb2ebda32cef647cdbe3bb4ac885378c43e215))
+* **models:** differentiable physical constants in term kernels ([#221](https://github.com/jejjohnson/somax/issues/221)) ([4d9ec3e](https://github.com/jejjohnson/somax/commit/4d9ec3ec235378f921429945045346021a7a4f72)), closes [#215](https://github.com/jejjohnson/somax/issues/215)
+* **train:** rollout and rollout_loss on pipekit_jax; document the Cycle / scan split ([#223](https://github.com/jejjohnson/somax/issues/223)) ([0afabe7](https://github.com/jejjohnson/somax/commit/0afabe7ba7184e8db4af4f6787770767c4eef81f))
+
 ## [0.0.15](https://github.com/jejjohnson/somax/compare/somax-v0.0.14...somax-v0.0.15) (2026-09-18)
 
 
