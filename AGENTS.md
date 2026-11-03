@@ -1,5 +1,11 @@
 # Agent Guidelines
 
+## Core changes land in sesmax
+
+somax's model-agnostic core has moved to [sesmax](https://github.com/jejjohnson/sesmax) (`sesmax-core`), copied from this repository at commit `9cb19b3`: `somax/_src/core`, `domain`, `da`, `io`, `monitor`, `train`, `constants`, `guards.py`, `solvers.py`, `operators.py` (`SomaxModelOp`), `operator_term.py`, `models/_nondim.py`, `models/_diagnostic_ops.py`, and the test models (`models/lorenz*.py`, `models/pde1d/`, `models/pde2d/`, and the linear shallow-water models `models/swm/linear_1d.py`, `nonlinear_1d.py`, `linear_2d.py`, `linear_swm_terms.py`, `models/gfd_testcases.py`).
+
+A change to any of these lands in sesmax first. Change them here only when a somax run needs the fix, and then port it from sesmax with a commit that names the sesmax PR. The ocean models, the `somax-sim` runner and the configs stay here until they move to `sesmax-ocean`.
+
 ## Karpathy Coding Principles
 
 Four behavioral principles to reduce the most common LLM coding mistakes. These bias toward caution over speed — for trivial tasks, use judgment.
